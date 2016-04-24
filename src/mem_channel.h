@@ -5,19 +5,24 @@
 #include "finite_queue.h"
 #include "g_std/g_string.h"
 #include "intrusive_list.h"
+#include "mem_channel_backend.h"
 #include "memory_hierarchy.h"
 #include "stats.h"
 
 class MemChannelAccEvent;
 class MemChannelTickEvent;
 
+/**
+ * A generic memory channel weave model.
+ *
+ * The model accepts memory access request \c MemReq in bound phase and returns minimum latency.
+ * In weave phase, it schedules and issues the requests at certain "tick" time based on the timing
+ * and priority defined by specific backend model.
+ *
+ * This class takes care of the weave phase simulation event recording and management. The specfic
+ * timing behaviors and scheduling algorithm are defined in backend model.
+ */
 class MemChannel : public MemObject {
-    private:
-        // Access request record. Linked in a linked list based on the priority.
-        struct AccReq : InListNode<AccReq> {
-            //TODO
-        };
-
     public:
         MemChannel(/*TODO*/);
 
@@ -38,6 +43,9 @@ class MemChannel : public MemObject {
     private:
         const g_string name;
         const uint32_t domain;
+
+        // Backend of the channel.
+        MemChannelBackend* be;
 
         /* Controller timing. */
 
@@ -76,21 +84,6 @@ class MemChannel : public MemObject {
         // Overflow request queue, not considered when scheduling.
         // Record AccEvent and startCycle.
         std::deque<std::pair<MemChannelAccEvent*, uint64_t>> overflowQueue;
-
-        // Whether to use separate queues for read and write requests.
-        const bool sepWrites;
-        // Read/write request queue.
-        const uint32_t reqQueueDepth;
-        typedef FiniteQueue<AccReq> ReqQueue;
-        ReqQueue rdReqQueue, wrReqQueue;
-
-        inline ReqQueue& getReqQueue(bool isWrite) {
-            return (sepWrites && isWrite) ? wrReqQueue : rdReqQueue;
-        }
-        inline const ReqQueue& getReqQueue(bool isWrite) const {
-            return (sepWrites && isWrite) ? wrReqQueue : rdReqQueue;
-        }
-        inline bool checkOverflow(bool isWrite) const { return getReqQueue(isWrite).full(); }
 
         /* Stats. */
 
