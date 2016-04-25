@@ -24,7 +24,8 @@ class MemChannelTickEvent;
  */
 class MemChannel : public MemObject {
     public:
-        MemChannel(/*TODO*/);
+        MemChannel(MemChannelBackend* _be, const uint32_t _sysFreqMHz, const uint32_t _controllerSysDelay,
+                const uint32_t _domain, const g_string& _name);
 
         const char* getName() { return name.c_str(); }
 
@@ -49,6 +50,8 @@ class MemChannel : public MemObject {
 
         /* Controller timing. */
 
+        // Controller latency.
+        uint32_t controllerSysDelay;
         // Bound phase delays, in sys cycles.
         uint32_t minRdDelay, minWrDelay, preRdDelay, preWrDelay, postRdDelay, postWrDelay;
 

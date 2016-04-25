@@ -41,6 +41,9 @@ class MemChannelBackend {
 
         // Return a lower bound of tick cycle.
         virtual uint64_t getTickCycleLowerBound() const = 0;
+
+        virtual uint32_t getMemFreqKHz() const = 0;
+        virtual uint32_t getMinLatency(const bool isWrite) const = 0;
 };
 
 #endif  // MEM_CHANNEL_BACKEND_H_

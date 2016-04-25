@@ -81,6 +81,20 @@ class MemChannelTickEvent : public TimingEvent, public GlobAlloc {
         using GlobAlloc::operator delete;
 };
 
+MemChannel::MemChannel(MemChannelBackend* _be, const uint32_t _sysFreqMHz, const uint32_t _controllerSysDelay,
+        const uint32_t _domain, const g_string& _name)
+    : name(_name), domain(_domain), be(_be), controllerSysDelay(_controllerSysDelay), sysFreqKHz(_sysFreqMHz * 1000),
+      tickCycle(-1uL), tickEvent(nullptr), freeTickEvent(nullptr)
+{
+    memFreqKHz = be->getMemFreqKHz();
+    minRdDelay = memToSysCycle(be->getMinLatency(false));
+    minWrDelay = memToSysCycle(be->getMinLatency(true));
+    // Memory ctrl delay is pre the contention.
+    preRdDelay = preWrDelay = controllerSysDelay;
+    postRdDelay = minRdDelay - preRdDelay;
+    postWrDelay = minWrDelay - preWrDelay;
+}
+
 void MemChannel::initStats(AggregateStat* parentStat) {
 }
 
@@ -157,12 +171,15 @@ void MemChannel::acceptAccEvent(MemChannelAccEvent* ev, uint64_t sysCycle) {
 void MemChannel::respondAccEvent(MemChannelAccEvent* ev, uint64_t sysCycle) {
     bool isWrite = ev->isWrite();
     ev->release();
-    ev->done(sysCycle - (isWrite ? minWrDelay : minRdDelay));
+    DEBUG("Respond AccEvent to 0x%lx at sysCycle %lu", ev->getAddr(), sysCycle);
+    // Exclude the post delay from the done cycle.
+    ev->done(sysCycle - (isWrite ? postWrDelay : postRdDelay));
 }
 
 uint64_t MemChannel::tick(uint64_t sysCycle) {
     uint64_t memCycle = sysToMemCycle(sysCycle);
     assert_msg(memCycle == tickCycle, "Tick at wrong time %lu (should be %lu)", memCycle, tickCycle);
+    DEBUG("Tick at %lu", memCycle);
 
     // Try issue and get the next tick cycle.
     uint64_t nextTickCycle = issue(memCycle);
@@ -218,6 +235,7 @@ uint64_t MemChannel::issue(uint64_t memCycle) {
         return minTickCycle;
     }
     auto req = &r;
+    DEBUG("Issue AccReq to 0x%lx at %lu", req->addr, memCycle);
 
     // Process the request.
     uint64_t respCycle = be->process(req);
