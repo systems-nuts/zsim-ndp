@@ -46,4 +46,79 @@ class MemChannelBackend {
         virtual uint32_t getMinLatency(const bool isWrite) const = 0;
 };
 
+/**
+ * A simple channel backend with fixed latency for all access, and pure age-based priority.
+ */
+class MemChannelSimpleBE : public MemChannelBackend {
+    public:
+        MemChannelSimpleBE(const uint32_t _freqMHz, const uint32_t _latency, const uint32_t _queueDepth)
+            : freqMHz(_freqMHz), latency(_latency), queueDepth(_queueDepth), lastRespCycle(0)
+        {
+            reqQueue.init(queueDepth);
+        }
+
+        uint64_t enqueue(const Address& addr, const bool isWrite, uint64_t startCycle,
+                uint64_t memCycle, MemChannelAccEvent* respEv) {
+            auto req = reqQueue.alloc();
+            req->addr = addr;
+            req->isWrite = isWrite;
+            req->startCycle = startCycle;
+            req->schedCycle = memCycle;
+            req->ev = respEv;
+
+            // If there is only one request, i.e., the one just enqueued, it has highest priority.
+            if (reqQueue.size() == 1) return req->schedCycle + latency;
+            else return -1uL;
+        }
+
+        bool dequeue(uint64_t memCycle, MemChannelAccReq* req, uint64_t* minTickCycle) {
+            if (reqQueue.empty()) {
+                *minTickCycle = -1uL;
+                return false;
+            }
+            auto begin = reqQueue.begin();
+            auto front = *begin;
+            uint64_t tickCycle = front->schedCycle + latency;
+            if (tickCycle > memCycle) {
+                *minTickCycle = tickCycle;
+                return false;
+            }
+            *req = *front;
+            reqQueue.remove(begin);
+            return true;
+        }
+
+        bool queueOverflow(const bool isWrite) const {
+            return reqQueue.full();
+        }
+
+        uint64_t process(const MemChannelAccReq* req) {
+            uint64_t respCycle = req->schedCycle + latency;
+            respCycle = std::max(respCycle, lastRespCycle + 1);
+            lastRespCycle = respCycle;
+            return respCycle;
+        }
+
+        uint64_t getTickCycleLowerBound() const {
+            uint64_t nextTickCycle = reqQueue.empty() ? -1uL : (*reqQueue.begin())->schedCycle + latency;
+            return std::max(lastRespCycle + 1, nextTickCycle);
+        }
+
+        uint32_t getMemFreqKHz() const { return freqMHz * 1000; }
+        uint32_t getMinLatency(const bool isWrite) const { return latency; }
+
+    private:
+        // Frequency.
+        uint32_t freqMHz;
+        // Fix latency.
+        uint32_t latency;
+
+        // Request queue.
+        uint32_t queueDepth;
+        FiniteQueue<MemChannelAccReq> reqQueue;
+
+        // Last respond cycle.
+        uint64_t lastRespCycle;
+};
+
 #endif  // MEM_CHANNEL_BACKEND_H_
