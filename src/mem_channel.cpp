@@ -96,6 +96,26 @@ MemChannel::MemChannel(MemChannelBackend* _be, const uint32_t _sysFreqMHz, const
 }
 
 void MemChannel::initStats(AggregateStat* parentStat) {
+    AggregateStat* memStats = new AggregateStat();
+    memStats->init(name.c_str(), "Memory channel stats");
+
+    profReads.init("rd", "Read requests");
+    memStats->append(&profReads);
+    profWrites.init("wr", "Write requests");
+    memStats->append(&profWrites);
+    profTotalRdLat.init("rdlat", "Total latency experienced by read requests");
+    memStats->append(&profTotalRdLat);
+    profTotalWrLat.init("wrlat", "Total latency experienced by write requests");
+    memStats->append(&profTotalWrLat);
+    rdLatencyHist.init("rdmlh", "Latency histogram for read requests", NUMBINS);
+    memStats->append(&rdLatencyHist);
+    wrLatencyHist.init("wrmlh", "Latency histogram for write requests", NUMBINS);
+    memStats->append(&wrLatencyHist);
+
+    // Backend stats.
+    be->initStats(memStats);
+
+    parentStat->append(memStats);
 }
 
 uint64_t MemChannel::access(MemReq& req) {
@@ -246,6 +266,18 @@ uint64_t MemChannel::issue(uint64_t memCycle) {
         assert(!req->isWrite && req->ev != nullptr);
         respondAccEvent(req->ev, sysRespCycle);
         req->ev = nullptr;
+    }
+
+    // Stats.
+    uint32_t delay = sysRespCycle - req->startCycle + controllerSysDelay;
+    if (req->isWrite) {
+        profWrites.inc();
+        profTotalWrLat.inc(delay);
+        wrLatencyHist.inc(std::min(NUMBINS-1, delay/BINSIZE), 1);
+    } else {
+        profReads.inc();
+        profTotalRdLat.inc(delay);
+        rdLatencyHist.inc(std::min(NUMBINS-1, delay/BINSIZE), 1);
     }
 
     return be->getTickCycleLowerBound();

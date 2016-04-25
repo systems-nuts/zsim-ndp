@@ -90,6 +90,10 @@ class MemChannel : public MemObject {
 
         /* Stats. */
 
+        Counter profReads, profWrites;
+        Counter profTotalRdLat, profTotalWrLat;
+        VectorCounter rdLatencyHist, wrLatencyHist;
+        static constexpr uint32_t BINSIZE = 10, NUMBINS = 100; // for latency histograms
 
     private:
         // Schedule event \c ev started at \c startCycle, at current time \c memCycle.

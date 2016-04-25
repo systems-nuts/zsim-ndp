@@ -44,6 +44,8 @@ class MemChannelBackend {
 
         virtual uint32_t getMemFreqKHz() const = 0;
         virtual uint32_t getMinLatency(const bool isWrite) const = 0;
+
+        virtual void initStats(AggregateStat* parentStat) {}
 };
 
 /**
