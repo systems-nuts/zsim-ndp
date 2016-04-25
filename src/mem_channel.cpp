@@ -200,4 +200,36 @@ void MemChannel::recycleTickEvent(MemChannelTickEvent* tev) {
     else delete tev;
 }
 
+uint64_t MemChannel::schedule(MemChannelAccEvent* ev, uint64_t startCycle, uint64_t memCycle) {
+    auto respEv = ev;
+    if (ev->isWrite()) {
+        // Respond write request immediately when scheduling.
+        respondAccEvent(ev, memToSysCycle(memCycle));
+        respEv = nullptr;
+    }
+    return be->enqueue(ev->getAddr(), ev->isWrite(), startCycle, memCycle, respEv);
+}
+
+uint64_t MemChannel::issue(uint64_t memCycle) {
+    uint64_t minTickCycle = -1uL;
+    MemChannelAccReq r;
+    if (!be->dequeue(memCycle, &r, &minTickCycle)) {
+        // If no request is ready, return minimum tick cycle as the next tick cycle.
+        return minTickCycle;
+    }
+    auto req = &r;
+
+    // Process the request.
+    uint64_t respCycle = be->process(req);
+    uint64_t sysRespCycle = memToSysCycle(respCycle);
+
+    // Respond read requests. Writes have been responded at schedule time.
+    if (req->ev) {
+        assert(!req->isWrite && req->ev != nullptr);
+        respondAccEvent(req->ev, sysRespCycle);
+        req->ev = nullptr;
+    }
+
+    return be->getTickCycleLowerBound();
+}
 
