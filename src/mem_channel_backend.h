@@ -53,9 +53,9 @@ class MemChannelBackend {
 /**
  * A simple channel backend with fixed latency for all access, and pure age-based priority.
  */
-class MemChannelSimpleBE : public MemChannelBackend {
+class MemChannelBackendSimple : public MemChannelBackend {
     public:
-        MemChannelSimpleBE(const uint32_t _freqMHz, const uint32_t _latency, const uint32_t _queueDepth)
+        MemChannelBackendSimple(const uint32_t _freqMHz, const uint32_t _latency, const uint32_t _queueDepth)
             : freqMHz(_freqMHz), latency(_latency), queueDepth(_queueDepth), lastRespCycle(0)
         {
             reqQueue.init(queueDepth);
