@@ -6,8 +6,8 @@
 
 class MemChannelAccEvent;
 
-// Access request record. Linked in a linked list based on the priority.
-struct MemChannelAccReq : InListNode<MemChannelAccReq> {
+// Access request record.
+struct MemChannelAccReq {
     Address addr;
     bool isWrite;
 
@@ -21,6 +21,8 @@ struct MemChannelAccReq : InListNode<MemChannelAccReq> {
 
     // Event to response. Null for writes as they get responses immediately.
     MemChannelAccEvent* ev;
+
+    virtual ~MemChannelAccReq() {}
 };
 
 class MemChannelBackend {
