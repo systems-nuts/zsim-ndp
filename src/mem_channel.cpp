@@ -249,12 +249,11 @@ uint64_t MemChannel::schedule(MemChannelAccEvent* ev, uint64_t startCycle, uint6
 
 uint64_t MemChannel::issue(uint64_t memCycle) {
     uint64_t minTickCycle = -1uL;
-    MemChannelAccReq r;
-    if (!be->dequeue(memCycle, &r, &minTickCycle)) {
+    MemChannelAccReq* req;
+    if (!be->dequeue(memCycle, &req, &minTickCycle)) {
         // If no request is ready, return minimum tick cycle as the next tick cycle.
         return minTickCycle;
     }
-    auto req = &r;
     DEBUG("Issue AccReq to 0x%lx at %lu", req->addr, memCycle);
 
     // Process the request.

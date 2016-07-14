@@ -7,7 +7,7 @@
 class MemChannelAccEvent;
 
 // Access request record.
-struct MemChannelAccReq {
+struct MemChannelAccReq : public GlobAlloc {
     Address addr;
     bool isWrite;
 
@@ -23,6 +23,10 @@ struct MemChannelAccReq {
     MemChannelAccEvent* ev;
 
     virtual ~MemChannelAccReq() {}
+
+    // Use glob mem
+    using GlobAlloc::operator new;
+    using GlobAlloc::operator delete;
 };
 
 class MemChannelBackend {
@@ -34,7 +38,7 @@ class MemChannelBackend {
 
         // Dequeue a request \c req to issue with tick cycle no later than \c memCycle.
         // Return if succeed. If not, set the minimum tick cycle \c minTickCycle.
-        virtual bool dequeue(uint64_t memCycle, MemChannelAccReq* req, uint64_t* minTickCycle) = 0;
+        virtual bool dequeue(uint64_t memCycle, MemChannelAccReq** req, uint64_t* minTickCycle) = 0;
 
         virtual bool queueOverflow(const bool isWrite) const = 0;
 
@@ -75,7 +79,7 @@ class MemChannelBackendSimple : public MemChannelBackend {
             else return -1uL;
         }
 
-        bool dequeue(uint64_t memCycle, MemChannelAccReq* req, uint64_t* minTickCycle) {
+        bool dequeue(uint64_t memCycle, MemChannelAccReq** req, uint64_t* minTickCycle) {
             if (reqQueue.empty()) {
                 *minTickCycle = -1uL;
                 return false;
@@ -87,7 +91,7 @@ class MemChannelBackendSimple : public MemChannelBackend {
                 *minTickCycle = tickCycle;
                 return false;
             }
-            *req = *front;
+            *req = new MemChannelAccReq(*front);
             reqQueue.remove(begin);
             return true;
         }
