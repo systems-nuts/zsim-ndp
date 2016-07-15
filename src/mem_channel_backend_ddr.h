@@ -248,8 +248,13 @@ class MemChannelBackendDDR : public MemChannelBackend {
         // Max throttle of continuous row hits in a bank.
         uint32_t maxRowHits;
 
-        // Should issue a write as the next access.
-        bool issueWrite;
+        // The issue mode. Decides how to issue the next access.
+        enum struct IssueMode {
+            RD_QUEUE,
+            WR_QUEUE,
+            UNKNOWN
+        };
+        IssueMode issueMode;
         // Mininum begin cycle for the next data burst transfer.
         // Also the end cycle for the last data burst transfer (1 cycle after the last transfer).
         uint64_t minBurstCycle;

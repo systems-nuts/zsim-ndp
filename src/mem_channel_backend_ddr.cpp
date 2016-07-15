@@ -109,7 +109,7 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
 
     prioLists.resize(rankCount * bankCount);
 
-    issueWrite = false;
+    issueMode = IssueMode::UNKNOWN;
     minBurstCycle = 0;
     lastIsWrite = false;
 }
@@ -143,8 +143,18 @@ uint64_t MemChannelBackendDDR::enqueue(const Address& addr, const bool isWrite,
 
 bool MemChannelBackendDDR::dequeue(uint64_t memCycle, MemChannelAccReq** req, uint64_t* minTickCycle) {
     // Update read/write issue mode.
-    issueWrite = reqQueueRd.empty() || reqQueueWr.size() > queueDepth * 3/4 ||
-        (issueWrite && reqQueueWr.size() > queueDepth * 1/4);
+    // Without a successful issue, the issue mode decision should not change. This is because the unsuccessful
+    // issue trial is a result of the weaving timing model. The decision (issue a read or write) has been made
+    // and will be carried out for sure.
+    if (issueMode == IssueMode::UNKNOWN) {
+        if (reqQueueRd.empty() || reqQueueWr.size() > queueDepth * 3/4 ||
+                (lastIsWrite && reqQueueWr.size() > queueDepth * 1/4)) {
+            issueMode = IssueMode::WR_QUEUE;
+        } else {
+            issueMode = IssueMode::RD_QUEUE;
+        }
+    }
+    bool issueWrite = (issueMode == IssueMode::WR_QUEUE);
 
     // Scan the requests with the highest priority in each list in chronological order.
     // Take the first request (the oldest) that is ready to be issued.
@@ -189,6 +199,10 @@ uint64_t MemChannelBackendDDR::process(const MemChannelAccReq* req) {
     lastIsWrite = req->isWrite;
     lastRankIdx = ddrReq->loc.rank;
     minBurstCycle = respCycle;
+
+    // Reset issue mode.
+    issueMode = IssueMode::UNKNOWN;
+
     return respCycle;
 }
 
