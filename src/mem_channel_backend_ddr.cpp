@@ -12,11 +12,11 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
         uint32_t ranksPerChannel, uint32_t banksPerRank, const char* _pagePolicy,
         uint32_t pageSizeBytes, uint32_t burstCount, uint32_t deviceIOBits, uint32_t channelWidthBits,
         uint32_t memFreqMHz, const Timing& _t,
-        const char* addrMapping, uint32_t _queueDepth)
+        const char* addrMapping, uint32_t _queueDepth, uint32_t _maxRowHits)
     : name(_name), rankCount(ranksPerChannel), bankCount(banksPerRank),
       pageSize(pageSizeBytes), burstSize(burstCount*deviceIOBits),
       devicesPerRank(channelWidthBits/deviceIOBits), freqKHz(memFreqMHz*1000), t(_t),
-      queueDepth(_queueDepth) {
+      queueDepth(_queueDepth), maxRowHits(_maxRowHits) {
 
     info("%s: %u ranks x %u banks.", name.c_str(), rankCount, bankCount);
     info("%s: page size %u bytes, %u devices per rank, burst %u bits from each device.",
@@ -267,11 +267,46 @@ void MemChannelBackendDDR::refresh(uint64_t memCycle) {
 }
 
 void MemChannelBackendDDR::assignPriority(DDRAccReq* req) {
-    // TODO: implement
+    auto& pl = prioLists[req->loc.rank * bankCount + req->loc.bank];
+    auto& bank = banks[req->loc.rank * bankCount + req->loc.bank];
+
+    // FCFS/FR-FCFS scheduling.
+    // Tune maxRowHits to switch between the two scheduling schemes. maxRowHits == 0
+    // means FCFS, and maxRowHits == max means FR-FCFS.
+    auto m = pl.back();
+    while (m) {
+        if (m->loc.row == req->loc.row) {
+            // Enqueue request after the last same-row request.
+            if (m->rowHitSeq + 1 < maxRowHits) {
+                req->rowHitSeq = m->rowHitSeq + 1;
+                pl.insertAfter(m, req);
+            } else {
+                // If exceeding the max number of row hits, enqueue at the end.
+                req->rowHitSeq = 0;
+                pl.push_back(req);
+            }
+            break;
+        }
+        m = m->prev;
+    }
+
+    if (!m) {
+        if (bank.open && bank.row == req->loc.row && bank.rowHitSeq + 1 < maxRowHits) {
+            // The new request row hits the current open row in the bank, bypass to the front.
+            req->rowHitSeq = bank.rowHitSeq + 1;
+            pl.push_front(req);
+        } else {
+            // Enqueue at the end.
+            req->rowHitSeq = 0;
+            pl.push_back(req);
+        }
+    }
 }
 
 void MemChannelBackendDDR::cancelPriority(DDRAccReq* req) {
-    // TODO: implement
+    auto& pl = prioLists[req->loc.rank * bankCount + req->loc.bank];
+    assert(req == pl.front());
+    pl.pop_front();
 }
 
 uint64_t MemChannelBackendDDR::calcACTCycle(const Bank& bank, uint64_t schedCycle, uint64_t preCycle) const {

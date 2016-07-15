@@ -347,6 +347,7 @@ MemChannel* BuildMemChannel(Config& config, uint32_t lineSize, uint32_t sysFreqM
         uint32_t burstCount = config.get<uint32_t>(prefix + "burstCount", 8);   // DDR3
         uint32_t deviceIOWidth = config.get<uint32_t>(prefix + "deviceIOWidth", 8);   // bits
         const char* addrMapping = config.get<const char*>(prefix + "addrMapping", "rank:col:bank");
+        uint32_t maxRowHits = config.get<uint32_t>(prefix + "maxRowHits", -1u);   // bits
 
         MemChannelBackendDDR::Timing timing;
         // All in mem cycles.
@@ -376,7 +377,7 @@ timing.name = config.get<uint32_t>(prefix + "timing.t" #name, defval)
         timing.BL = burstCount / 2; // double-data-rate
 
         be = new MemChannelBackendDDR(name, ranksPerChannel, banksPerRank, pagePolicy, pageSize, burstCount,
-                deviceIOWidth, channelWidth, memFreqMHz, timing, addrMapping, queueDepth);
+                deviceIOWidth, channelWidth, memFreqMHz, timing, addrMapping, queueDepth, maxRowHits);
     } else {
         panic("Invalid memory channel type %s", channelType.c_str());
     }

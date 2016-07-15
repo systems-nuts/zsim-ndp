@@ -40,7 +40,8 @@ class MemChannelBackendDDR : public MemChannelBackend {
         MemChannelBackendDDR(const g_string& _name, uint32_t ranksPerChannel, uint32_t banksPerRank,
                 const char* _pagePolicy, uint32_t pageSizeBytes,
                 uint32_t burstCount, uint32_t deviceIOBits, uint32_t channelWidthBits,
-                uint32_t memFreqMHz, const Timing& _t, const char* addrMapping, uint32_t _queueDepth);
+                uint32_t memFreqMHz, const Timing& _t, const char* addrMapping, uint32_t _queueDepth,
+                uint32_t _maxRowHits);
 
         uint64_t enqueue(const Address& addr, const bool isWrite, uint64_t startCycle,
                 uint64_t memCycle, MemChannelAccEvent* respEv);
@@ -89,6 +90,9 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
         struct DDRAccReq : MemChannelAccReq, InListNode<DDRAccReq> {
             DDRAddrMap loc;
+
+            // Sequence number used to throttle max number of row hits.
+            uint32_t rowHitSeq;
 
             inline bool hasHighestPriority() const { return !this->prev; }
         };
@@ -150,6 +154,9 @@ class MemChannelBackendDDR : public MemChannelBackend {
             uint64_t lastRWCycle;
 
             DDRActWindow* actWindow;
+
+            // Sequence number for the last bank row hit.
+            uint32_t rowHitSeq;
 
             explicit Bank(DDRActWindow* aw)
                 : open(false), row(0), minPRECycle(0), lastACTCycle(0), lastRWCycle(0), actWindow(aw) {}
@@ -238,6 +245,8 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
         // Priority list, per bank.
         g_vector<InList<DDRAccReq>> prioLists;
+        // Max throttle of continuous row hits in a bank.
+        uint32_t maxRowHits;
 
         // Should issue a write as the next access.
         bool issueWrite;
