@@ -292,7 +292,7 @@ uint64_t MemChannel::schedule(MemChannelAccEvent* ev, uint64_t startCycle, uint6
 
 uint64_t MemChannel::issue(uint64_t memCycle) {
     uint64_t minTickCycle = -1uL;
-    MemChannelAccReq* req;
+    MemChannelAccReq* req = nullptr;
     if (!be->dequeue(memCycle, &req, &minTickCycle)) {
         // If no request is ready, return minimum tick cycle as the next tick cycle.
         return minTickCycle;
@@ -321,6 +321,8 @@ uint64_t MemChannel::issue(uint64_t memCycle) {
         profTotalRdLat.inc(delay);
         rdLatencyHist.inc(std::min(NUMBINS-1, delay/BINSIZE), 1);
     }
+
+    delete req;
 
     return be->getTickCycleLowerBound();
 }

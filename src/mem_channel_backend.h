@@ -38,6 +38,7 @@ class MemChannelBackend {
 
         // Dequeue a request \c req to issue with tick cycle no later than \c memCycle.
         // Return if succeed. If not, set the minimum tick cycle \c minTickCycle.
+        // The request \c req is dynamically allocated, which needs to be freed when used up.
         virtual bool dequeue(uint64_t memCycle, MemChannelAccReq** req, uint64_t* minTickCycle) = 0;
 
         virtual bool queueOverflow(const bool isWrite) const = 0;
