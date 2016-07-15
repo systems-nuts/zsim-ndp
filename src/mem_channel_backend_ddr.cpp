@@ -4,7 +4,6 @@
 #include "config.h"         // for Tokenize
 
 // TODO: implement
-// refresh: RFC, REFI, RPab
 // adaptive close/open
 // power-down: XP
 // power model: IDD
@@ -191,6 +190,10 @@ bool MemChannelBackendDDR::queueOverflow(const bool isWrite) const {
     return reqQueue(isWrite).full();
 }
 
+void MemChannelBackendDDR::periodicalProcess(uint64_t memCycle) {
+    refresh(memCycle);
+}
+
 
 uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update) {
     const auto& loc = req->loc;
@@ -244,6 +247,23 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
     }
 
     return burstCycle;
+}
+
+void MemChannelBackendDDR::refresh(uint64_t memCycle) {
+    uint64_t minREFCycle = memCycle;
+    for (const auto& b : banks) {
+        // Issue PRE to close all banks before REF.
+        minREFCycle = std::max(minREFCycle, b.minPRECycle + t.RPab);
+    }
+
+    uint64_t finREFCycle = minREFCycle + t.RFC;
+    assert(t.RFC >= t.RP);
+    for (auto& b : banks) {
+        // Banks are closed after REF.
+        // ACT is able to issue right after refresh done, equiv. to PRE tRP earlier.
+        b.open = false;
+        b.minPRECycle = finREFCycle - t.RP;
+    }
 }
 
 void MemChannelBackendDDR::assignPriority(DDRAccReq* req) {

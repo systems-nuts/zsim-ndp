@@ -51,6 +51,8 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
         uint64_t process(const MemChannelAccReq* req);
 
+        void periodicalProcess(uint64_t memCycle);
+
         uint64_t getTickCycleLowerBound() const {
             // Return min burst cycle here.
             // For high-memory-load, this is likely to be the next tick (back-to-back channel transfer),
@@ -64,6 +66,10 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
         uint32_t getMinLatency(const bool isWrite) const {
             return isWrite ? 0 : t.CAS + t.BL;
+        }
+
+        uint64_t getPeriodicalInterval() const {
+            return t.REFI;
         }
 
         void initStats(AggregateStat* parentStat);
@@ -173,6 +179,8 @@ class MemChannelBackendDDR : public MemChannelBackend {
         // If update is true, then it is a real issued access and the states
         // will be updated. Otherwise no changes are made to the states.
         uint64_t requestHandler(const DDRAccReq* req, bool update = false);
+
+        void refresh(uint64_t memCycle);
 
         virtual void assignPriority(DDRAccReq* req);
         virtual void cancelPriority(DDRAccReq* req);
