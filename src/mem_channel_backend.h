@@ -45,11 +45,17 @@ class MemChannelBackend {
         // Process the request. Return respond cycle.
         virtual uint64_t process(const MemChannelAccReq* req) = 0;
 
+        // Periodical process.
+        virtual void periodicalProcess(uint64_t memCycle) {}
+
         // Return a lower bound of tick cycle.
         virtual uint64_t getTickCycleLowerBound() const = 0;
 
         virtual uint32_t getMemFreqKHz() const = 0;
         virtual uint32_t getMinLatency(const bool isWrite) const = 0;
+
+        // Return periodical process interval in mem cycles.
+        virtual uint64_t getPeriodicalInterval() const { return -1uL; }
 
         virtual void initStats(AggregateStat* parentStat) {}
 };
