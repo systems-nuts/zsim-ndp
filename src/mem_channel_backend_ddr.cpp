@@ -155,6 +155,12 @@ bool MemChannelBackendDDR::dequeue(uint64_t memCycle, MemChannelAccReq** req, ui
             issueMode = IssueMode::RD_QUEUE;
         }
     }
+    // ... unless the queue is empty.
+    if (issueMode == IssueMode::WR_QUEUE && reqQueueWr.empty()) {
+        issueMode = IssueMode::RD_QUEUE;
+    } else if (issueMode == IssueMode::RD_QUEUE && reqQueueRd.empty()) {
+        issueMode = IssueMode::WR_QUEUE;
+    }
     bool issueWrite = (issueMode == IssueMode::WR_QUEUE);
 
     // Scan the requests with the highest priority in each list in chronological order.
