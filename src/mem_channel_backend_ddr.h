@@ -246,7 +246,16 @@ class MemChannelBackendDDR : public MemChannelBackend {
         }
 
         // Priority list, per bank.
-        g_vector<InList<DDRAccReq>> prioLists;
+        g_vector<InList<DDRAccReq>> prioListsRd;
+        g_vector<InList<DDRAccReq>> prioListsWr;
+
+        inline const g_vector<InList<DDRAccReq>>& prioLists(const bool isWrite) const {
+            return isWrite ? prioListsWr : prioListsRd;
+        }
+        inline g_vector<InList<DDRAccReq>>& prioLists(const bool isWrite) {
+            return isWrite ? prioListsWr : prioListsRd;
+        }
+
         // Max throttle of continuous row hits in a bank.
         uint32_t maxRowHits;
 

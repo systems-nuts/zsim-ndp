@@ -107,7 +107,8 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
     reqQueueRd.init(queueDepth);
     reqQueueWr.init(queueDepth);
 
-    prioLists.resize(rankCount * bankCount);
+    prioListsRd.resize(rankCount * bankCount);
+    prioListsWr.resize(rankCount * bankCount);
 
     issueMode = IssueMode::UNKNOWN;
     minBurstCycle = 0;
@@ -293,7 +294,7 @@ void MemChannelBackendDDR::refresh(uint64_t memCycle) {
 }
 
 void MemChannelBackendDDR::assignPriority(DDRAccReq* req) {
-    auto& pl = prioLists[req->loc.rank * bankCount + req->loc.bank];
+    auto& pl = prioLists(req->isWrite)[req->loc.rank * bankCount + req->loc.bank];
     auto& bank = banks[req->loc.rank * bankCount + req->loc.bank];
 
     // FCFS/FR-FCFS scheduling.
@@ -330,7 +331,7 @@ void MemChannelBackendDDR::assignPriority(DDRAccReq* req) {
 }
 
 void MemChannelBackendDDR::cancelPriority(DDRAccReq* req) {
-    auto& pl = prioLists[req->loc.rank * bankCount + req->loc.bank];
+    auto& pl = prioLists(req->isWrite)[req->loc.rank * bankCount + req->loc.bank];
     assert(req == pl.front());
     pl.pop_front();
 }
