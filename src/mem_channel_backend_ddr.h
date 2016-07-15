@@ -50,6 +50,8 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
         bool queueOverflow(const bool isWrite) const;
 
+        bool queueEmpty(const bool isWrite) const;
+
         uint64_t process(const MemChannelAccReq* req);
 
         void periodicalProcess(uint64_t memCycle);

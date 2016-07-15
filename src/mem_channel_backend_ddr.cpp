@@ -210,6 +210,10 @@ bool MemChannelBackendDDR::queueOverflow(const bool isWrite) const {
     return reqQueue(isWrite).full();
 }
 
+bool MemChannelBackendDDR::queueEmpty(const bool isWrite) const {
+    return reqQueue(isWrite).empty();
+}
+
 void MemChannelBackendDDR::periodicalProcess(uint64_t memCycle) {
     refresh(memCycle);
 }

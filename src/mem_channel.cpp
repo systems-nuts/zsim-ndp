@@ -265,6 +265,8 @@ uint64_t MemChannel::tick(uint64_t sysCycle) {
     tickCycle = nextTickCycle;
     if (tickCycle == -1uL) {
         tickEvent = nullptr;
+        // Check: if there is any AccEvent in the queues, should not have infinite tick cycle!
+        assert(be->queueEmpty(true) && be->queueEmpty(false));
         return 0; // 0 means no more event.
     }
     return std::max(sysCycle, matchingSysCycle(tickCycle)); // make sure no go back in time.

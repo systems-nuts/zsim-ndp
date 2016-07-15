@@ -43,6 +43,8 @@ class MemChannelBackend {
 
         virtual bool queueOverflow(const bool isWrite) const = 0;
 
+        virtual bool queueEmpty(const bool isWrite) const = 0;
+
         // Process the request. Return respond cycle.
         virtual uint64_t process(const MemChannelAccReq* req) = 0;
 
@@ -105,6 +107,10 @@ class MemChannelBackendSimple : public MemChannelBackend {
 
         bool queueOverflow(const bool isWrite) const {
             return reqQueue.full();
+        }
+
+        bool queueEmpty(const bool isWrite) const {
+            return reqQueue.empty();
         }
 
         uint64_t process(const MemChannelAccReq* req) {
