@@ -49,6 +49,9 @@
 #include "ideal_arrays.h"
 #include "locks.h"
 #include "log.h"
+#include "mem_channel.h"
+#include "mem_channel_backend.h"
+#include "mem_channel_backend_ddr.h"
 #include "mem_ctrls.h"
 #include "network.h"
 #include "null_core.h"
@@ -323,6 +326,66 @@ DDRMemory* BuildDDRMemory(Config& config, uint32_t lineSize, uint32_t frequency,
     return mem;
 }
 
+MemChannel* BuildMemChannel(Config& config, uint32_t lineSize, uint32_t sysFreqMHz, uint32_t domain, g_string name, const string& prefix) {
+    string channelType = config.get<const char*>(prefix + "channelType");
+    uint32_t memFreqMHz = config.get<uint32_t>(prefix + "channelFreq", 1000);   // MHz
+    uint32_t channelWidth = config.get<uint32_t>(prefix + "channelWidth", 64);  // bits
+
+    uint32_t queueDepth = config.get<uint32_t>(prefix + "queueDepth", 16);
+    uint32_t controllerLatency = config.get<uint32_t>(prefix + "controllerLatency", 0);
+
+    MemChannelBackend* be = nullptr;
+
+    if (channelType == "Simple") {
+        uint32_t latency = config.get<uint32_t>(prefix + "latency", 50);    // memory cycles
+        be = new MemChannelBackendSimple(memFreqMHz, latency, channelWidth);
+    } else if (channelType == "DDR") {
+        uint32_t ranksPerChannel = config.get<uint32_t>(prefix + "ranksPerChannel", 1);
+        uint32_t banksPerRank = config.get<uint32_t>(prefix + "banksPerRank", 8);   // DDR3
+        const char* pagePolicy = config.get<const char*>(prefix + "pagePolicy", "close");
+        uint32_t pageSize = config.get<uint32_t>(prefix + "pageSize", 1024);    // 1 kB
+        uint32_t burstCount = config.get<uint32_t>(prefix + "burstCount", 8);   // DDR3
+        uint32_t deviceIOWidth = config.get<uint32_t>(prefix + "deviceIOWidth", 8);   // bits
+        const char* addrMapping = config.get<const char*>(prefix + "addrMapping", "rank:col:bank");
+
+        MemChannelBackendDDR::Timing timing;
+        // All in mem cycles.
+#define SETT(name) \
+timing.name = config.get<uint32_t>(prefix + "timing.t" #name)
+#define SETTDEFVAL(name, defval) \
+timing.name = config.get<uint32_t>(prefix + "timing.t" #name, defval)
+        SETT(CAS);
+        SETT(RAS);
+        SETT(RCD);
+        SETT(RP);
+        SETT(RRD);
+        SETT(RTP);
+        SETT(RFC);
+        SETTDEFVAL(WR, 1);
+        SETTDEFVAL(WTR, 0);
+        SETTDEFVAL(CCD, 0);
+        SETTDEFVAL(CWD, 1);
+        SETTDEFVAL(REFI, 7800*memFreqMHz/1000);   // 7.8 us
+        SETTDEFVAL(RPab, timing.RP);
+        SETTDEFVAL(FAW, 0);
+        SETTDEFVAL(RTRS, 1);
+        SETTDEFVAL(CMD, 1);
+        SETTDEFVAL(XP, 0);
+#undef SETT
+#undef SETTDEFVAL
+        timing.BL = burstCount / 2; // double-data-rate
+
+        be = new MemChannelBackendDDR(name, ranksPerChannel, banksPerRank, pagePolicy, pageSize, burstCount,
+                deviceIOWidth, channelWidth, memFreqMHz, timing, addrMapping, queueDepth);
+    } else {
+        panic("Invalid memory channel type %s", channelType.c_str());
+    }
+
+    assert(be);
+    auto mem = new MemChannel(be, sysFreqMHz, controllerLatency, domain, name);
+    return mem;
+}
+
 MemObject* BuildMemoryController(Config& config, uint32_t lineSize, uint32_t frequency, uint32_t domain, g_string& name) {
     //Type
     string type = config.get<const char*>("sys.mem.type", "Simple");
@@ -363,6 +426,8 @@ MemObject* BuildMemoryController(Config& config, uint32_t lineSize, uint32_t fre
         // FIXME(dsm): Don't use a separate config file... see DDRMemory
         g_string mcfg = config.get<const char*>("sys.mem.paramFile", "");
         mem = new MemControllerBase(mcfg, lineSize, frequency, domain, name);
+    } else if (type == "Channel") {
+        mem = BuildMemChannel(config, lineSize, frequency, domain, name, "sys.mem.");
     } else {
         panic("Invalid memory controller type %s", type.c_str());
     }
