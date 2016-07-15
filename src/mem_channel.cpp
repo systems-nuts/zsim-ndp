@@ -92,7 +92,12 @@ class MemChannelPeriodicalEvent : public TimingEvent, public GlobAlloc {
             : TimingEvent(0, 0, domain), mem(_mem), interval(_interval)
         {
             setMinStartCycle(0);
-            if (interval != -1uL) queue(0);
+            if (interval != -1uL) {
+                queue(0);
+                DEBUG("Periodical event created, interval is %lu", interval);
+            } else {
+                DEBUG("Periodical event created but will be ignored");
+            }
         }
 
         void parentDone(uint64_t startCycle) {
@@ -123,7 +128,8 @@ MemChannel::MemChannel(MemChannelBackend* _be, const uint32_t _sysFreqMHz, const
     postWrDelay = minWrDelay - preWrDelay;
 
     // Allocate periodical event from global space. Will be automatically reclaimed.
-    new MemChannelPeriodicalEvent(this, matchingSysCycle(be->getPeriodicalInterval()), domain);
+    uint64_t memInterval = be->getPeriodicalInterval();
+    new MemChannelPeriodicalEvent(this, memInterval == -1uL ? -1uL : matchingSysCycle(memInterval), domain);
 }
 
 void MemChannel::initStats(AggregateStat* parentStat) {
