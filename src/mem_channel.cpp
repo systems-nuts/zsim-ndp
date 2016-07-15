@@ -197,6 +197,7 @@ void MemChannel::acceptAccEvent(MemChannelAccEvent* ev, uint64_t sysCycle) {
     // Request queue overflow check.
     if (be->queueOverflow(ev->isWrite())) {
         overflowQueue.emplace_back(ev, sysCycle);
+        DEBUG("Event added to overflow queue, queue size %lu", overflowQueue.size());
         return;
     }
 
@@ -251,6 +252,7 @@ uint64_t MemChannel::tick(uint64_t sysCycle) {
             DEBUG("Schedule overflow request (0x%lu,%c) at %lu", ev->getAddr(), ev->isWrite()?'w':'r', memCycle);
             uint64_t estTickCycle = schedule(ev, startCycle, memCycle);
             overflowQueue.pop_front();
+            DEBUG("Event removed from overflow queue, queue size %lu", overflowQueue.size());
             if (estTickCycle < nextTickCycle) {
                 // The new scheduled request could make tick cycle earlier.
                 nextTickCycle = estTickCycle;

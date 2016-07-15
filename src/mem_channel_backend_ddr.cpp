@@ -8,6 +8,9 @@
 // power-down: XP
 // power model: IDD
 
+//#define DEBUG(args...) info(args)
+#define DEBUG(args...)
+
 MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
         uint32_t ranksPerChannel, uint32_t banksPerRank, const char* _pagePolicy,
         uint32_t pageSizeBytes, uint32_t burstCount, uint32_t deviceIOBits, uint32_t channelWidthBits,
@@ -127,6 +130,8 @@ uint64_t MemChannelBackendDDR::enqueue(const Address& addr, const bool isWrite,
 
     req->loc = mapAddress(addr);
 
+    DEBUG("%s DDR enqueue: %s queue depth %lu", name.c_str(), isWrite ? "write" : "read", reqQueue(isWrite).size());
+
     // Assign priority.
     assignPriority(req);
 
@@ -169,6 +174,7 @@ bool MemChannelBackendDDR::dequeue(uint64_t memCycle, MemChannelAccReq** req, ui
 
     *req = new DDRAccReq(*r);
     reqQueue(issueWrite).remove(ir);
+    DEBUG("%s DDR dequeue: %s queue depth %lu", name.c_str(), issueWrite ? "write" : "read", reqQueue(issueWrite).size());
 
     return true;
 }
@@ -245,6 +251,8 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
             bank.recordPRE(preCycle);
         }
     }
+    DEBUG("%s DDR handler: 0x%lx@%lu -- PRE %lu ACT %lu RW %lu BL %lu", name.c_str(), req->addr, req->schedCycle,
+            preCycle, actCycle, rwCycle, burstCycle);
 
     return burstCycle;
 }
