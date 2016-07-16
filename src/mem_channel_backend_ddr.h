@@ -5,6 +5,8 @@
 #include "g_std/g_vector.h"
 #include "g_std/g_string.h"
 #include "mem_channel_backend.h"
+#include "pad.h"
+#include "stats.h"
 
 /**
  * DDR memory backend.
@@ -274,6 +276,11 @@ class MemChannelBackendDDR : public MemChannelBackend {
         bool lastIsWrite;
         // Last request's rank. Used to track rank switch.
         uint32_t lastRankIdx;
+
+        PAD();
+
+        // Stats.
+        Counter profACT, profPRE, profRD, profWR, profREF;
 };
 
 #endif  // MEM_CHANNEL_BACKEND_DDR_H_

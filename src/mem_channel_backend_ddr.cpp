@@ -124,7 +124,19 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
 }
 
 void MemChannelBackendDDR::initStats(AggregateStat* parentStat) {
-    // TODO: implement
+    AggregateStat* memStats = new AggregateStat();
+    memStats->init(name.c_str(), "Memory channel stats");
+
+    profACT.init("ACT", "Activate commands");
+    parentStat->append(&profACT);
+    profPRE.init("PRE", "Precharge commands");
+    parentStat->append(&profPRE);
+    profRD.init("RD", "Read commands");
+    parentStat->append(&profRD);
+    profWR.init("WR", "Write commands");
+    parentStat->append(&profWR);
+    profREF.init("REF", "Refresh commands");
+    parentStat->append(&profREF);
 }
 
 uint64_t MemChannelBackendDDR::enqueue(const Address& addr, const bool isWrite,
@@ -250,6 +262,7 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
         preCycle = std::max(bank.minPRECycle, schedCycle);
         if (update) {
             bank.recordPRE(preCycle);
+            profPRE.inc();
         }
     }
 
@@ -260,6 +273,7 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
         actCycle = calcACTCycle(bank, schedCycle, preCycle);
         if (update) {
             bank.recordACT(actCycle, loc.row);
+            profACT.inc();
         }
     }
     if (update) {
@@ -270,6 +284,8 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
     uint64_t rwCycle = calcRWCycle(bank, schedCycle, actCycle, isWrite, loc.rank);
     if (update) {
         bank.recordRW(rwCycle);
+        if (isWrite) profWR.inc();
+        else profRD.inc();
     }
 
     // Burst data transfer.
@@ -284,6 +300,7 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
         if (pagePolicy == DDRPagePolicy::CLOSE ||
                 (pagePolicy == DDRPagePolicy::RELAXED_CLOSE && (next == nullptr || next->loc.row != loc.row))) {
             bank.recordPRE(preCycle);
+            profPRE.inc();
         }
     }
     DEBUG("%s DDR handler: 0x%lx@%lu -- PRE %lu ACT %lu RW %lu BL %lu", name.c_str(), req->addr, req->schedCycle,
@@ -297,8 +314,10 @@ void MemChannelBackendDDR::refresh(uint64_t memCycle) {
     for (const auto& b : banks) {
         // Issue PRE to close all banks before REF.
         minREFCycle = std::max(minREFCycle, b.minPRECycle + t.RPab);
+        if (b.open) profPRE.inc();
     }
 
+    profREF.inc();
     uint64_t finREFCycle = minREFCycle + t.RFC;
     assert(t.RFC >= t.RP);
     for (auto& b : banks) {
