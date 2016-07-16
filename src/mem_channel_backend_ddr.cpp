@@ -313,6 +313,13 @@ void MemChannelBackendDDR::assignPriority(DDRAccReq* req) {
     auto& pl = prioLists(req->isWrite)[req->loc.rank * bankCount + req->loc.bank];
     auto& bank = banks[req->loc.rank * bankCount + req->loc.bank];
 
+    // Close page policy always uses FCFS.
+    if (pagePolicy == DDRPagePolicy::CLOSE) {
+        req->rowHitSeq = 0;
+        pl.push_back(req);
+        return;
+    }
+
     // FCFS/FR-FCFS scheduling.
     // Tune maxRowHits to switch between the two scheduling schemes. maxRowHits == 0
     // means FCFS, and maxRowHits == max means FR-FCFS.
