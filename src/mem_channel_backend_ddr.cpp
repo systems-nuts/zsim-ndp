@@ -2,8 +2,10 @@
 #include <cstring>          // for strcmp
 #include "bithacks.h"
 #include "config.h"         // for Tokenize
+#include "zsim.h"
 
 // TODO: implement
+// access granularity
 // adaptive close/open
 // power-down: XP
 // power model: IDD
@@ -34,6 +36,10 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
     assert_msg(channelWidthBits % deviceIOBits == 0,
             "Channel width (%u given) must be multiple of device IO width (%u given).",
             channelWidthBits, deviceIOBits);
+
+    assert_msg(burstSize * devicesPerRank == zinfo->lineSize * 8,
+            "Channel burst size (%u bits * %u) should match cacheline size (%u bytes)",
+            burstSize, devicesPerRank, zinfo->lineSize);
 
     // Page policy.
     if (strcmp(_pagePolicy, "open") == 0) {
