@@ -46,6 +46,8 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
         pagePolicy = DDRPagePolicy::OPEN;
     } else if (strcmp(_pagePolicy, "close") == 0) {
         pagePolicy = DDRPagePolicy::CLOSE;
+    } else if (strcmp(_pagePolicy, "relaxed-close") == 0) {
+        pagePolicy = DDRPagePolicy::RELAXED_CLOSE;
     } else {
         panic("Unrecognized page policy %s", _pagePolicy);
     }
@@ -276,9 +278,11 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
 
     // (future) next PRE.
     if (update) {
-        // TODO: adaptive close
         uint64_t preCycle = updatePRECycle(bank, rwCycle, isWrite);
-        if (pagePolicy == DDRPagePolicy::CLOSE) {
+        const auto& pl = prioLists(isWrite)[loc.rank * bankCount + loc.bank];
+        const auto next = pl.front();
+        if (pagePolicy == DDRPagePolicy::CLOSE ||
+                (pagePolicy == DDRPagePolicy::RELAXED_CLOSE && (next == nullptr || next->loc.row != loc.row))) {
             bank.recordPRE(preCycle);
         }
     }

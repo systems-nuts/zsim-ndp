@@ -88,6 +88,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
         enum struct DDRPagePolicy {
             CLOSE,
             OPEN,
+            RELAXED_CLOSE,
         };
 
         struct DDRAccReq : MemChannelAccReq, InListNode<DDRAccReq> {
