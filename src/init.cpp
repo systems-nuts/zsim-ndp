@@ -376,8 +376,25 @@ timing.name = config.get<uint32_t>(prefix + "timing.t" #name, defval)
 #undef SETTDEFVAL
         timing.BL = burstCount / 2; // double-data-rate
 
+        MemChannelBackendDDR::Power power;
+        // VDD in V, to mV.
+        double vdd = config.get<double>(prefix + "power.VDD", 0);
+        power.VDD = (uint32_t)(vdd * 1000);
+        // IDD in mA, to uA.
+#define SETIDD(name) \
+power.IDD##name = (uint32_t)(config.get<double>(prefix + "power.IDD" #name, 0) * 1000)
+        SETIDD(0);
+        SETIDD(2N);
+        SETIDD(2P);
+        SETIDD(3N);
+        SETIDD(3P);
+        SETIDD(4R);
+        SETIDD(4W);
+        SETIDD(5);
+#undef SETIDD
+
         be = new MemChannelBackendDDR(name, ranksPerChannel, banksPerRank, pagePolicy, pageSize, burstCount,
-                deviceIOWidth, channelWidth, memFreqMHz, timing, addrMapping, queueDepth, maxRowHits);
+                deviceIOWidth, channelWidth, memFreqMHz, timing, power, addrMapping, queueDepth, maxRowHits);
     } else {
         panic("Invalid memory channel type %s", channelType.c_str());
     }

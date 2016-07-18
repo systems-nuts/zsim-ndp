@@ -16,11 +16,11 @@
 MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
         uint32_t ranksPerChannel, uint32_t banksPerRank, const char* _pagePolicy,
         uint32_t pageSizeBytes, uint32_t burstCount, uint32_t deviceIOBits, uint32_t channelWidthBits,
-        uint32_t memFreqMHz, const Timing& _t,
+        uint32_t memFreqMHz, const Timing& _t, const Power& _p,
         const char* addrMapping, uint32_t _queueDepth, uint32_t _maxRowHits)
     : name(_name), rankCount(ranksPerChannel), bankCount(banksPerRank),
       pageSize(pageSizeBytes), burstSize(burstCount*deviceIOBits),
-      devicesPerRank(channelWidthBits/deviceIOBits), freqKHz(memFreqMHz*1000), t(_t),
+      devicesPerRank(channelWidthBits/deviceIOBits), freqKHz(memFreqMHz*1000), t(_t), p(_p),
       queueDepth(_queueDepth), maxRowHits(_maxRowHits) {
 
     info("%s: %u ranks x %u banks.", name.c_str(), rankCount, bankCount);
@@ -32,6 +32,8 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
             name.c_str(), t.RP, t.RRD, t.RTP, t.WR, t.WTR);
     info("%s: tRFC = %u, tREFI = %u, tRPab = %u, tFAW = %u, tRTRS = %u, tCMD = %u, tXP = %u",
             name.c_str(), t.RFC, t.REFI, t.RPab, t.FAW, t.RTRS, t.CMD, t.XP);
+    info("%s: VDD = %u, IDD0 = %u, IDD2N = %u, IDD2P = %u, IDD3N = %u, IDD3P = %u, IDD4R = %u, IDD4W = %u, IDD5 = %u",
+            name.c_str(), p.VDD, p.IDD0, p.IDD2N, p.IDD2P, p.IDD3N, p.IDD3P, p.IDD4R, p.IDD4W, p.IDD5);
 
     assert_msg(channelWidthBits % deviceIOBits == 0,
             "Channel width (%u given) must be multiple of device IO width (%u given).",
@@ -40,6 +42,10 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
     assert_msg(burstSize * devicesPerRank == zinfo->lineSize * 8,
             "Channel burst size (%u bits * %u) should match cacheline size (%u bytes)",
             burstSize, devicesPerRank, zinfo->lineSize);
+
+    assert_msg(p.IDD4R >= p.IDD3N, "IDD4R must be not less than IDD3N.");
+    assert_msg(p.IDD4W >= p.IDD3N, "IDD4W must be not less than IDD3N.");
+    assert_msg(p.IDD5 >= p.IDD3N, "IDD5 must be not less than IDD3N.");
 
     // Page policy.
     if (strcmp(_pagePolicy, "open") == 0) {

@@ -38,11 +38,26 @@ class MemChannelBackendDDR : public MemChannelBackend {
             uint32_t XP;    // power-down exit latency
         };
 
+        struct Power {
+            // VDD is in mV
+            uint32_t VDD;
+            // IDD is in uA
+            uint32_t IDD0;
+            uint32_t IDD2N;
+            uint32_t IDD2P;
+            uint32_t IDD3N;
+            uint32_t IDD3P;
+            uint32_t IDD4R;
+            uint32_t IDD4W;
+            uint32_t IDD5;
+        };
+
     public:
         MemChannelBackendDDR(const g_string& _name, uint32_t ranksPerChannel, uint32_t banksPerRank,
                 const char* _pagePolicy, uint32_t pageSizeBytes,
                 uint32_t burstCount, uint32_t deviceIOBits, uint32_t channelWidthBits,
-                uint32_t memFreqMHz, const Timing& _t, const char* addrMapping, uint32_t _queueDepth,
+                uint32_t memFreqMHz, const Timing& _t, const Power& _p,
+                const char* addrMapping, uint32_t _queueDepth,
                 uint32_t _maxRowHits);
 
         uint64_t enqueue(const Address& addr, const bool isWrite, uint64_t startCycle,
@@ -215,6 +230,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
         const uint32_t freqKHz;
         const Timing t;
+        const Power p;
 
         DDRPagePolicy pagePolicy;
 
