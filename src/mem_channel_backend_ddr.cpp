@@ -143,6 +143,15 @@ void MemChannelBackendDDR::initStats(AggregateStat* parentStat) {
     parentStat->append(&profWR);
     profREF.init("REF", "Refresh commands");
     parentStat->append(&profREF);
+
+    profEnergyACTPRE.init("eACTPRE", "Activate/precharge energy");
+    parentStat->append(&profEnergyACTPRE);
+    profEnergyRDWR.init("eRDWR", "Read/write energy");
+    parentStat->append(&profEnergyRDWR);
+    profEnergyREF.init("eREF", "Refresh energy");
+    parentStat->append(&profEnergyREF);
+    profEnergyBKGD.init("eBKGD", "Background energy");
+    parentStat->append(&profEnergyBKGD);
 }
 
 uint64_t MemChannelBackendDDR::enqueue(const Address& addr, const bool isWrite,
@@ -290,6 +299,7 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
         if (update) {
             bank.recordACT(actCycle, loc.row);
             profACT.inc();
+            updateEnergyACTPRE();
         }
     }
     if (update) {
@@ -302,6 +312,7 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
         bank.recordRW(rwCycle);
         if (isWrite) profWR.inc();
         else profRD.inc();
+        updateEnergyRDWR(isWrite);
     }
 
     // Burst data transfer.
@@ -338,6 +349,7 @@ void MemChannelBackendDDR::refresh(uint64_t memCycle) {
     }
 
     profREF.inc();
+    updateEnergyREF();
     uint64_t finREFCycle = minREFCycle + t.RFC;
     assert(t.RFC >= t.RP);
     for (auto& b : banks) {
@@ -441,5 +453,36 @@ uint64_t MemChannelBackendDDR::updatePRECycle(Bank& bank, uint64_t rwCycle, bool
             isWrite ? minBurstCycle + t.WR : rwCycle + t.RTP,
             rwCycle + t.CMD);
     return bank.minPRECycle;
+}
+
+void MemChannelBackendDDR::updateEnergyACTPRE() {
+    uint32_t tRC = t.RAS + t.RP;
+    uint32_t eACTPRE = p.VDD * (p.IDD0 * tRC - p.IDD3N * t.RAS - p.IDD2N * (tRC - t.RAS));
+    eACTPRE /= freqKHz * 1000;
+    eACTPRE *= devicesPerRank;
+    profEnergyACTPRE.inc(eACTPRE);
+}
+
+void MemChannelBackendDDR::updateEnergyRDWR(bool isWrite) {
+    uint32_t eRDWR = p.VDD * ((isWrite ? p.IDD4W : p.IDD4R) - p.IDD3N) * t.BL;
+    eRDWR /= freqKHz * 1000;
+    eRDWR *= devicesPerRank;
+    profEnergyRDWR.inc(eRDWR);
+}
+
+void MemChannelBackendDDR::updateEnergyREF() {
+    uint32_t eREF = p.VDD * (p.IDD5 - p.IDD3N) * t.RFC;
+    eREF /= freqKHz * 1000;
+    eREF *= devicesPerRank;
+    profEnergyREF.inc(eREF);
+}
+
+void MemChannelBackendDDR::updateEnergyBKGD(uint32_t cycles, bool powerDown, bool active) {
+    uint32_t idd = (powerDown ?
+            (active ? p.IDD3P : p.IDD2P) : (active ? p.IDD3N : p.IDD2N));
+    uint64_t eBKGD = p.VDD * idd * cycles;
+    eBKGD /= freqKHz * 1000;
+    eBKGD *= devicesPerRank;
+    profEnergyBKGD.inc(eBKGD);
 }
 

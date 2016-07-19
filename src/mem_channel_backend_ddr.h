@@ -231,6 +231,12 @@ class MemChannelBackendDDR : public MemChannelBackend {
         uint64_t calcBurstCycle(const Bank& bank, uint64_t rwCycle, bool isWrite) const;
         uint64_t updatePRECycle(Bank& bank, uint64_t rwCycle, bool isWrite);
 
+        // Energy helper functions.
+        void updateEnergyACTPRE();
+        void updateEnergyRDWR(bool isWrite);
+        void updateEnergyREF();
+        void updateEnergyBKGD(uint32_t cycles, bool powerDown, bool active);
+
     protected:
         const g_string name;
 
@@ -312,6 +318,8 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
         // Stats.
         Counter profACT, profPRE, profRD, profWR, profREF;
+
+        Counter profEnergyACTPRE, profEnergyRDWR, profEnergyREF, profEnergyBKGD;
 };
 
 #endif  // MEM_CHANNEL_BACKEND_DDR_H_
