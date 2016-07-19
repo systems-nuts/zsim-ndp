@@ -171,17 +171,9 @@ uint64_t MemChannelBackendDDR::enqueue(const Address& addr, const bool isWrite,
     // Assign priority.
     assignPriority(req);
 
-    if (req->hasHighestPriority()) {
-        // Wake up power-down rank.
-        auto* rs = banks[req->loc.rank * bankCount + req->loc.bank].rankState;
-        if (powerDownCycles != -1u &&
-                (rs->lastPowerUpCycle == 0 || (rs->lastPowerUpCycle < rs->lastActivityCycle &&
-                                               rs->lastActivityCycle + powerDownCycles < req->schedCycle))) {
-            rs->lastPowerUpCycle = req->schedCycle;
-            DEBUG("%s DDR enqueue: wake up rank %u at cycle %lu, whose last activity is at cycle %lu",
-                    name.c_str(), req->loc.rank, rs->lastPowerUpCycle, rs->lastActivityCycle);
-        }
+    adjustPowerState(req->schedCycle, req->loc.rank, req->loc.bank);
 
+    if (req->hasHighestPriority()) {
         return requestHandler(req);
     }
     else return -1uL;
@@ -357,6 +349,38 @@ void MemChannelBackendDDR::refresh(uint64_t memCycle) {
         // ACT is able to issue right after refresh done, equiv. to PRE tRP earlier.
         b.open = false;
         b.minPRECycle = finREFCycle - t.RP;
+    }
+}
+
+void MemChannelBackendDDR::adjustPowerState(uint64_t memCycle, uint32_t rankIdx, uint32_t bankIdx) {
+    auto* rankState = banks[rankIdx * bankCount + bankIdx].rankState;
+
+    // Wake up power-down rank.
+    if (powerDownCycles != -1u &&
+            (rankState->lastPowerUpCycle == 0 || (rankState->lastPowerUpCycle < rankState->lastActivityCycle &&
+                                                  rankState->lastActivityCycle + powerDownCycles < memCycle))) {
+        // There should be no other requests in the queue except for the one triggering the wakeup.
+        bool skipPowerDown = false;
+        for (uint32_t ib = 0; ib < bankCount; ib++) {
+            uint32_t idx = rankIdx * bankCount + ib;
+            if (ib == bankIdx) {
+                if (prioListsRd[idx].size() + prioListsWr[idx].size() > 1) {
+                    skipPowerDown = true;
+                    break;
+                }
+            } else {
+                if (!prioListsRd[idx].empty() || !prioListsWr[idx].empty()) {
+                    skipPowerDown = true;
+                    break;
+                }
+            }
+        }
+
+        if (!skipPowerDown) {
+            rankState->lastPowerUpCycle = memCycle;
+            DEBUG("%s DDR: wake up rank %u at cycle %lu, whose last activity is at cycle %lu",
+                    name.c_str(), rankIdx, rankState->lastPowerUpCycle, rankState->lastActivityCycle);
+        }
     }
 }
 

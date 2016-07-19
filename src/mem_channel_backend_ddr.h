@@ -222,6 +222,8 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
         void refresh(uint64_t memCycle);
 
+        void adjustPowerState(uint64_t memCycle, uint32_t rankIdx, uint32_t bankIdx);
+
         virtual void assignPriority(DDRAccReq* req);
         virtual void cancelPriority(DDRAccReq* req);
 
