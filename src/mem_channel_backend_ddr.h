@@ -58,7 +58,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
                 uint32_t burstCount, uint32_t deviceIOBits, uint32_t channelWidthBits,
                 uint32_t memFreqMHz, const Timing& _t, const Power& _p,
                 const char* addrMapping, uint32_t _queueDepth,
-                uint32_t _maxRowHits);
+                uint32_t _maxRowHits, uint32_t _powerDownCycles);
 
         uint64_t enqueue(const Address& addr, const bool isWrite, uint64_t startCycle,
                 uint64_t memCycle, MemChannelAccEvent* respEv);
@@ -161,6 +161,17 @@ class MemChannelBackendDDR : public MemChannelBackend {
                 inline uint32_t dec(uint32_t i) const { return i? i-1 : buf.size()-1; }
         };
 
+        // Track the state of a rank, including power-down.
+        struct RankState : public GlobAlloc {
+            // The last activity in the rank, after which we start to count powerDownCycles.
+            uint64_t lastActivityCycle;
+            // The last power-up cycle. All commands must be issued after power-up penalty after it.
+            uint64_t lastPowerUpCycle;
+
+            RankState()
+                : lastActivityCycle(0), lastPowerUpCycle(0) {}
+        };
+
         struct Bank {
             // Bank state and open row.
             bool open;
@@ -175,11 +186,13 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
             DDRActWindow* actWindow;
 
+            RankState* rankState;
+
             // Sequence number for the last bank row hit.
             uint32_t rowHitSeq;
 
-            explicit Bank(DDRActWindow* aw)
-                : open(false), row(0), minPRECycle(0), lastACTCycle(0), lastRWCycle(0), actWindow(aw) {}
+            explicit Bank(DDRActWindow* aw, RankState* rs)
+                : open(false), row(0), minPRECycle(0), lastACTCycle(0), lastRWCycle(0), actWindow(aw), rankState(rs) {}
 
             void recordPRE(uint64_t preCycle) {
                 assert(open);
@@ -231,6 +244,8 @@ class MemChannelBackendDDR : public MemChannelBackend {
         const uint32_t freqKHz;
         const Timing t;
         const Power p;
+
+        const uint32_t powerDownCycles;
 
         DDRPagePolicy pagePolicy;
 

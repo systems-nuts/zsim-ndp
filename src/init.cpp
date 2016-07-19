@@ -348,6 +348,12 @@ MemChannel* BuildMemChannel(Config& config, uint32_t lineSize, uint32_t sysFreqM
         uint32_t deviceIOWidth = config.get<uint32_t>(prefix + "deviceIOWidth", 8);   // bits
         const char* addrMapping = config.get<const char*>(prefix + "addrMapping", "rank:col:bank");
         uint32_t maxRowHits = config.get<uint32_t>(prefix + "maxRowHits", -1u);   // bits
+        uint32_t powerDownCycles = config.get<uint32_t>(prefix + "powerDownCycles", -1u);   // system cycles
+        if (powerDownCycles == 0) powerDownCycles = -1u; // 0 also means never power down.
+        if (powerDownCycles != -1u) {
+            // To mem cycles.
+            powerDownCycles = powerDownCycles * sysFreqMHz / memFreqMHz + 1;
+        }
 
         MemChannelBackendDDR::Timing timing;
         // All in mem cycles.
@@ -394,7 +400,8 @@ power.IDD##name = (uint32_t)(config.get<double>(prefix + "power.IDD" #name, 0) *
 #undef SETIDD
 
         be = new MemChannelBackendDDR(name, ranksPerChannel, banksPerRank, pagePolicy, pageSize, burstCount,
-                deviceIOWidth, channelWidth, memFreqMHz, timing, power, addrMapping, queueDepth, maxRowHits);
+                deviceIOWidth, channelWidth, memFreqMHz, timing, power, addrMapping, queueDepth, maxRowHits,
+                powerDownCycles);
     } else {
         panic("Invalid memory channel type %s", channelType.c_str());
     }

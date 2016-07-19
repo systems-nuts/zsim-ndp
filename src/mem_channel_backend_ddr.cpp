@@ -7,7 +7,6 @@
 // TODO: implement
 // access granularity
 // adaptive close/open
-// power-down: XP
 // power model: IDD
 
 //#define DEBUG(args...) info(args)
@@ -17,11 +16,11 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
         uint32_t ranksPerChannel, uint32_t banksPerRank, const char* _pagePolicy,
         uint32_t pageSizeBytes, uint32_t burstCount, uint32_t deviceIOBits, uint32_t channelWidthBits,
         uint32_t memFreqMHz, const Timing& _t, const Power& _p,
-        const char* addrMapping, uint32_t _queueDepth, uint32_t _maxRowHits)
+        const char* addrMapping, uint32_t _queueDepth, uint32_t _maxRowHits, uint32_t _powerDownCycles)
     : name(_name), rankCount(ranksPerChannel), bankCount(banksPerRank),
       pageSize(pageSizeBytes), burstSize(burstCount*deviceIOBits),
       devicesPerRank(channelWidthBits/deviceIOBits), freqKHz(memFreqMHz*1000), t(_t), p(_p),
-      queueDepth(_queueDepth), maxRowHits(_maxRowHits) {
+      powerDownCycles(_powerDownCycles), queueDepth(_queueDepth), maxRowHits(_maxRowHits) {
 
     info("%s: %u ranks x %u banks.", name.c_str(), rankCount, bankCount);
     info("%s: page size %u bytes, %u devices per rank, burst %u bits from each device.",
@@ -62,8 +61,9 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
     banks.clear();
     for (uint32_t r = 0; r < rankCount; r++) {
         auto aw = new DDRActWindow(4);
+        auto rs = new RankState();
         for (uint32_t b = 0; b < bankCount; b++) {
-            banks.emplace_back(aw);
+            banks.emplace_back(aw, rs);
         }
     }
     assert(banks.size() == rankCount * bankCount);
@@ -163,6 +163,16 @@ uint64_t MemChannelBackendDDR::enqueue(const Address& addr, const bool isWrite,
     assignPriority(req);
 
     if (req->hasHighestPriority()) {
+        // Wake up power-down rank.
+        auto* rs = banks[req->loc.rank * bankCount + req->loc.bank].rankState;
+        if (powerDownCycles != -1u &&
+                (rs->lastPowerUpCycle == 0 || (rs->lastPowerUpCycle < rs->lastActivityCycle &&
+                                               rs->lastActivityCycle + powerDownCycles < req->schedCycle))) {
+            rs->lastPowerUpCycle = req->schedCycle;
+            DEBUG("%s DDR enqueue: wake up rank %u at cycle %lu, whose last activity is at cycle %lu",
+                    name.c_str(), req->loc.rank, rs->lastPowerUpCycle, rs->lastActivityCycle);
+        }
+
         return requestHandler(req);
     }
     else return -1uL;
@@ -265,7 +275,7 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
         preCycle = bank.minPRECycle;
     } else if (loc.row != bank.row) {
         // A conflict row is open.
-        preCycle = std::max(bank.minPRECycle, schedCycle);
+        preCycle = maxN<uint64_t>(bank.minPRECycle, schedCycle, bank.rankState->lastPowerUpCycle + t.XP);
         if (update) {
             bank.recordPRE(preCycle);
             profPRE.inc();
@@ -297,6 +307,9 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
     // Burst data transfer.
     uint64_t burstCycle = calcBurstCycle(bank, rwCycle, isWrite);
     assert(burstCycle >= minBurstCycle);
+    if (update) {
+        bank.rankState->lastActivityCycle = std::max(bank.rankState->lastActivityCycle, burstCycle + t.BL);
+    }
 
     // (future) next PRE.
     if (update) {
@@ -306,6 +319,7 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
         if (pagePolicy == DDRPagePolicy::CLOSE ||
                 (pagePolicy == DDRPagePolicy::RELAXED_CLOSE && (next == nullptr || next->loc.row != loc.row))) {
             bank.recordPRE(preCycle);
+            bank.rankState->lastActivityCycle = std::max(bank.rankState->lastActivityCycle, preCycle);
             profPRE.inc();
         }
     }
@@ -385,18 +399,19 @@ void MemChannelBackendDDR::cancelPriority(DDRAccReq* req) {
 }
 
 uint64_t MemChannelBackendDDR::calcACTCycle(const Bank& bank, uint64_t schedCycle, uint64_t preCycle) const {
-    // Constraints: tRP, tRRD, tFAW, tCMD.
+    // Constraints: tRP, tRRD, tFAW, tXP, tCMD.
     return maxN<uint64_t>(
             schedCycle,
             preCycle + t.RP,
             bank.lastACTCycle + t.RRD,
             bank.actWindow->minACTCycle() + t.FAW,
+            bank.rankState->lastPowerUpCycle + t.XP,
             preCycle + t.CMD);
 }
 
 uint64_t MemChannelBackendDDR::calcRWCycle(const Bank& bank, uint64_t schedCycle, uint64_t actCycle,
         bool isWrite, uint32_t rankIdx) const {
-    // Constraints: tRCD, tWTR, tCCD, bus contention, tRTRS, tCMD.
+    // Constraints: tRCD, tWTR, tCCD, bus contention, tRTRS, tXP, tCMD.
     int64_t dataOnBus = minBurstCycle;
     if (rankIdx != lastRankIdx) {
         // Switch rank.
@@ -408,6 +423,7 @@ uint64_t MemChannelBackendDDR::calcRWCycle(const Bank& bank, uint64_t schedCycle
             (lastIsWrite && !isWrite) ? minBurstCycle + t.WTR : 0,
             bank.lastRWCycle + t.CCD,
             std::max<int64_t>(0, dataOnBus - (isWrite ? std::max(t.CWD, t.CAS) : t.CAS)), // avoid underflow
+            bank.rankState->lastPowerUpCycle + t.XP,
             actCycle + t.CMD);
 }
 
