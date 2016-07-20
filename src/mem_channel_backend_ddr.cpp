@@ -8,7 +8,6 @@
 // access granularity
 // adaptive close/open
 // power model: interval recorder for BKGD
-// power model: periodically update BKGD
 // power model: I/O termination
 
 //#define DEBUG(args...) info(args)
@@ -263,6 +262,10 @@ bool MemChannelBackendDDR::queueEmpty(const bool isWrite) const {
 void MemChannelBackendDDR::periodicalProcess(uint64_t memCycle, uint32_t index) {
     if (index == 0) {
         refresh(memCycle);
+    } else if (index == 1) {
+        for (uint32_t r = 0; r < rankCount; r++) {
+            adjustPowerState(memCycle, r, 0, false);
+        }
     } else panic("Invalid periodical event index %u.", index);
 }
 

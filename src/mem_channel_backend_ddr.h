@@ -88,12 +88,14 @@ class MemChannelBackendDDR : public MemChannelBackend {
             return isWrite ? 0 : t.CAS + t.BL;
         }
 
-        uint32_t getPeriodicalEventCount() const { return 1; }
+        uint32_t getPeriodicalEventCount() const { return 2; }
 
         uint64_t getPeriodicalInterval(uint32_t index) const {
             // Event index:
             // 0: refresh.
+            // 1: update background energy.
             if (index == 0) return t.REFI;
+            else if (index == 1) return 10000;
             else panic("Invalid periodical event index %u.", index);
         }
 
