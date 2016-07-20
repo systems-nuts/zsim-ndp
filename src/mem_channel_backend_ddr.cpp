@@ -260,8 +260,10 @@ bool MemChannelBackendDDR::queueEmpty(const bool isWrite) const {
     return reqQueue(isWrite).empty();
 }
 
-void MemChannelBackendDDR::periodicalProcess(uint64_t memCycle) {
-    refresh(memCycle);
+void MemChannelBackendDDR::periodicalProcess(uint64_t memCycle, uint32_t index) {
+    if (index == 0) {
+        refresh(memCycle);
+    } else panic("Invalid periodical event index %u.", index);
 }
 
 

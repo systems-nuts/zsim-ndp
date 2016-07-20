@@ -41,7 +41,7 @@ class MemChannel : public MemObject {
         uint64_t tick(uint64_t sysCycle);
         void recycleTickEvent(MemChannelTickEvent* tev);
 
-        void periodicalTick(uint64_t sysCycle);
+        void periodicalTick(uint64_t sysCycle, uint32_t index);
 
     private:
         const g_string name;

@@ -85,11 +85,12 @@ class MemChannelTickEvent : public TimingEvent, public GlobAlloc {
 class MemChannelPeriodicalEvent : public TimingEvent, public GlobAlloc {
     private:
         MemChannel* const mem;
+        const uint32_t index;
         const uint64_t interval;  // in sys cycles.
 
     public:
-        MemChannelPeriodicalEvent(MemChannel* _mem, uint64_t _interval, int32_t domain)
-            : TimingEvent(0, 0, domain), mem(_mem), interval(_interval)
+        MemChannelPeriodicalEvent(MemChannel* _mem, uint32_t _index, uint64_t _interval, int32_t domain)
+            : TimingEvent(0, 0, domain), mem(_mem), index(_index), interval(_interval)
         {
             setMinStartCycle(0);
             if (interval != -1uL) {
@@ -105,7 +106,7 @@ class MemChannelPeriodicalEvent : public TimingEvent, public GlobAlloc {
         }
 
         void simulate(uint64_t startCycle) {
-            mem->periodicalTick(startCycle);
+            mem->periodicalTick(startCycle, index);
             requeue(startCycle + interval);
         }
 
@@ -128,8 +129,10 @@ MemChannel::MemChannel(MemChannelBackend* _be, const uint32_t _sysFreqMHz, const
     postWrDelay = minWrDelay - preWrDelay;
 
     // Allocate periodical event from global space. Will be automatically reclaimed.
-    uint64_t memInterval = be->getPeriodicalInterval();
-    new MemChannelPeriodicalEvent(this, memInterval == -1uL ? -1uL : matchingSysCycle(memInterval), domain);
+    for (uint32_t index = 0; index < be->getPeriodicalEventCount(); index++) {
+        uint64_t memInterval = be->getPeriodicalInterval(index);
+        new MemChannelPeriodicalEvent(this, index, matchingSysCycle(memInterval), domain);
+    }
 }
 
 void MemChannel::initStats(AggregateStat* parentStat) {
@@ -278,8 +281,8 @@ void MemChannel::recycleTickEvent(MemChannelTickEvent* tev) {
     else delete tev;
 }
 
-void MemChannel::periodicalTick(uint64_t sysCycle) {
-    be->periodicalProcess(sysToMemCycle(sysCycle));
+void MemChannel::periodicalTick(uint64_t sysCycle, uint32_t index) {
+    be->periodicalProcess(sysToMemCycle(sysCycle), index);
 }
 
 uint64_t MemChannel::schedule(MemChannelAccEvent* ev, uint64_t startCycle, uint64_t memCycle) {

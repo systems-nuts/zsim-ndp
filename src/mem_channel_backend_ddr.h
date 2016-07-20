@@ -71,7 +71,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
         uint64_t process(const MemChannelAccReq* req);
 
-        void periodicalProcess(uint64_t memCycle);
+        void periodicalProcess(uint64_t memCycle, uint32_t index);
 
         uint64_t getTickCycleLowerBound() const {
             // Return min burst cycle here.
@@ -88,8 +88,13 @@ class MemChannelBackendDDR : public MemChannelBackend {
             return isWrite ? 0 : t.CAS + t.BL;
         }
 
-        uint64_t getPeriodicalInterval() const {
-            return t.REFI;
+        uint32_t getPeriodicalEventCount() const { return 1; }
+
+        uint64_t getPeriodicalInterval(uint32_t index) const {
+            // Event index:
+            // 0: refresh.
+            if (index == 0) return t.REFI;
+            else panic("Invalid periodical event index %u.", index);
         }
 
         void initStats(AggregateStat* parentStat);
