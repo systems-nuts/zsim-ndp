@@ -173,7 +173,7 @@ uint64_t MemChannelBackendDDR::enqueue(const Address& addr, const bool isWrite,
     // Assign priority.
     assignPriority(req);
 
-    adjustPowerState(req->schedCycle, req->loc.rank, req->loc.bank);
+    adjustPowerState(req->schedCycle, req->loc.rank, req->loc.bank, true);
 
     if (req->hasHighestPriority()) {
         return requestHandler(req);
@@ -356,7 +356,7 @@ void MemChannelBackendDDR::refresh(uint64_t memCycle) {
     }
 }
 
-void MemChannelBackendDDR::adjustPowerState(uint64_t memCycle, uint32_t rankIdx, uint32_t bankIdx) {
+void MemChannelBackendDDR::adjustPowerState(uint64_t memCycle, uint32_t rankIdx, uint32_t bankIdx, bool powerUp) {
     auto* rankState = banks[rankIdx * bankCount + bankIdx].rankState;
 
     // Forward background energy calculation cycles.
@@ -380,37 +380,54 @@ void MemChannelBackendDDR::adjustPowerState(uint64_t memCycle, uint32_t rankIdx,
         rankState->lastEnergyBKGDUpdateCycle = endCycle;
     };
 
-    // Wake up power-down rank.
-    if (powerDownCycles != -1u &&
-            (rankState->lastPowerUpCycle == 0 || (rankState->lastPowerUpCycle < rankState->lastActivityCycle &&
-                                                  rankState->lastActivityCycle + powerDownCycles < memCycle))) {
-        // There should be no other requests in the queue except for the one triggering the wakeup.
-        bool skipPowerDown = false;
-        for (uint32_t ib = 0; ib < bankCount; ib++) {
-            uint32_t idx = rankIdx * bankCount + ib;
-            if (ib == bankIdx) {
-                if (prioListsRd[idx].size() + prioListsWr[idx].size() > 1) {
-                    skipPowerDown = true;
-                    break;
+    if (powerDownCycles != -1u) {
+        if (rankState->lastPowerDownCycle < rankState->lastPowerUpCycle) {
+            // In power-up state.
+            if (rankState->lastActivityCycle + powerDownCycles < memCycle) {
+                // There is a race between the lastActivityCycle and adjustPowerState().
+                // We detect the number of in-queue requests to resolve this race and
+                // skip power-down until next adjustment.
+                bool skipPowerDown = false;
+                uint32_t inqueueToRankReqCount = 0;
+                uint32_t inqueueToBankReqCount = 0;
+                for (uint32_t ib = 0; ib < bankCount; ib++) {
+                    uint32_t idx = rankIdx * bankCount + ib;
+                    inqueueToRankReqCount += prioListsRd[idx].size() + prioListsWr[idx].size();
+                    if (ib == bankIdx) {
+                        inqueueToBankReqCount += prioListsRd[idx].size() + prioListsWr[idx].size();
+                    }
                 }
-            } else {
-                if (!prioListsRd[idx].empty() || !prioListsWr[idx].empty()) {
-                    skipPowerDown = true;
-                    break;
+                if (powerUp) {
+                    // Only one request to the specific bank.
+                    skipPowerDown = (inqueueToRankReqCount != 1) || (inqueueToBankReqCount != 1);
+                } else {
+                    skipPowerDown = (inqueueToRankReqCount != 0);
+                }
+
+                if (!skipPowerDown) {
+                    // Power down the rank.
+                    rankState->lastPowerDownCycle = rankState->lastActivityCycle + powerDownCycles;
+                    DEBUG("%s DDR: power down rank %u at cycle %lu, whose last activity is at cycle %lu.",
+                            name.c_str(), rankIdx,
+                            rankState->lastPowerDownCycle, rankState->lastActivityCycle);
+                    assert(rankState->lastPowerUpCycle <= rankState->lastPowerDownCycle);
+
+                    // Update background energy to last power-down cycle.
+                    forwardCyclesOnEnergyBKGDUpdate(rankState->lastPowerDownCycle);
+                } else {
+                    DEBUG("%s DDR: skip power down rank %u at cycle %lu, whose (out-of-date) last activity is at cycle %lu.",
+                            name.c_str(), rankIdx,
+                            memCycle, rankState->lastActivityCycle);
                 }
             }
         }
 
-        if (!skipPowerDown) {
-            rankState->lastPowerUpCycle = memCycle;
-            DEBUG("%s DDR: wake up rank %u at cycle %lu, whose last activity is at cycle %lu",
-                    name.c_str(), rankIdx, rankState->lastPowerUpCycle, rankState->lastActivityCycle);
+        if (rankState->lastPowerUpCycle <= rankState->lastPowerDownCycle) {
+            // In power-down state.
 
-            // Before power-down.
-            forwardCyclesOnEnergyBKGDUpdate(rankState->lastActivityCycle + powerDownCycles);
-
-            // During power-down.
-            uint64_t powerDownPeriod = rankState->lastPowerUpCycle - (rankState->lastActivityCycle + powerDownCycles);
+            // Update background energy to current cycle.
+            assert(memCycle >= rankState->lastEnergyBKGDUpdateCycle);
+            uint64_t powerDownPeriod = memCycle - rankState->lastEnergyBKGDUpdateCycle;
             bool active = false;
             for (uint32_t ib = 0; ib < bankCount; ib++) {
                 const auto& ob = banks[rankIdx * bankCount + ib];
@@ -420,12 +437,20 @@ void MemChannelBackendDDR::adjustPowerState(uint64_t memCycle, uint32_t rankIdx,
                 }
             }
             updateEnergyBKGD(powerDownPeriod, true, active);
-            rankState->lastEnergyBKGDUpdateCycle = rankState->lastPowerUpCycle;
+            rankState->lastEnergyBKGDUpdateCycle = memCycle;
 
-            // After power-down
-            // Will be handled in the usual path below.
+            // Power up the rank.
+            if (powerUp) {
+                rankState->lastPowerUpCycle = memCycle;
+                DEBUG("%s DDR: power up rank %u at cycle %lu, whose last power-down at cycle %lu.",
+                        name.c_str(), rankIdx,
+                        rankState->lastPowerUpCycle, rankState->lastPowerDownCycle);
+                assert(rankState->lastPowerDownCycle < rankState->lastPowerUpCycle);
+            }
         }
     }
+
+    // Normal power-up state background energy update.
 
     // Avoid too frequent update.
     if (memCycle < rankState->lastEnergyBKGDUpdateCycle + 500) return;
