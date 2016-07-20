@@ -7,7 +7,6 @@
 // TODO: implement
 // access granularity
 // adaptive close/open
-// power model: interval recorder for BKGD
 // power model: I/O termination
 
 //#define DEBUG(args...) info(args)
@@ -366,21 +365,13 @@ void MemChannelBackendDDR::adjustPowerState(uint64_t memCycle, uint32_t rankIdx,
     auto forwardCyclesOnEnergyBKGDUpdate = [this, rankIdx, rankState](uint64_t endCycle) {
         assert(endCycle > rankState->lastEnergyBKGDUpdateCycle);
         uint64_t forwardCycles = endCycle - rankState->lastEnergyBKGDUpdateCycle;
+        uint64_t activeCycles = rankState->activeIntRec.getCoverage(endCycle);
 
-        // FIXME: hack for now. Only look at the final states of banks and take percentage.
-        // Should use interval recorder.
-        uint32_t openBankCount = 0;
-        for (uint32_t ib = 0; ib < bankCount; ib++) {
-            const auto& ob = banks[rankIdx * bankCount + ib];
-            openBankCount += ob.open ? 1 : 0;
-        }
-        uint64_t eBKGD = p.VDD * (p.IDD3N * openBankCount + p.IDD2N * (bankCount - openBankCount))
-            * forwardCycles / bankCount;
-        eBKGD *= devicesPerRank;
-        eBKGD /= freqKHz;
-        profEnergyBKGD.inc(eBKGD);
+        updateEnergyBKGD(activeCycles, false, true);
+        updateEnergyBKGD(forwardCycles - activeCycles, false, false);
 
         rankState->lastEnergyBKGDUpdateCycle = endCycle;
+        rankState->activeIntRec.updateOrigin(endCycle);
     };
 
     if (powerDownCycles != -1u) {
@@ -441,6 +432,7 @@ void MemChannelBackendDDR::adjustPowerState(uint64_t memCycle, uint32_t rankIdx,
             }
             updateEnergyBKGD(powerDownPeriod, true, active);
             rankState->lastEnergyBKGDUpdateCycle = memCycle;
+            rankState->activeIntRec.updateOrigin(memCycle);
 
             // Power up the rank.
             if (powerUp) {

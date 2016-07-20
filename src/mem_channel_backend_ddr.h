@@ -4,6 +4,7 @@
 #include "finite_queue.h"
 #include "g_std/g_vector.h"
 #include "g_std/g_string.h"
+#include "interval_recorder.h"
 #include "mem_channel_backend.h"
 #include "pad.h"
 #include "stats.h"
@@ -180,8 +181,13 @@ class MemChannelBackendDDR : public MemChannelBackend {
             // The last cycle before which the background energy of the rank has been updated.
             uint64_t lastEnergyBKGDUpdateCycle;
 
+            // Record active intervals of the rank (i.e., >= 1 banks are active).
+            IntervalRecorder activeIntRec;
+
             RankState()
-                : lastActivityCycle(0), lastPowerUpCycle(0), lastPowerDownCycle(0), lastEnergyBKGDUpdateCycle(0) {}
+                : lastActivityCycle(0), lastPowerUpCycle(0), lastPowerDownCycle(0), lastEnergyBKGDUpdateCycle(0),
+                  activeIntRec()
+            {}
         };
 
         struct Bank {
@@ -210,6 +216,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
                 assert(open);
                 open = false;
                 minPRECycle = preCycle;
+                rankState->activeIntRec.addInterval(lastACTCycle, preCycle);
             }
 
             void recordACT(uint64_t actCycle, uint64_t rowIdx) {
