@@ -481,32 +481,32 @@ uint64_t MemChannelBackendDDR::updatePRECycle(Bank& bank, uint64_t rwCycle, bool
 
 void MemChannelBackendDDR::updateEnergyACTPRE() {
     uint32_t tRC = t.RAS + t.RP;
-    uint32_t eACTPRE = p.VDD * (p.IDD0 * tRC - p.IDD3N * t.RAS - p.IDD2N * (tRC - t.RAS));
-    eACTPRE /= freqKHz * 1000;
+    uint64_t eACTPRE = (uint64_t)p.VDD * (p.IDD0 * tRC - p.IDD3N * t.RAS - p.IDD2N * (tRC - t.RAS));
     eACTPRE *= devicesPerRank;
+    eACTPRE /= freqKHz;
     profEnergyACTPRE.inc(eACTPRE);
 }
 
 void MemChannelBackendDDR::updateEnergyRDWR(bool isWrite) {
-    uint32_t eRDWR = p.VDD * ((isWrite ? p.IDD4W : p.IDD4R) - p.IDD3N) * t.BL;
-    eRDWR /= freqKHz * 1000;
+    uint64_t eRDWR = (uint64_t)p.VDD * ((isWrite ? p.IDD4W : p.IDD4R) - p.IDD3N) * t.BL;
     eRDWR *= devicesPerRank;
+    eRDWR /= freqKHz;
     profEnergyRDWR.inc(eRDWR);
 }
 
 void MemChannelBackendDDR::updateEnergyREF() {
-    uint32_t eREF = p.VDD * (p.IDD5 - p.IDD3N) * t.RFC;
-    eREF /= freqKHz * 1000;
+    uint64_t eREF = (uint64_t)p.VDD * (p.IDD5 - p.IDD3N) * t.RFC;
     eREF *= devicesPerRank;
+    eREF /= freqKHz;
     profEnergyREF.inc(eREF);
 }
 
 void MemChannelBackendDDR::updateEnergyBKGD(uint32_t cycles, bool powerDown, bool active) {
     uint32_t idd = (powerDown ?
             (active ? p.IDD3P : p.IDD2P) : (active ? p.IDD3N : p.IDD2N));
-    uint64_t eBKGD = p.VDD * idd * cycles;
-    eBKGD /= freqKHz * 1000;
+    uint64_t eBKGD = (uint64_t)p.VDD * idd * cycles;
     eBKGD *= devicesPerRank;
+    eBKGD /= freqKHz;
     profEnergyBKGD.inc(eBKGD);
 }
 
