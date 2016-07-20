@@ -168,8 +168,11 @@ class MemChannelBackendDDR : public MemChannelBackend {
             // The last power-up cycle. All commands must be issued after power-up penalty after it.
             uint64_t lastPowerUpCycle;
 
+            // The last cycle before which the background energy of the rank has been updated.
+            uint64_t lastEnergyBKGDUpdateCycle;
+
             RankState()
-                : lastActivityCycle(0), lastPowerUpCycle(0) {}
+                : lastActivityCycle(0), lastPowerUpCycle(0), lastEnergyBKGDUpdateCycle(0) {}
         };
 
         struct Bank {

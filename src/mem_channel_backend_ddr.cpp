@@ -7,7 +7,9 @@
 // TODO: implement
 // access granularity
 // adaptive close/open
-// power model: IDD
+// power model: interval recorder for BKGD
+// power model: periodically update BKGD
+// power model: I/O termination
 
 //#define DEBUG(args...) info(args)
 #define DEBUG(args...)
@@ -355,6 +357,27 @@ void MemChannelBackendDDR::refresh(uint64_t memCycle) {
 void MemChannelBackendDDR::adjustPowerState(uint64_t memCycle, uint32_t rankIdx, uint32_t bankIdx) {
     auto* rankState = banks[rankIdx * bankCount + bankIdx].rankState;
 
+    // Forward background energy calculation cycles.
+    auto forwardCyclesOnEnergyBKGDUpdate = [this, rankIdx, rankState](uint64_t endCycle) {
+        assert(endCycle > rankState->lastEnergyBKGDUpdateCycle);
+        uint64_t forwardCycles = endCycle - rankState->lastEnergyBKGDUpdateCycle;
+
+        // FIXME: hack for now. Only look at the final states of banks and take percentage.
+        // Should use interval recorder.
+        uint32_t openBankCount = 0;
+        for (uint32_t ib = 0; ib < bankCount; ib++) {
+            const auto& ob = banks[rankIdx * bankCount + ib];
+            openBankCount += ob.open ? 1 : 0;
+        }
+        uint64_t eBKGD = p.VDD * (p.IDD3N * openBankCount + p.IDD2N * (bankCount - openBankCount))
+            * forwardCycles / bankCount;
+        eBKGD *= devicesPerRank;
+        eBKGD /= freqKHz;
+        profEnergyBKGD.inc(eBKGD);
+
+        rankState->lastEnergyBKGDUpdateCycle = endCycle;
+    };
+
     // Wake up power-down rank.
     if (powerDownCycles != -1u &&
             (rankState->lastPowerUpCycle == 0 || (rankState->lastPowerUpCycle < rankState->lastActivityCycle &&
@@ -380,8 +403,51 @@ void MemChannelBackendDDR::adjustPowerState(uint64_t memCycle, uint32_t rankIdx,
             rankState->lastPowerUpCycle = memCycle;
             DEBUG("%s DDR: wake up rank %u at cycle %lu, whose last activity is at cycle %lu",
                     name.c_str(), rankIdx, rankState->lastPowerUpCycle, rankState->lastActivityCycle);
+
+            // Before power-down.
+            forwardCyclesOnEnergyBKGDUpdate(rankState->lastActivityCycle + powerDownCycles);
+
+            // During power-down.
+            uint64_t powerDownPeriod = rankState->lastPowerUpCycle - (rankState->lastActivityCycle + powerDownCycles);
+            bool active = false;
+            for (uint32_t ib = 0; ib < bankCount; ib++) {
+                const auto& ob = banks[rankIdx * bankCount + ib];
+                if (ob.open) {
+                    active = true;
+                    break;
+                }
+            }
+            updateEnergyBKGD(powerDownPeriod, true, active);
+            rankState->lastEnergyBKGDUpdateCycle = rankState->lastPowerUpCycle;
+
+            // After power-down
+            // Will be handled in the usual path below.
         }
     }
+
+    // Avoid too frequent update.
+    if (memCycle < rankState->lastEnergyBKGDUpdateCycle + 500) return;
+
+    uint64_t minCycle = memCycle;
+    for (uint32_t b = 0; b < bankCount; b++) {
+        const auto* headRdReq = prioListsRd[rankIdx * bankCount + b].front();
+        if (headRdReq != nullptr) minCycle = MIN(minCycle, headRdReq->schedCycle);
+        const auto* headWrReq = prioListsWr[rankIdx * bankCount + b].front();
+        if (headWrReq != nullptr) minCycle = MIN(minCycle, headWrReq->schedCycle);
+    }
+    // This assertion is invalid, because it is possible some requests with smaller schedCycle
+    // are behind, so minCycle becomes smaller. However this does not invalidate rankState->
+    // lastEnergyBKGDUpdateCycle because those requests cannot be issued earlier than that.
+    // assert(minCycle >= rankState->lastEnergyBKGDUpdateCycle);
+
+    // No bank activity can be made prior to the schedCycle of the current highest-priority request
+    // to this bank. Also, the schedCycle of the current highest-priority request is monotonously
+    // increasing. So, no activity can be made to the rank before \c minCycle.
+
+    // Avoid too frequent update (again).
+    if (minCycle < rankState->lastEnergyBKGDUpdateCycle + 500) return;
+
+    forwardCyclesOnEnergyBKGDUpdate(minCycle);
 }
 
 void MemChannelBackendDDR::assignPriority(DDRAccReq* req) {
