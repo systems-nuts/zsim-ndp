@@ -93,9 +93,9 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
         uint64_t getPeriodicalInterval(uint32_t index) const {
             // Event index:
-            // 0: refresh.
+            // 0: refresh a single rank.
             // 1: update background energy.
-            if (index == 0) return t.REFI;
+            if (index == 0) return t.REFI / rankCount;
             else if (index == 1) return 10000;
             else panic("Invalid periodical event index %u.", index);
         }
@@ -292,6 +292,10 @@ class MemChannelBackendDDR : public MemChannelBackend {
             loc.colH = (addr >> colHShift) & colHMask;
             return loc;
         }
+
+        // Refresh.
+
+        uint32_t nextRankToRefresh;
 
         // Schedule and issue.
 

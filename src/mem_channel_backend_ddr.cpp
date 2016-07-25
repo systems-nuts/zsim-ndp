@@ -116,6 +116,10 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
             ilog2(bankMask << bankShift), bankShift ? bankShift : 0,
             ilog2(colHMask << colHShift), colHShift ? colHShift : 0);
 
+    // Refresh.
+
+    nextRankToRefresh = 0;
+
     // Schedule and issue.
 
     reqQueueRd.init(queueDepth);
@@ -339,8 +343,11 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
 }
 
 void MemChannelBackendDDR::refresh(uint64_t memCycle) {
+    // Each time refresh a single rank.
+
     uint64_t minREFCycle = memCycle;
-    for (const auto& b : banks) {
+    for (uint32_t ib = nextRankToRefresh * rankCount; ib < (nextRankToRefresh + 1) * rankCount; ib++) {
+        const auto& b = banks[ib];
         // Issue PRE to close all banks before REF.
         minREFCycle = std::max(minREFCycle, b.minPRECycle + t.RPab);
         if (b.open) profPRE.inc();
@@ -350,12 +357,15 @@ void MemChannelBackendDDR::refresh(uint64_t memCycle) {
     updateEnergyREF();
     uint64_t finREFCycle = minREFCycle + t.RFC;
     assert(t.RFC >= t.RP);
-    for (auto& b : banks) {
+    for (uint32_t ib = nextRankToRefresh * rankCount; ib < (nextRankToRefresh + 1) * rankCount; ib++) {
+        auto& b = banks[ib];
         // Banks are closed after REF.
         // ACT is able to issue right after refresh done, equiv. to PRE tRP earlier.
         b.open = false;
         b.minPRECycle = finREFCycle - t.RP;
     }
+
+    nextRankToRefresh = (nextRankToRefresh + 1) % rankCount;
 }
 
 void MemChannelBackendDDR::adjustPowerState(uint64_t memCycle, uint32_t rankIdx, uint32_t bankIdx, bool powerUp) {
