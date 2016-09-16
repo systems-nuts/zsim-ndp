@@ -34,6 +34,7 @@
 #include "pad.h"
 
 class Core;
+class NUMAMap;
 class Scheduler;
 class AggregateStat;
 class StatsBackend;
@@ -84,6 +85,7 @@ struct GlobSimInfo {
 
     EventQueue* eventQueue;
     Scheduler* sched;
+    NUMAMap* numaMap;
 
     //Contention simulation
     uint32_t numDomains;
