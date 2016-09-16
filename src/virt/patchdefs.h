@@ -45,6 +45,10 @@ PF(SYS_sched_setaffinity, PatchSchedSetaffinity);
 // NUMA virtualization -- numa.cpp
 PF(SYS_get_mempolicy, PatchGetMempolicy);
 PF(SYS_set_mempolicy, PatchSetMempolicy);
+PF(SYS_mbind, PatchMbind);
+PF(SYS_migrate_pages, PatchMigratePages);
+PF(SYS_move_pages, PatchMovePages);
+PF(SYS_munmap, PatchMunmap);
 
 // Conditional patches, only when not fast-forwarded
 

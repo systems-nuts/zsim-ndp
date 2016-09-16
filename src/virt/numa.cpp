@@ -113,8 +113,24 @@ static inline Address getPageAddress(void* addr) {
     return zinfo->numaMap->getPageAddress((Address)addr);
 }
 
+static inline Address getPageAddressEnd(void* addr, unsigned long len) {
+    return getPageAddress(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(addr) + len - 1)) + 1;
+}
+
 static inline uint32_t getNodeOfAddr(void* addr) {
     return zinfo->numaMap->getNodeOfPage(getPageAddress(addr));
+}
+
+static inline size_t addAddrRangeToNode(void* addr, unsigned long len, uint32_t node) {
+    auto begin = getPageAddress(addr);
+    auto end = getPageAddressEnd(addr, len);
+    return zinfo->numaMap->addPagesToNode(begin, end - begin, node);
+}
+
+static inline void removeAddrRange(void* addr, unsigned long len) {
+    auto begin = getPageAddress(addr);
+    auto end = getPageAddressEnd(addr, len);
+    zinfo->numaMap->removePages(begin, end - begin);
 }
 
 
@@ -282,5 +298,177 @@ PostPatchFn PatchSetMempolicy(PrePatchArgs args) {
         PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)0);  // return 0 on success
         return PPA_NOTHING;
     };
+}
+
+// SYS_mbind
+PostPatchFn PatchMbind(PrePatchArgs args) {
+    if (!zinfo->numaMap) {
+        warn("[%d] NUMA is not modeled in the simulated system configuration, syscall: SYS_mbind (%d)", args.tid, SYS_mbind);
+        return getErrorPostPatch(ENOSYS);
+    }
+
+    void* addr = reinterpret_cast<void*>(PIN_GetSyscallArgument(args.ctxt, args.std, 0));
+    unsigned long len = PIN_GetSyscallArgument(args.ctxt, args.std, 1);
+    int mode = PIN_GetSyscallArgument(args.ctxt, args.std, 2);
+    unsigned long* nodemask = reinterpret_cast<unsigned long*>(PIN_GetSyscallArgument(args.ctxt, args.std, 3));
+    unsigned long maxnode = PIN_GetSyscallArgument(args.ctxt, args.std, 4);
+    unsigned long flags = PIN_GetSyscallArgument(args.ctxt, args.std, 5);
+
+    PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)SYS_getpid);  // no effect on host
+
+    // Translate nodemask.
+    g_vector<bool> vec;
+    int err = nodemask2vector(nodemask, maxnode, vec);
+    if (err) return getErrorPostPatch(err);
+
+    // Validate.
+    err = validate(mode, vec, "SYS_mbind");
+    if (err) return getErrorPostPatch(err);
+    if (flags & MPOL_MF_MOVE_ALL) {
+        warn("SYS_mbind does not support MPOL_MF_MOVE_ALL!");
+        return getErrorPostPatch(EPERM);
+    }
+
+    return [&](PostPatchArgs args) {
+        if (mode == MPOL_DEFAULT) {
+            // See PatchSetMempolicy(), no effects, use default local alloc.
+            PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)0);  // return 0 on success
+            return PPA_NOTHING;
+        } else if (mode == MPOL_INTERLEAVE) {
+            warn("SYS_mbind does not support MPOL_INTERLEAVE!");
+            PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EINVAL);
+            return PPA_NOTHING;
+        }
+        assert(mode == MPOL_BIND || mode == MPOL_PREFERRED);
+        // Get the first node.
+        uint32_t node = 0;
+        while (!vec[node] && node <= zinfo->numaMap->getMaxNode()) node++;
+        if (node > zinfo->numaMap->getMaxNode()) {
+            if (mode == MPOL_PREFERRED) {
+                // See PatchSetMempolicy(), local alloc is default, do nothing.
+                PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)0);  // return 0 on success
+                return PPA_NOTHING;
+            } else {
+                PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EINVAL);
+                return PPA_NOTHING;
+            }
+        }
+
+        // Add all non-existing pages; either move or ignore existing pages depending on flags.
+        // FIXME(mgao12): a potential issue here is that some implicit bound pages are treated
+        // as non-existing because we do not track them in NUMAMap.
+        bool isStrict = (flags & MPOL_MF_STRICT);
+        bool movePages = (flags & MPOL_MF_MOVE);
+        if (movePages) {
+            removeAddrRange(addr, len);
+        }
+        auto ignoredCount = addAddrRangeToNode(addr, len, node);
+        if (isStrict && ignoredCount != 0) {
+            // Some pages do not follow the policy or could not be moved.
+            PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EIO);
+            return PPA_NOTHING;
+        }
+
+        PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)0);  // return 0 on success
+        return PPA_NOTHING;
+    };
+}
+
+// SYS_migrate_pages
+PostPatchFn PatchMigratePages(PrePatchArgs args) {
+    if (!zinfo->numaMap) {
+        warn("[%d] NUMA is not modeled in the simulated system configuration, syscall: SYS_migrate_pages (%d)", args.tid, SYS_migrate_pages);
+        return getErrorPostPatch(ENOSYS);
+    }
+
+    PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)SYS_getpid);  // no effect on host
+
+    return [](PostPatchArgs args) {
+        // FIXME(mgao12): current NUMAMap does not provide interface to migrate all pages
+        // associated with a node in a process, so we do not patch migrate_page for now.
+        warn("SYS_migrate_pages is not supported for now!");
+        // Make it a failure.
+        PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EPERM);
+        return PPA_NOTHING;
+    };
+}
+
+// SYS_move_pages
+PostPatchFn PatchMovePages(PrePatchArgs args) {
+    if (!zinfo->numaMap) {
+        warn("[%d] NUMA is not modeled in the simulated system configuration, syscall: SYS_move_pages (%d)", args.tid, SYS_move_pages);
+        return getErrorPostPatch(ENOSYS);
+    }
+
+    uint32_t linuxTid = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
+    unsigned long count = PIN_GetSyscallArgument(args.ctxt, args.std, 1);
+    void** pages = reinterpret_cast<void**>(PIN_GetSyscallArgument(args.ctxt, args.std, 2));
+    const int* nodes = reinterpret_cast<const int*>(PIN_GetSyscallArgument(args.ctxt, args.std, 3));
+    int* status = reinterpret_cast<int*>(PIN_GetSyscallArgument(args.ctxt, args.std, 4));
+    int flags = PIN_GetSyscallArgument(args.ctxt, args.std, 5);
+
+    PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)SYS_getpid);  // no effect on host
+
+    // Validate.
+    if (linuxTid != 0 || (flags & MPOL_MF_MOVE_ALL)) {
+        warn("SYS_move_pages does not support non-zero pid or MPOL_MF_MOVE_ALL!");
+        return getErrorPostPatch(EPERM);
+    }
+    if (pages == nullptr) return getErrorPostPatch(EINVAL);
+
+    return [&](PostPatchArgs args) {
+        int err = 0;
+        for (unsigned long idx = 0; idx < count; idx++) {
+            // Get page.
+            void* page = nullptr;
+            if (!safeCopy(pages + idx, &page)) {
+                err = EFAULT;
+                break;
+            };
+
+            int stat = 0;
+            if (nodes != nullptr) {
+                // Move pages.
+                int resNode = 0;
+                if (!safeCopy(nodes + idx, &resNode)) {
+                    err = EFAULT;
+                    break;
+                }
+                uint32_t node = static_cast<uint32_t>(resNode);
+                if (node > zinfo->numaMap->getMaxNode()) {
+                    err = ENODEV;
+                    break;
+                }
+                removeAddrRange(page, 1);
+                assert(addAddrRangeToNode(page, 1, node) == 0);
+                stat = static_cast<int>(node);
+            } else {
+                // Get current node.
+                uint32_t node = getNodeOfAddr(page);
+                stat = static_cast<int>(node);
+            }
+            if (status != nullptr) {
+                if (!safeCopy(&stat, status + idx)) {
+                    err = EFAULT;
+                    break;
+                }
+            }
+        }
+
+        PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-err);
+        return PPA_NOTHING;
+    };
+}
+
+// SYS_munmap
+PostPatchFn PatchMunmap(PrePatchArgs args) {
+    if (zinfo->numaMap) {
+        void* addr = reinterpret_cast<void*>(PIN_GetSyscallArgument(args.ctxt, args.std, 0));
+        size_t len = PIN_GetSyscallArgument(args.ctxt, args.std, 1);
+
+        removeAddrRange(addr, len);
+    }
+
+    return NullPostPatch;
 }
 
