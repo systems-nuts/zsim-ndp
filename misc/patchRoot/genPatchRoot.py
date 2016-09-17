@@ -53,6 +53,7 @@ parser = OptionParser(usage="%prog [options] [resultsDirSuffix]")
 parser.add_option("-n", type="int", dest="ncpus", default=1, help="Number of simulated cores")
 parser.add_option("-d", type="string", dest="dir", default="./patchRoot", help="Destination directory")
 parser.add_option("-f", dest="force", action="store_true", default=False, help="Force, bypass existence checks")
+parser.add_option("--nodes", type="int", dest="nnodes", default=1, help="Number of simulated NUMA nodes")
 
 
 for option in parser.option_list:
@@ -63,11 +64,17 @@ for option in parser.option_list:
 ncpus = options.ncpus
 root = options.dir
 progDir = os.path.dirname(os.path.abspath(__file__)) + "/"
+nnodes = options.nnodes
 
-print "Will produce a tree for %d CPUs/cores in %s" % (ncpus, root)
+print "Will produce a tree for %d CPUs/cores with %d NUMA nodes in %s" % (ncpus, nnodes, root)
 
 if ncpus < 1:
     print "ERROR: Need >= 1 cpus!"
+    sys.exit(1)
+
+ncpusPerNode = ncpus / nnodes
+if ncpus % nnodes != 0:
+    print "ERROR: CPUs (%d) must be evenly distributed among %d NUMA nodes!" % (ncpus, nnodes)
     sys.exit(1)
 
 if os.path.exists(root) and not options.force:
@@ -104,6 +111,18 @@ f = open(root + "/proc/stat", "w")
 print >>f, statTemplate.substitute({"CPUSTAT" : cpuStat}),
 f.close()
 
+# self/status
+cmd("mkdir -p %s/proc/self" % root)
+f = open(root + "/proc/self/status", "w")
+# FIXME: only for CPU/memory list
+print >>f, "..."
+print >>f, "Cpus_allowed:\t%s" % getMask(0, ncpus-1)
+print >>f, "Cpus_allowed_list:\t%s" % ("0-" + str(ncpus-1) if ncpus > 1 else "0")
+print >>f, "Mems_allowed:\t%s" % getMask(0, nnodes-1)
+print >>f, "Mems_allowed_list:\t%s" % ("0-" + str(nnodes-1) if nnodes > 1 else "0")
+print >>f, "..."
+f.close()
+
 ## /sys
 
 # cpus
@@ -114,19 +133,21 @@ for f in ["online", "possible", "present"]:
     cmd("echo %s > %s" % (cpuList, cpuDir + f))
 cmd("echo > " + cpuDir + "offline")
 cmd("echo 0 > " + cpuDir + "sched_mc_power_savings")
+if ncpus > 255:
+    print "WARN: These many cpus have not been tested, x2APIC systems may be different..."
 maxCpus = max(ncpus, 255)
 cmd("echo %d > %s" % (maxCpus, cpuDir + "kernel_max"))
-coreSiblingsMask = getMask(0, ncpus)
 for cpu in range(ncpus):
+    node = cpu / ncpusPerNode
+    coreSiblingsMask = getMask(node*ncpusPerNode, (node+1)*ncpusPerNode-1)
+    cpuList = (str(node*ncpusPerNode) + "-" + str((node+1)*ncpusPerNode-1)) if ncpusPerNode > 1 else str(cpu)
     d = cpuDir + "cpu" + str(cpu) + "/"
     td = d + "topology/"
     cmd("mkdir -p " + td)
-    if maxCpus > 255:
-        print "WARN: These many cpus have not been tested, x2APIC systems may be different..."
     cmd("echo %d > %s" % (cpu, td + "core_id"))
     cmd("echo %s > %s" % (cpuList, td + "core_siblings_list"))
     cmd("echo %d > %s" % (cpu, td + "thread_siblings_list"))
-    cmd("echo 0 > " + td + "physical_package_id")
+    cmd("echo %d > %s" % (node, td + "physical_package_id"))
     cmd("echo %s > %s" % (coreSiblingsMask, td + "core_siblings"))
     cmd("echo %s > %s" % (getMask(cpu, cpu), td + "thread_siblings"))
     cmd("echo 1 > " + d + "online")
@@ -134,16 +155,36 @@ for cpu in range(ncpus):
 # nodes
 nodeDir = root + "/sys/devices/system/node/"
 cmd("mkdir -p " + nodeDir)
-for f in ["has_normal_memory", "online", "possible"]: cmd("echo 0 > " + nodeDir + f)
-cmd("echo > " + nodeDir + "has_cpu")
+nodeList = "0-" + str(nnodes-1)
+for f in ["has_normal_memory", "online", "possible"]:
+    cmd("echo %s > " % (nodeList if nnodes > 1 else "0") + nodeDir + f)
+cmd("echo %s > " % (nodeList if nnodes > 1 else "")+ nodeDir + "has_cpu")
 
-n0Dir = nodeDir + "node0/"
-cmd("mkdir -p " + n0Dir)
-for cpu in range(ncpus):
-    cmd("ln -s " + cpuDir + "cpu" + str(cpu) + " " + n0Dir)
-cmd("cp -r %s/nodeFiles/* %s" % (progDir, n0Dir))
-cmd("echo %s > %s" % (coreSiblingsMask, n0Dir + "cpumap"))
-cmd("echo %s > %s" % (cpuList, n0Dir + "cpulist"))
+meminfoTemplate = XTemplate(open(progDir + "/nodeFiles/meminfo.template", "r").read())
+for node in range(nnodes):
+    nDir = nodeDir + "node%d/" % (node)
+    cmd("mkdir -p " + nDir)
+    for cpu in range(node*ncpusPerNode, (node+1)*ncpusPerNode):
+        cmd("ln -s " + cpuDir + "cpu" + str(cpu) + " " + nDir)
+
+    for f in ["numastat", "scan_unevictable_pages", "vmstat"]:
+        cmd("cp -r %s/nodeFiles/%s %s" % (progDir, f, nDir))
+
+    cpuMask = getMask(node*ncpusPerNode, (node+1)*ncpusPerNode-1)
+    cpuList = (str(node*ncpusPerNode) + "-" + str((node+1)*ncpusPerNode-1)) if ncpusPerNode > 1 else str(cpu)
+    cmd("echo %s > %s" % (cpuMask, nDir + "cpumap"))
+    cmd("echo %s > %s" % (cpuList, nDir + "cpulist"))
+
+    f = open(nDir + "/meminfo", "w")
+    print >>f, meminfoTemplate.substitute({"NODE" : str(node)}),
+    f.close()
+
+    f = open(nDir + "/distance", "w")
+    for n2 in range(nnodes):
+        d = "10" if n2 == node else "20"
+        print >>f, d + " ",
+    print >>f, ""
+    f.close()
 
 # misc
 cmd("mkdir -p " + root + "/sys/bus/pci/devices")
