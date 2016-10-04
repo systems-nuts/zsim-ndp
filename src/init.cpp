@@ -51,6 +51,7 @@
 #include "locks.h"
 #include "log.h"
 #include "mem_ctrls.h"
+#include "mem_router.h"
 #include "network.h"
 #include "null_core.h"
 #include "ooo_core.h"
@@ -465,6 +466,35 @@ AddressMap* BuildAddressMap(Config& config, const string& prefix, uint32_t numPa
     }
     assert(am);
     return am;
+}
+
+vector<MemRouter*> BuildMemRouterGroup(Config& config, const string& prefix, uint32_t numRouters, uint32_t numPorts, const g_string& name) {
+    vector<MemRouter*> rg(numRouters, nullptr);
+    string type = config.get<const char*>(prefix + "type", "Simple");
+    if (type == "Simple") {
+        uint32_t latency = config.get<uint32_t>(prefix + "latency", 0);
+        for (uint32_t i = 0; i < numRouters; i++) {
+            stringstream ss;
+            ss << name << "-r" << i;
+            g_string routerName(ss.str().c_str());
+            rg[i] = new SimpleMemRouter(numPorts, latency, routerName);
+        }
+    } else if (type == "MD1") {
+        uint32_t latency = config.get<uint32_t>(prefix + "latency");
+        uint32_t portWidth = config.get<uint32_t>(prefix + "portWidth");
+        if (portWidth % 8) panic("Port width for router %s must be a multiple of 8 bits.", name.c_str());
+        uint32_t bytesPerCycle = portWidth / 8;
+        for (uint32_t i = 0; i < numRouters; i++) {
+            stringstream ss;
+            ss << name << "-r" << i;
+            g_string routerName(ss.str().c_str());
+            rg[i] = new MD1MemRouter(numPorts, latency, bytesPerCycle, routerName);
+        }
+    } else {
+        panic("Unknown router type %s", type.c_str());
+    }
+    for (const auto& r : rg) assert(r);
+    return rg;
 }
 
 static void InitSystem(Config& config) {
