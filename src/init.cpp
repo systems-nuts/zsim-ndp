@@ -51,6 +51,7 @@
 #include "locks.h"
 #include "log.h"
 #include "mem_ctrls.h"
+#include "mem_interconnect.h"
 #include "mem_router.h"
 #include "network.h"
 #include "null_core.h"
@@ -596,6 +597,105 @@ static void InitSystem(Config& config) {
         }
     }
 
+    // Build the interconnects.
+    vector<const char*> interconnectNames;
+    config.subgroups("sys.interconnects", interconnectNames);
+    vector<string> routerGroupNames;
+    unordered_map<string, vector<MemRouter*>> routerGroupMap;
+
+    for (const char* net : interconnectNames) {
+        for (auto& grp : cacheGroupNames) if (string(grp).find(net) == 0)
+            panic("Interconnect name %s cannot be prefix of cache name %s", net, grp);
+
+        string prefix = string("sys.interconnects.") + net + ".";
+
+        // Interconnect has a single parent cache group or mem.
+        string parent = config.get<const char*>(prefix + "parent");
+        if (parent != "mem" && cMap.count(parent) == 0)
+            panic("Invalid interconnect parent name %s, must be a parent cache name or \"mem\"!", parent.c_str());
+
+        // Connectivity to the cache hierarchy through interfaces.
+        string tifgrp = string(net) + "-tif";
+        string bifgrp = string(net) + "-bif";
+        cacheGroupNames.push_back(gm_strdup(tifgrp.c_str()));
+        cacheGroupNames.push_back(gm_strdup(bifgrp.c_str()));
+        if (parent == "mem") {
+            // children vs. tif.
+            childMap[tifgrp] = parseChildren(llc);
+            parentMap[llc] = tifgrp;
+            // bif vs. parents.
+            llc = bifgrp;
+        } else {
+            // children vs. tif.
+            childMap[tifgrp] = childMap[parent];
+            for (auto& vec : childMap[parent]) for (auto& c : vec) parentMap[c] = tifgrp;
+            // bif vs. parents.
+            childMap[parent] = parseChildren(bifgrp);
+            parentMap[bifgrp] = parent;
+        }
+        // bif vs. tif, fake relationship so everything is connected.
+        childMap[bifgrp] = parseChildren(tifgrp);
+        parentMap[tifgrp] = bifgrp;
+
+        // Build interconnect.
+        vector<MemInterconnect*> interconnectVec;
+        uint32_t numNets = 0;
+        uint32_t numParents = 0;
+        uint32_t numChildren = 0;
+        for (auto& vec : childMap[tifgrp]) for (auto& c : vec) for (auto& cache : *cMap[c]) numChildren += cache.size();
+        if (parent == "mem") {
+            // A single interconnect before memory.
+            numNets = 1;
+            numParents = mems.size();
+        } else {
+            // Each parent cache associates with a separate interconnect.
+            numNets = cMap[parent]->size();
+            numParents = cMap[parent]->at(0).size();
+            for (uint32_t i = 0; i < cMap[parent]->size(); i++) assert(cMap[parent]->at(i).size() == numParents);
+            assert(numChildren % numNets == 0);
+            numChildren /= numNets;
+        }
+        for (uint32_t i = 0; i < numNets; i++) {
+            stringstream ss;
+            ss << net << "-" << i;
+            g_string name(ss.str().c_str());
+
+            // Routing algorithm.
+            RoutingAlgorithm* ra = BuildRoutingAlgorithm(config, prefix + "routingAlgorithm.");
+
+            // Routers.
+            uint32_t numRouters = ra->getNumRouters();
+            uint32_t numPorts = ra->getNumPorts();
+            auto routers = BuildMemRouterGroup(config, prefix + "routers.", numRouters, numPorts, name);
+            routerGroupNames.push_back(name.c_str());
+            routerGroupMap[name.c_str()] = routers;
+
+            // Address map.
+            AddressMap* am = BuildAddressMap(config, prefix + "addressMap.", numParents);
+
+            uint32_t ccHeaderSize = config.get<uint32_t>(prefix + "ccHeaderSize", 0);
+            bool centralizedParents = config.get<bool>(prefix + "centralizedParents", false);
+            bool ignoreInvLatency = config.get<bool>(prefix + "ignoreInvLatency", false);
+
+            auto interconnect = new MemInterconnect(ra, am, routers, numParents, numChildren, centralizedParents, ccHeaderSize, ignoreInvLatency, name.c_str());
+            interconnectVec.push_back(interconnect);
+        }
+
+        info("MemInterconnect %s: parent cache is %s; %lu instances, %u children each", net, parent.c_str(), interconnectVec.size(), numChildren);
+
+        // Build interfaces.
+        cMap[tifgrp] = new CacheGroup;
+        cMap[bifgrp] = new CacheGroup;
+        for (const auto& interconnect : interconnectVec) {
+            cMap[tifgrp]->emplace_back();
+            auto tif = interconnect->getTopInterface();
+            std::copy(tif.begin(), tif.end(), std::back_inserter(cMap[tifgrp]->back()));
+            cMap[bifgrp]->emplace_back();
+            auto bif = interconnect->getBottomInterface();
+            std::copy(bif.begin(), bif.end(), std::back_inserter(cMap[bifgrp]->back()));
+        }
+    }
+
     //Connect everything
     bool printHierarchy = config.get<bool>("sim.printHierarchy", false);
 
@@ -848,6 +948,14 @@ static void InitSystem(Config& config) {
     memStat->init("mem", "Memory controller stats");
     for (auto mem : mems) mem->initStats(memStat);
     zinfo->rootStat->append(memStat);
+
+    // Init stats: interconnects.
+    for (auto group : routerGroupNames) {
+        AggregateStat* groupStat = new AggregateStat(true);
+        groupStat->init(gm_strdup(group.c_str()), "Router stats");
+        for (auto router : routerGroupMap[group]) router->initStats(groupStat);
+        zinfo->rootStat->append(groupStat);
+    }
 
     //Odds and ends: BuildCacheGroup new'd the cache groups, we need to delete them
     for (pair<string, CacheGroup*> kv : cMap) delete kv.second;
