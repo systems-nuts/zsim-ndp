@@ -31,6 +31,7 @@
 #include <string>
 #include <sys/time.h>
 #include <vector>
+#include "address_map.h"
 #include "cache.h"
 #include "cache_arrays.h"
 #include "config.h"
@@ -417,6 +418,24 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
     }
 
     return cgp;
+}
+
+AddressMap* BuildAddressMap(Config& config, const string& prefix, uint32_t numParents) {
+    AddressMap* am = nullptr;
+    string type = config.get<const char*>(prefix + "type", "XOR16b");
+    if (type == "XOR16b") {
+        am = new XOR16bHashAddressMap(numParents);
+    } else if (type == "StaticInterleaving") {
+        uint64_t chunkSize = config.get<uint64_t>(prefix + "chunkSize");
+        if (chunkSize % zinfo->lineSize != 0) {
+            panic("StaticInterleavingAddressMap: chunkSize (%lu) must be a multiple of line size", chunkSize);
+        }
+        am = new StaticInterleavingAddressMap(chunkSize / zinfo->lineSize, numParents);
+    } else {
+        panic("Unknown address map %s", type.c_str());
+    }
+    assert(am);
+    return am;
 }
 
 static void InitSystem(Config& config) {
