@@ -62,6 +62,7 @@
 #include "process_tree.h"
 #include "profile_stats.h"
 #include "repl_policies.h"
+#include "routing_algorithm.h"
 #include "scheduler.h"
 #include "simple_core.h"
 #include "stats.h"
@@ -418,6 +419,34 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
     }
 
     return cgp;
+}
+
+RoutingAlgorithm* BuildRoutingAlgorithm(Config& config, const string& prefix) {
+    RoutingAlgorithm* ra = nullptr;
+    string type = config.get<const char*>(prefix + "type", "Direct");
+    if (type == "Direct") {
+        uint32_t terminals = config.get<uint32_t>(prefix + "terminals");
+        ra = new DirectRoutingAlgorithm(terminals);
+    } else if (type == "Local") {
+        uint32_t terminals = config.get<uint32_t>(prefix + "terminals");
+        ra = new LocalRoutingAlgorithm(terminals);
+    } else if (type == "Mesh2DDimensionOrder") {
+        uint32_t dimX = config.get<uint32_t>(prefix + "dimX");
+        uint32_t dimY = config.get<uint32_t>(prefix + "dimY");
+        ra = new Mesh2DDimensionOrderRoutingAlgorithm(dimX, dimY);
+    } else if (type == "Star") {
+        uint32_t chains = config.get<uint32_t>(prefix + "chains");
+        uint32_t length = config.get<uint32_t>(prefix + "length");
+        ra = new StarRoutingAlgorithm(chains, length);
+    } else if (type == "Tree") {
+        auto levelSizes = ParseList<uint32_t>(config.get<const char*>(prefix + "levelSizes"));
+        bool onlyLeafTerminals = config.get<bool>(prefix + "onlyLeafTerminals", true);
+        ra = new TreeRoutingAlgorithm(levelSizes, onlyLeafTerminals);
+    } else {
+        panic("Unknown routing algorithm %s", type.c_str());
+    }
+    assert(ra);
+    return ra;
 }
 
 AddressMap* BuildAddressMap(Config& config, const string& prefix, uint32_t numParents) {
