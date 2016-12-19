@@ -156,6 +156,8 @@ void MemChannelBackendDDR::initStats(AggregateStat* parentStat) {
     parentStat->append(&profEnergyREF);
     profEnergyBKGD.init("eBKGD", "Background energy");
     parentStat->append(&profEnergyBKGD);
+    profEnergyWIRE.init("eWIRE", "Channel wire energy");
+    parentStat->append(&profEnergyWIRE);
 }
 
 uint64_t MemChannelBackendDDR::enqueue(const Address& addr, const bool isWrite,
@@ -590,6 +592,8 @@ void MemChannelBackendDDR::updateEnergyRDWR(bool isWrite) {
     eRDWR *= devicesPerRank;
     eRDWR /= freqKHz;
     profEnergyRDWR.inc(eRDWR);
+    uint64_t eWIRE = p.channelWireFemtoJoulePerBit * burstSize * devicesPerRank / 1000;  // pJ
+    profEnergyWIRE.inc(eWIRE);
 }
 
 void MemChannelBackendDDR::updateEnergyREF() {

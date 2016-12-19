@@ -51,6 +51,8 @@ class MemChannelBackendDDR : public MemChannelBackend {
             uint32_t IDD4R;
             uint32_t IDD4W;
             uint32_t IDD5;
+            // Channel wire energy is in fJ/bit
+            uint32_t channelWireFemtoJoulePerBit;
         };
 
     public:
@@ -344,7 +346,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
         // Stats.
         Counter profACT, profPRE, profRD, profWR, profREF;
 
-        Counter profEnergyACTPRE, profEnergyRDWR, profEnergyREF, profEnergyBKGD;
+        Counter profEnergyACTPRE, profEnergyRDWR, profEnergyREF, profEnergyBKGD, profEnergyWIRE;
 };
 
 #endif  // MEM_CHANNEL_BACKEND_DDR_H_

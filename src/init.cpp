@@ -398,6 +398,8 @@ power.IDD##name = (uint32_t)(config.get<double>(prefix + "power.IDD" #name, 0) *
         SETIDD(4W);
         SETIDD(5);
 #undef SETIDD
+        double channelWirePicoJoulePerBit = config.get<double>(prefix + "power.channelWirePicoJoulePerBit", 0);
+        power.channelWireFemtoJoulePerBit = (uint32_t)(channelWirePicoJoulePerBit * 1000);
 
         be = new MemChannelBackendDDR(name, ranksPerChannel, banksPerRank, pagePolicy, pageSize, burstCount,
                 deviceIOWidth, channelWidth, memFreqMHz, timing, power, addrMapping, queueDepth, maxRowHits,
