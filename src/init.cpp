@@ -381,6 +381,8 @@ timing.name = config.get<uint32_t>(prefix + "timing.t" #name, defval)
 #undef SETT
 #undef SETTDEFVAL
         timing.BL = burstCount / 2; // double-data-rate
+        timing.rdBurstChannelOccupyOverhead = config.get<uint32_t>(prefix + "timing.rdBurstChannelOccupyOverhead", 0);
+        timing.wrBurstChannelOccupyOverhead = config.get<uint32_t>(prefix + "timing.wrBurstChannelOccupyOverhead", 0);
 
         MemChannelBackendDDR::Power power;
         // VDD in V, to mV.

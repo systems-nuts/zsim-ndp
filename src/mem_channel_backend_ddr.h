@@ -37,6 +37,9 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
             uint32_t CMD;   // command bus occupancy
             uint32_t XP;    // power-down exit latency
+
+            uint32_t rdBurstChannelOccupyOverhead;  // cycles
+            uint32_t wrBurstChannelOccupyOverhead;  // cycles
         };
 
         struct Power {
@@ -88,7 +91,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
         }
 
         uint32_t getMinLatency(const bool isWrite) const {
-            return isWrite ? 0 : t.CAS + t.BL;
+            return isWrite ? 0 : t.CAS + t.BL + additionalBLCycles(isWrite);
         }
 
         uint32_t getPeriodicalEventCount() const { return 2; }
@@ -253,6 +256,10 @@ class MemChannelBackendDDR : public MemChannelBackend {
         uint64_t calcRWCycle(const Bank& bank, uint64_t schedCycle, uint64_t actCycle, bool isWrite, uint32_t rankIdx) const;
         uint64_t calcBurstCycle(const Bank& bank, uint64_t rwCycle, bool isWrite) const;
         uint64_t updatePRECycle(Bank& bank, uint64_t rwCycle, bool isWrite);
+
+        uint32_t additionalBLCycles(bool isWrite) const {
+            return isWrite ? t.wrBurstChannelOccupyOverhead : t.rdBurstChannelOccupyOverhead;
+        }
 
         // Energy helper functions.
         void updateEnergyACTPRE();
