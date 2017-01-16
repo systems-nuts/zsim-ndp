@@ -29,7 +29,7 @@ struct MemChannelAccReq : public GlobAlloc {
     using GlobAlloc::operator delete;
 };
 
-class MemChannelBackend {
+class MemChannelBackend : public GlobAlloc {
     public:
         // Enqueue a request to the schedule queue.
         // Return the tick cycle if it can be issued (i.e., no higher-priority requests), o/w -1.
@@ -63,6 +63,10 @@ class MemChannelBackend {
         virtual uint64_t getPeriodicalInterval(uint32_t index) const { return -1uL; }
 
         virtual void initStats(AggregateStat* parentStat) {}
+
+        // Use glob mem
+        using GlobAlloc::operator new;
+        using GlobAlloc::operator delete;
 };
 
 /**
