@@ -172,7 +172,8 @@ uint64_t MemChannelBackendDDR::enqueue(const Address& addr, const bool isWrite,
 
     req->loc = mapAddress(addr);
 
-    DEBUG("%s DDR enqueue: %s queue depth %lu", name.c_str(), isWrite ? "write" : "read", reqQueue(isWrite).size());
+    DEBUG("%s DDR enqueue: 0x%lx -> %s queue depth %lu, cycle %lu", name.c_str(),
+            addr, isWrite ? "write" : "read", reqQueue(isWrite).size(), memCycle);
 
     // Assign priority.
     assignPriority(req);
@@ -234,7 +235,8 @@ bool MemChannelBackendDDR::dequeue(uint64_t memCycle, MemChannelAccReq** req, ui
 
     *req = new DDRAccReq(*r);
     reqQueue(issueWrite).remove(ir);
-    DEBUG("%s DDR dequeue: %s queue depth %lu", name.c_str(), issueWrite ? "write" : "read", reqQueue(issueWrite).size());
+    DEBUG("%s DDR dequeue: 0x%lx <- %s queue depth %lu, cycle %lu", name.c_str(),
+            (*req)->addr, issueWrite ? "write" : "read", reqQueue(issueWrite).size(), memCycle);
 
     return true;
 }
@@ -338,8 +340,12 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
             profPRE.inc();
         }
     }
-    DEBUG("%s DDR handler: 0x%lx@%lu -- PRE %lu ACT %lu RW %lu BL %lu", name.c_str(), req->addr, req->schedCycle,
-            preCycle, actCycle, rwCycle, burstCycle);
+    if (update) {
+        DEBUG("%s DDR handler: 0x%lx (r%u, b%u, row%lu, col%u) sched %lu "
+                "-- PRE %lu ACT %lu RW %lu BL %lu", name.c_str(), req->addr,
+                req->loc.rank, req->loc.bank, req->loc.row, req->loc.colH,
+                req->schedCycle, preCycle, actCycle, rwCycle, burstCycle);
+    }
 
     return burstCycle;
 }
