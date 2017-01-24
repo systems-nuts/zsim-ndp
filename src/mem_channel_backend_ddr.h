@@ -63,7 +63,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
                 const char* _pagePolicy, uint32_t pageSizeBytes,
                 uint32_t burstCount, uint32_t deviceIOBits, uint32_t channelWidthBits,
                 uint32_t memFreqMHz, const Timing& _t, const Power& _p,
-                const char* addrMapping, uint32_t _queueDepth,
+                const char* addrMapping, uint32_t _queueDepth, bool _deferWrites,
                 uint32_t _maxRowHits, uint32_t _powerDownCycles);
 
         uint64_t enqueue(const Address& addr, const bool isWrite, uint64_t startCycle,
@@ -310,13 +310,14 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
         // Request queue.
         const uint32_t queueDepth;
+        bool deferWrites;
         FiniteQueue<DDRAccReq> reqQueueRd, reqQueueWr;
 
         inline const FiniteQueue<DDRAccReq>& reqQueue(const bool isWrite) const {
-            return isWrite ? reqQueueWr : reqQueueRd;
+            return (deferWrites && isWrite) ? reqQueueWr : reqQueueRd;
         }
         inline FiniteQueue<DDRAccReq>& reqQueue(const bool isWrite) {
-            return isWrite ? reqQueueWr : reqQueueRd;
+            return (deferWrites && isWrite) ? reqQueueWr : reqQueueRd;
         }
 
         // Priority list, per bank.

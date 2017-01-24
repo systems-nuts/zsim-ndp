@@ -343,6 +343,7 @@ MemChannel* BuildMemChannel(Config& config, uint32_t lineSize, uint32_t sysFreqM
         uint32_t ranksPerChannel = config.get<uint32_t>(prefix + "ranksPerChannel", 1);
         uint32_t banksPerRank = config.get<uint32_t>(prefix + "banksPerRank", 8);   // DDR3
         const char* pagePolicy = config.get<const char*>(prefix + "pagePolicy", "close");
+        bool deferWrites = config.get<bool>(prefix + "deferWrites", true);
         uint32_t pageSize = config.get<uint32_t>(prefix + "pageSize", 1024);    // 1 kB
         uint32_t burstCount = config.get<uint32_t>(prefix + "burstCount", 8);   // DDR3
         uint32_t deviceIOWidth = config.get<uint32_t>(prefix + "deviceIOWidth", 8);   // bits
@@ -404,8 +405,8 @@ power.IDD##name = (uint32_t)(config.get<double>(prefix + "power.IDD" #name, 0) *
         power.channelWireFemtoJoulePerBit = (uint32_t)(channelWirePicoJoulePerBit * 1000);
 
         be = new MemChannelBackendDDR(name, ranksPerChannel, banksPerRank, pagePolicy, pageSize, burstCount,
-                deviceIOWidth, channelWidth, memFreqMHz, timing, power, addrMapping, queueDepth, maxRowHits,
-                powerDownCycles);
+                deviceIOWidth, channelWidth, memFreqMHz, timing, power, addrMapping, queueDepth, deferWrites,
+                maxRowHits, powerDownCycles);
     } else {
         panic("Invalid memory channel type %s", channelType.c_str());
     }

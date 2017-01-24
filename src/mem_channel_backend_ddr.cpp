@@ -16,11 +16,13 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
         uint32_t ranksPerChannel, uint32_t banksPerRank, const char* _pagePolicy,
         uint32_t pageSizeBytes, uint32_t burstCount, uint32_t deviceIOBits, uint32_t channelWidthBits,
         uint32_t memFreqMHz, const Timing& _t, const Power& _p,
-        const char* addrMapping, uint32_t _queueDepth, uint32_t _maxRowHits, uint32_t _powerDownCycles)
+        const char* addrMapping, uint32_t _queueDepth, bool _deferWrites,
+        uint32_t _maxRowHits, uint32_t _powerDownCycles)
     : name(_name), rankCount(ranksPerChannel), bankCount(banksPerRank),
       pageSize(pageSizeBytes), burstSize(burstCount*deviceIOBits),
       devicesPerRank(channelWidthBits/deviceIOBits), freqKHz(memFreqMHz*1000), t(_t), p(_p),
-      powerDownCycles(_powerDownCycles), queueDepth(_queueDepth), maxRowHits(_maxRowHits) {
+      powerDownCycles(_powerDownCycles), queueDepth(_queueDepth), deferWrites(_deferWrites),
+      maxRowHits(_maxRowHits) {
 
     info("%s: %u ranks x %u banks.", name.c_str(), rankCount, bankCount);
     info("%s: page size %u bytes, %u devices per rank, burst %u bits from each device.",
@@ -205,6 +207,8 @@ bool MemChannelBackendDDR::dequeue(uint64_t memCycle, MemChannelAccReq** req, ui
     } else if (issueMode == IssueMode::RD_QUEUE && reqQueueRd.empty()) {
         issueMode = IssueMode::WR_QUEUE;
     }
+    // Overwrite if reads and writes are unified scheduled.
+    if (!deferWrites) issueMode = IssueMode::RD_QUEUE;
     bool issueWrite = (issueMode == IssueMode::WR_QUEUE);
 
     // Scan the requests with the highest priority in each list in chronological order.
