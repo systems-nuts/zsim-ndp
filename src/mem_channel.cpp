@@ -94,7 +94,7 @@ class MemChannelPeriodicalEvent : public TimingEvent, public GlobAlloc {
         {
             setMinStartCycle(0);
             if (interval != -1uL) {
-                queue(0);
+                queue(interval);
                 DEBUG("Periodical event created, interval is %lu", interval);
             } else {
                 DEBUG("Periodical event created but will be ignored");
