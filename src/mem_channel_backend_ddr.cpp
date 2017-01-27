@@ -250,7 +250,7 @@ uint64_t MemChannelBackendDDR::process(const MemChannelAccReq* req) {
     assert(ddrReq);
 
     uint64_t burstCycle = requestHandler(ddrReq, true);
-    uint64_t respCycle = burstCycle + t.BL + additionalBLCycles(req->isWrite);
+    uint64_t respCycle = burstCycle + getBL(req->isWrite);
 
     lastIsWrite = req->isWrite;
     lastRankIdx = ddrReq->loc.rank;
@@ -329,7 +329,7 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
     uint64_t burstCycle = calcBurstCycle(bank, rwCycle, isWrite);
     assert(burstCycle >= minBurstCycle);
     if (update) {
-        bank.rankState->lastActivityCycle = std::max(bank.rankState->lastActivityCycle, burstCycle + t.BL + additionalBLCycles(isWrite));
+        bank.rankState->lastActivityCycle = std::max(bank.rankState->lastActivityCycle, burstCycle + getBL(isWrite));
     }
 
     // (future) next PRE.

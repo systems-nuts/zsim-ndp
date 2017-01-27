@@ -91,7 +91,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
         }
 
         uint32_t getMinLatency(const bool isWrite) const {
-            return isWrite ? 0 : t.CAS + t.BL + additionalBLCycles(isWrite);
+            return isWrite ? 0 : t.CAS + getBL(isWrite);
         }
 
         uint32_t getPeriodicalEventCount() const { return 2; }
@@ -257,8 +257,8 @@ class MemChannelBackendDDR : public MemChannelBackend {
         uint64_t calcBurstCycle(const Bank& bank, uint64_t rwCycle, bool isWrite) const;
         uint64_t updatePRECycle(Bank& bank, uint64_t rwCycle, bool isWrite);
 
-        uint32_t additionalBLCycles(bool isWrite) const {
-            return isWrite ? t.wrBurstChannelOccupyOverhead : t.rdBurstChannelOccupyOverhead;
+        uint32_t getBL(bool isWrite) const {
+            return t.BL + (isWrite ? t.wrBurstChannelOccupyOverhead : t.rdBurstChannelOccupyOverhead);
         }
 
         // Energy helper functions.
