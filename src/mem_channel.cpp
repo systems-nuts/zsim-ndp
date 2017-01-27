@@ -116,9 +116,10 @@ class MemChannelPeriodicalEvent : public TimingEvent, public GlobAlloc {
 };
 
 MemChannel::MemChannel(MemChannelBackend* _be, const uint32_t _sysFreqMHz, const uint32_t _controllerSysDelay,
+        bool _waitForWriteAck,
         const uint32_t _domain, const g_string& _name)
     : name(_name), domain(_domain), be(_be), controllerSysDelay(_controllerSysDelay), sysFreqKHz(_sysFreqMHz * 1000),
-      tickCycle(-1uL), tickEvent(nullptr), freeTickEvent(nullptr)
+      waitForWriteAck(_waitForWriteAck), tickCycle(-1uL), tickEvent(nullptr), freeTickEvent(nullptr)
 {
     memFreqKHz = be->getMemFreqKHz();
     minRdDelay = memToSysCycle(be->getMinLatency(false));
@@ -287,7 +288,7 @@ void MemChannel::periodicalTick(uint64_t sysCycle, uint32_t index) {
 
 uint64_t MemChannel::schedule(MemChannelAccEvent* ev, uint64_t startCycle, uint64_t memCycle) {
     auto respEv = ev;
-    if (ev->isWrite()) {
+    if (ev->isWrite() && !waitForWriteAck) {
         // Respond write request immediately when scheduling.
         respondAccEvent(ev, memToSysCycle(memCycle));
         respEv = nullptr;
@@ -310,7 +311,7 @@ uint64_t MemChannel::issue(uint64_t memCycle) {
 
     // Respond read requests. Writes have been responded at schedule time.
     if (req->ev) {
-        assert(!req->isWrite && req->ev != nullptr);
+        assert(waitForWriteAck || (!req->isWrite && req->ev != nullptr));
         respondAccEvent(req->ev, sysRespCycle);
         req->ev = nullptr;
     }

@@ -25,6 +25,7 @@ class MemChannelTickEvent;
 class MemChannel : public MemObject {
     public:
         MemChannel(MemChannelBackend* _be, const uint32_t _sysFreqMHz, const uint32_t _controllerSysDelay,
+                bool _waitForWriteAck,
                 const uint32_t _domain, const g_string& _name);
 
         const char* getName() { return name.c_str(); }
@@ -78,6 +79,9 @@ class MemChannel : public MemObject {
         }
 
         /* Scheduling. */
+
+        // Whether to wait for a write acknowledgement.
+        bool waitForWriteAck;
 
         // Tick cycle for the next event, in mem cycles.
         uint64_t tickCycle;

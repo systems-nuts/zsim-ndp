@@ -334,6 +334,8 @@ MemChannel* BuildMemChannel(Config& config, uint32_t lineSize, uint32_t sysFreqM
     uint32_t queueDepth = config.get<uint32_t>(prefix + "queueDepth", 16);
     uint32_t controllerLatency = config.get<uint32_t>(prefix + "controllerLatency", 0);
 
+    bool waitForWriteAck = config.get<bool>(prefix + "waitForWriteAck", false);
+
     MemChannelBackend* be = nullptr;
 
     if (channelType == "Simple") {
@@ -412,7 +414,7 @@ power.IDD##name = (uint32_t)(config.get<double>(prefix + "power.IDD" #name, 0) *
     }
 
     assert(be);
-    auto mem = new MemChannel(be, sysFreqMHz, controllerLatency, domain, name);
+    auto mem = new MemChannel(be, sysFreqMHz, controllerLatency, waitForWriteAck, domain, name);
     return mem;
 }
 
