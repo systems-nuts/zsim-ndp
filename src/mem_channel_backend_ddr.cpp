@@ -357,6 +357,8 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
 void MemChannelBackendDDR::refresh(uint64_t memCycle) {
     // Each time refresh a single rank.
 
+    DEBUG("%s: refresh rank %u at mem cycle %lu", name.c_str(), nextRankToRefresh, memCycle);
+
     uint64_t minREFCycle = memCycle;
     for (uint32_t ib = nextRankToRefresh * rankCount; ib < (nextRankToRefresh + 1) * rankCount; ib++) {
         const auto& b = banks[ib];
