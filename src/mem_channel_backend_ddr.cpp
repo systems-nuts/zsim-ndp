@@ -334,7 +334,7 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
 
     // (future) next PRE.
     if (update) {
-        uint64_t preCycle = updatePRECycle(bank, rwCycle, isWrite);
+        uint64_t preCycle = updatePRECycle(bank, rwCycle, burstCycle, isWrite);
         const auto& pl = prioLists(isWrite)[loc.rank * bankCount + loc.bank];
         const auto next = pl.front();
         if (pagePolicy == DDRPagePolicy::CLOSE ||
@@ -580,13 +580,13 @@ uint64_t MemChannelBackendDDR::calcBurstCycle(const Bank& bank, uint64_t rwCycle
     return rwCycle + (isWrite ? std::max(t.CWD, t.CAS) : t.CAS);
 }
 
-uint64_t MemChannelBackendDDR::updatePRECycle(Bank& bank, uint64_t rwCycle, bool isWrite) {
+uint64_t MemChannelBackendDDR::updatePRECycle(Bank& bank, uint64_t rwCycle, uint64_t burstCycle, bool isWrite) {
     assert(bank.open);
     // Constraints: tRAS, tWR, tRTP, tCMD.
     bank.minPRECycle = maxN<uint64_t>(
             bank.minPRECycle,
             bank.lastACTCycle + t.RAS,
-            isWrite ? minBurstCycle + t.WR : rwCycle + t.RTP,
+            isWrite ? burstCycle + getBL(isWrite) + t.WR : rwCycle + t.RTP,
             rwCycle + t.CMD);
     return bank.minPRECycle;
 }

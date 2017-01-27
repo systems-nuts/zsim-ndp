@@ -255,7 +255,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
         uint64_t calcACTCycle(const Bank& bank, uint64_t schedCycle, uint64_t preCycle) const;
         uint64_t calcRWCycle(const Bank& bank, uint64_t schedCycle, uint64_t actCycle, bool isWrite, uint32_t rankIdx) const;
         uint64_t calcBurstCycle(const Bank& bank, uint64_t rwCycle, bool isWrite) const;
-        uint64_t updatePRECycle(Bank& bank, uint64_t rwCycle, bool isWrite);
+        uint64_t updatePRECycle(Bank& bank, uint64_t rwCycle, uint64_t burstCycle, bool isWrite);
 
         uint32_t getBL(bool isWrite) const {
             return t.BL + (isWrite ? t.wrBurstChannelOccupyOverhead : t.rdBurstChannelOccupyOverhead);
