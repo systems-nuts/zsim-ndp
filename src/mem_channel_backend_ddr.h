@@ -189,9 +189,16 @@ class MemChannelBackendDDR : public MemChannelBackend {
             // Record active intervals of the rank (i.e., >= 1 banks are active).
             IntervalRecorder activeIntRec;
 
+            // Last ACT cycle across all banks.
+            uint64_t lastACTCycle;
+            // Last RD/WR cycle across all banks.
+            uint64_t lastRWCycle;
+
+            DDRActWindow actWindow4;
+
             RankState()
-                : lastActivityCycle(0), lastPowerUpCycle(0), lastPowerDownCycle(0), lastEnergyBKGDUpdateCycle(0),
-                  activeIntRec()
+                : lastActivityCycle(0), lastPowerUpCycle(0), lastPowerDownCycle(0), lastEnergyBKGDUpdateCycle(0), activeIntRec(),
+                  lastACTCycle(0), lastRWCycle(0), actWindow4(4)
             {}
         };
 
@@ -207,15 +214,13 @@ class MemChannelBackendDDR : public MemChannelBackend {
             // Last RD/WR cycle.
             uint64_t lastRWCycle;
 
-            DDRActWindow* actWindow;
-
             RankState* rankState;
 
             // Sequence number for the last bank row hit.
             uint32_t rowHitSeq;
 
-            explicit Bank(DDRActWindow* aw, RankState* rs)
-                : open(false), row(0), minPRECycle(0), lastACTCycle(0), lastRWCycle(0), actWindow(aw), rankState(rs) {}
+            explicit Bank(RankState* rs)
+                : open(false), row(0), minPRECycle(0), lastACTCycle(0), lastRWCycle(0), rankState(rs) {}
 
             void recordPRE(uint64_t preCycle) {
                 assert(open);
@@ -229,12 +234,14 @@ class MemChannelBackendDDR : public MemChannelBackend {
                 open = true;
                 row = rowIdx;
                 lastACTCycle = actCycle;
-                actWindow->addACT(actCycle);
+                rankState->lastACTCycle = std::max(rankState->lastACTCycle, actCycle);
+                rankState->actWindow4.addACT(actCycle);
             }
 
             void recordRW(uint64_t rwCycle) {
                 assert(open);
                 lastRWCycle = rwCycle;
+                rankState->lastRWCycle = std::max(rankState->lastRWCycle, rwCycle);
             }
         };
 

@@ -62,10 +62,9 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
     // Banks.
     banks.clear();
     for (uint32_t r = 0; r < rankCount; r++) {
-        auto aw = new DDRActWindow(4);
         auto rs = new RankState();
         for (uint32_t b = 0; b < bankCount; b++) {
-            banks.emplace_back(aw, rs);
+            banks.emplace_back(rs);
         }
     }
     assert(banks.size() == rankCount * bankCount);
@@ -552,7 +551,7 @@ uint64_t MemChannelBackendDDR::calcACTCycle(const Bank& bank, uint64_t schedCycl
             schedCycle,
             preCycle + t.RP,
             bank.lastACTCycle + t.RRD,
-            bank.actWindow->minACTCycle() + t.FAW,
+            bank.rankState->actWindow4.minACTCycle() + t.FAW,
             bank.rankState->lastPowerUpCycle + t.XP,
             preCycle + t.CMD);
 }
