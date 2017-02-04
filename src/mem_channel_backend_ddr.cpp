@@ -27,8 +27,8 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
     info("%s: %u ranks x %u banks.", name.c_str(), rankCount, bankCount);
     info("%s: page size %u bytes, %u devices per rank, burst %u bits from each device.",
             name.c_str(), pageSize, devicesPerRank, burstSize);
-    info("%s: tBL = %u, tCAS = %u, tCCD = %u, tCWD = %u, tRAS = %u, tRCD = %u",
-            name.c_str(), t.BL, t.CAS, t.CCD, t.CWD, t.RAS, t.RCD);
+    info("%s: tBL = %u, tCAS = %u, tCCD = %u, tCWL = %u, tRAS = %u, tRCD = %u",
+            name.c_str(), t.BL, t.CAS, t.CCD, t.CWL, t.RAS, t.RCD);
     info("%s: tRP = %u, tRRD = %u, tRTP = %u, tWR = %u, tWTR = %u",
             name.c_str(), t.RP, t.RRD, t.RTP, t.WR, t.WTR);
     info("%s: tRFC = %u, tREFI = %u, tRPab = %u, tFAW = %u, tRTRS = %u, tCMD = %u, tXP = %u",
@@ -570,14 +570,14 @@ uint64_t MemChannelBackendDDR::calcRWCycle(const Bank& bank, uint64_t schedCycle
             actCycle + t.RCD,
             (lastIsWrite && !isWrite) ? bank.rankState->lastBurstCycle + getBL(isWrite) + t.WTR : 0,  // lastBurstCycle has not updated, i.e. last access
             bank.rankState->lastRWCycle + t.CCD,
-            std::max<int64_t>(0, dataOnBus - (isWrite ? std::max(t.CWD, t.CAS) : t.CAS)), // avoid underflow
+            std::max<int64_t>(0, dataOnBus - (isWrite ? t.CWL : t.CAS)), // avoid underflow
             bank.rankState->lastPowerUpCycle + t.XP,
             actCycle + t.CMD);
 }
 
 uint64_t MemChannelBackendDDR::calcBurstCycle(const Bank& bank, uint64_t rwCycle, bool isWrite) const {
-    // Constraints: tCAS, tCWD.
-    return rwCycle + (isWrite ? std::max(t.CWD, t.CAS) : t.CAS);
+    // Constraints: tCAS, tCWL.
+    return rwCycle + (isWrite ? t.CWL : t.CAS);
 }
 
 uint64_t MemChannelBackendDDR::updatePRECycle(Bank& bank, uint64_t rwCycle, bool isWrite) {

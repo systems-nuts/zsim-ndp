@@ -374,7 +374,7 @@ timing.name = config.get<uint32_t>(prefix + "timing.t" #name, defval)
         SETTDEFVAL(WR, 1);
         SETTDEFVAL(WTR, 0);
         SETTDEFVAL(CCD, 0);
-        SETTDEFVAL(CWD, 1);
+        SETTDEFVAL(CWL, timing.CAS - 1);  // default value from DRAMSim2, WL = RL - 1
         SETTDEFVAL(REFI, 7800*memFreqMHz/1000);   // 7.8 us
         SETTDEFVAL(RPab, timing.RP);
         SETTDEFVAL(FAW, 0);

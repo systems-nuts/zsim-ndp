@@ -18,7 +18,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
             uint32_t BL;    // burst
             uint32_t CAS;   // RD/WR -> data
             uint32_t CCD;   // RD/WR -> RD/WR
-            uint32_t CWD;   // WR -> data begin
+            uint32_t CWL;   // WR -> data begin, i.e., CWD
             uint32_t RAS;   // ACT -> PRE
             uint32_t RCD;   // ACT -> RD/WR
             uint32_t RP;    // PRE -> ACT
