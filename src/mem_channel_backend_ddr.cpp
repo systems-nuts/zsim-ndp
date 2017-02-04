@@ -4,10 +4,10 @@
 #include "config.h"         // for Tokenize
 #include "zsim.h"
 
-// TODO: implement
-// access granularity
-// adaptive close/open
-// power model: I/O termination
+// NOTE(mgao): compound command READ_P, WRITE_P
+// Since we do not model command bus, there is no difference between READ_P and
+// READ and PRE.
+
 
 //#define DEBUG(args...) info(args)
 #define DEBUG(args...)

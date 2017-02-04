@@ -28,6 +28,10 @@ class MemChannelBackendDDR : public MemChannelBackend {
             uint32_t WTR;   // WR data end -> RD
             // RC = RAS + RP
 
+            // NOTE(mgao): tAL
+            // We do not consider AL because command bus is not modeled
+            // currently, and thus there is no difference.
+
             uint32_t RFC;   // REF -> ACT
             uint32_t REFI;  // REF -> REF
             uint32_t RPab;  // all-bank PRE -> ACT
@@ -35,7 +39,10 @@ class MemChannelBackendDDR : public MemChannelBackend {
             uint32_t FAW;   // four-bank ACT window
             uint32_t RTRS;  // rank to rank
 
+            // FIXME(mgao): Command bus congestion is not modeled, thus always
+            // using the min delay tCMD between commands.
             uint32_t CMD;   // command bus occupancy
+
             uint32_t XP;    // power-down exit latency
             uint32_t CKE;   // min power-down period
 
@@ -56,6 +63,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
             uint32_t IDD4W;
             uint32_t IDD5;
             // Channel wire energy is in fJ/bit
+            // This general wire energy can cover I/O termination, TSV, etc.
             uint32_t channelWireFemtoJoulePerBit;
         };
 
