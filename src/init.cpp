@@ -381,6 +381,7 @@ timing.name = config.get<uint32_t>(prefix + "timing.t" #name, defval)
         SETTDEFVAL(RTRS, 1);
         SETTDEFVAL(CMD, 1);
         SETTDEFVAL(XP, 0);
+        SETTDEFVAL(CKE, 0);
 #undef SETT
 #undef SETTDEFVAL
         timing.BL = burstCount / 2; // double-data-rate

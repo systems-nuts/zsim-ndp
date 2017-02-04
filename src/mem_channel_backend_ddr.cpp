@@ -460,10 +460,10 @@ void MemChannelBackendDDR::adjustPowerState(uint64_t memCycle, uint32_t rankIdx,
 
             // Power up the rank.
             if (powerUp) {
-                rankState->lastPowerUpCycle = memCycle;
-                DEBUG("%s DDR: power up rank %u at cycle %lu, whose last power-down at cycle %lu.",
+                rankState->lastPowerUpCycle = std::max(memCycle, rankState->lastPowerDownCycle + t.CKE);
+                DEBUG("%s DDR: power up rank %u at cycle %lu (from %lu), whose last power-down at cycle %lu.",
                         name.c_str(), rankIdx,
-                        rankState->lastPowerUpCycle, rankState->lastPowerDownCycle);
+                        rankState->lastPowerUpCycle, memCycle, rankState->lastPowerDownCycle);
                 assert(rankState->lastPowerDownCycle < rankState->lastPowerUpCycle);
             }
         }

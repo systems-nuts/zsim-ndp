@@ -37,6 +37,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
             uint32_t CMD;   // command bus occupancy
             uint32_t XP;    // power-down exit latency
+            uint32_t CKE;   // min power-down period
 
             uint32_t rdBurstChannelOccupyOverhead;  // cycles
             uint32_t wrBurstChannelOccupyOverhead;  // cycles
