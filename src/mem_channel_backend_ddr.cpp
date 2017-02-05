@@ -561,8 +561,11 @@ uint64_t MemChannelBackendDDR::calcRWCycle(const Bank& bank, uint64_t schedCycle
         bool isWrite, uint32_t rankIdx) const {
     // Constraints: tRCD, tWTR, tCCD, bus contention, tRTRS, tXP, tCMD.
     int64_t dataOnBus = minBurstCycle;
-    if (rankIdx != lastRankIdx) {
-        // Switch rank.
+    if (lastIsWrite && isWrite) {
+        // Consecutive writes, no RTRS.
+        // TODO(mgao): tOST
+    } else if (rankIdx != lastRankIdx || lastIsWrite != isWrite) {
+        // Switch rank, or switch between read and write.
         dataOnBus += t.RTRS;
     }
     return maxN<uint64_t>(
