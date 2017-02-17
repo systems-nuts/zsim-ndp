@@ -213,7 +213,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
             {}
         };
 
-        struct Bank {
+        struct Bank : public GlobAlloc {
             // Bank state and open row.
             bool open;
             uint64_t row;
@@ -254,6 +254,10 @@ class MemChannelBackendDDR : public MemChannelBackend {
                 lastRWCycle = rwCycle;
                 rankState->lastRWCycle = std::max(rankState->lastRWCycle, rwCycle);
             }
+
+            // Use glob mem
+            using GlobAlloc::operator new;
+            using GlobAlloc::operator delete;
         };
 
     protected:
