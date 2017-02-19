@@ -560,7 +560,10 @@ class Scheduler : public GlobAlloc, public Callee {
             futex_lock(&schedLock);
             uint32_t gid = getGid(pid, tid);
             if(gidMap.find(gid) == gidMap.end()) {
-                panic("Scheduler::getMask(): can't find thread info pid=%d, tid=%d", pid, tid);
+                futex_unlock(&schedLock);
+                warn("Scheduler::getMask(): can't find thread info pid=%d, tid=%d", pid, tid);
+                mask.resize(zinfo->numCores, true);
+                return mask;
             }
             ThreadInfo* th = gidMap[gid];
             mask = th->mask;
@@ -572,7 +575,9 @@ class Scheduler : public GlobAlloc, public Callee {
             futex_lock(&schedLock);
             uint32_t gid = getGid(pid, tid);
             if(gidMap.find(gid) == gidMap.end()) {
-                panic("Scheduler::updateMask(): can't find thread info pid=%d, tid=%d", pid, tid);
+                futex_unlock(&schedLock);
+                warn("Scheduler::updateMask(): can't find thread info pid=%d, tid=%d", pid, tid);
+                return;
             }
             ThreadInfo* th = gidMap[gid];
             //info("Scheduler::updateMask(): update thread mask pid=%d, tid=%d", pid, tid);
@@ -638,13 +643,16 @@ class Scheduler : public GlobAlloc, public Callee {
                 if (futex_res == 0 || th->futexWord != 1) break;
             }
             //info("%d out of sched wait, got cid = %d, needsJoin = %d", th->gid, th->cid, th->needsJoin);
+            // NOTE(mgao): After wakeup, waker assumes the wakee will wait on schedLock to join. See waitUntilQueued().
+            // So we should get the lock regardless of needsJoin.
+            futex_lock(&schedLock);
             if (th->needsJoin) {
-                futex_lock(&schedLock);
-                assert(th->needsJoin); //re-check after the lock
+                //assert(th->needsJoin); //re-check after the lock
                 zinfo->cores[th->cid]->join();
                 bar.join(th->cid, &schedLock);
                 //info("%d join done", th->gid);
             }
+            futex_unlock(&schedLock);
         }
 
         void wakeup(ThreadInfo* th, bool needsJoin) {
