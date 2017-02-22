@@ -660,15 +660,39 @@ static void InitSystem(Config& config) {
             ss << net << "-" << i;
             g_string name(ss.str().c_str());
 
+            // Discover all levels, from the leaf to upper levels.
+            vector<string> levelPrefixList;
+            levelPrefixList.push_back(prefix);
+            while (config.exists(levelPrefixList.back() + "upperLevel")) {
+                levelPrefixList.push_back(levelPrefixList.back() + "upperLevel.");
+            }
+            uint32_t numLevels = levelPrefixList.size();
+
             // Routing algorithm.
-            RoutingAlgorithm* ra = BuildRoutingAlgorithm(config, prefix + "routingAlgorithm.");
+            vector<RoutingAlgorithm*> raVec;
+            for (uint32_t l = 0; l < numLevels; l++) {
+                raVec.push_back(BuildRoutingAlgorithm(config, levelPrefixList[l] + "routingAlgorithm."));
+            }
+            RoutingAlgorithm* ra = raVec.size() == 1 ? raVec[0] : new HomoHierRoutingAlgorithm(raVec);
 
             // Routers.
-            uint32_t numRouters = ra->getNumRouters();
+            vector<MemRouter*> routers;
+            vector<uint32_t> numInstancesByLevel;  // number of interconnect instances in each level
             uint32_t numPorts = ra->getNumPorts();
-            auto routers = BuildMemRouterGroup(config, prefix + "routers.", numRouters, numPorts, name);
-            routerGroupNames.push_back(name.c_str());
-            routerGroupMap[name.c_str()] = routers;
+            for (uint32_t l = 0; l < numLevels; l++) {
+                for (auto& n : numInstancesByLevel) n *= raVec[l]->getNumTerminals();
+                numInstancesByLevel.push_back(1);
+            }
+            for (uint32_t l = 0; l < numLevels; l++) {
+                uint32_t numRouters = numInstancesByLevel[l] * raVec[l]->getNumRouters();
+                stringstream ss;
+                ss << name << "-l" << l;
+                g_string rgName(ss.str().c_str());
+                auto rg = BuildMemRouterGroup(config, levelPrefixList[l] + "routers.", numRouters, numPorts, rgName);
+                routers.insert(routers.end(), rg.begin(), rg.end());
+                routerGroupNames.push_back(rgName.c_str());
+                routerGroupMap[rgName.c_str()] = rg;
+            }
 
             // Address map.
             AddressMap* am = BuildAddressMap(config, prefix + "addressMap.", numParents);

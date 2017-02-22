@@ -4,6 +4,7 @@
 #include "bithacks.h"
 #include "g_std/g_vector.h"
 #include "log.h"
+#include "str.h"
 
 class RoutingAlgorithm : public GlobAlloc {
     /** The first N routers are terminal routers if there are N terminals. */
@@ -252,6 +253,81 @@ class TreeRoutingAlgorithm : public RoutingAlgorithm {
             assert(i < maxFanout);
             return rootNumRouters + i;
         }
+};
+
+/**
+ * Generic homogeneous hierarchical routing.
+ *
+ * Can have arbitrary levels, defined by a list of RoutingAlgorithm objects, from leaf to root.
+ */
+class HomoHierRoutingAlgorithm : public RoutingAlgorithm {
+    public:
+        HomoHierRoutingAlgorithm(const g_vector<RoutingAlgorithm*>& _levels);
+
+        uint32_t getNumTerminals() const { return numTerminals; }
+
+        uint32_t getNumRouters() const { return tuples.size(); }
+
+        uint32_t getNumPorts() const { return numPorts; }
+
+        uint32_t getCenterRouterId() const { return centerRouterId; }
+
+        void nextHop(uint32_t currentId, uint32_t destinationId, uint32_t* nextId, uint32_t* portId);
+
+    private:
+        const g_vector<RoutingAlgorithm*> levels;
+
+        uint32_t numTerminals;
+
+        uint32_t centerRouterId;
+
+        uint32_t numPorts;
+        uint32_t portIdUpward;
+        uint32_t portIdDownward;
+
+        /* A router is defined by:
+         *
+         * - level;
+         * - group, i.e., network instance of current level.
+         * - local, i.e., relative within the group (network instance).
+         *
+         * Mapping of router Id:
+         *
+         * Router Ids are assigned first by levels, i.e., first all routers in level 0, then all routers in level 1,
+         * etc.. Within each level, router Ids are assigned first to terminals over all groups, then to non-terminal
+         * routers over all groups. E.g., for 4 groups each with 3 terminals and 1 non-terminal router, routers from 0
+         * to 11 would be terminals, and routers 12 to 15 would be non-terminal routers. This ensures that all leaf
+         * (level 0) terminal Ids equal to their router Ids.
+         */
+
+        struct RouterTuple {
+            uint32_t level;
+            uint32_t group;
+            uint32_t local;
+
+            RouterTuple(uint32_t _level, uint32_t _group, uint32_t _local) : level(_level), group(_group), local(_local) {}
+
+            std::string str() const {
+                return "[" + Str(level) + "," + Str(group) + "," + Str(local) + "]";
+            }
+        };
+
+        uint32_t tuple2Id(const RouterTuple& tuple) const;
+
+        g_vector<uint32_t> levelIdOffsets;  // level -> starting router Id, with length levels + 1
+        g_vector<uint32_t> levelGroupCounts;  // level -> group count
+
+        g_vector<RouterTuple> tuples;  // router Id -> tuple
+
+    private:
+        // Move up one level.
+        void movesUp(RouterTuple& tuple) const;
+
+        // Move down one level.
+        void movesDown(RouterTuple& tuple) const;
+
+        // Get the router which is in the given level and is an ancestor of the given router.
+        RouterTuple getAncestor(uint32_t routerId, uint32_t level) const;
 };
 
 #endif  // ROUTING_ALGORITHM_H_
