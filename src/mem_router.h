@@ -27,6 +27,8 @@ class MemRouter : public GlobAlloc {
 
         virtual uint64_t transfer(uint64_t cycle, uint64_t size, uint32_t portId, bool lastHop, uint32_t srcCoreId) = 0;
 
+        virtual bool needsCSim() const { return false; }
+
     protected:
         AggregateStat* initBaseStats() {
             AggregateStat* routerStat = new AggregateStat();
@@ -140,6 +142,72 @@ class MD1MemRouter : public MemRouter {
                 queuingFactorsX100[portId] = 50 * load / (100 - load);
             }
         }
+};
+
+
+class MemRouterProcEvent;
+class MemRouterOutEvent;
+
+/**
+ * Router timing model with limited bandwidth for ports.
+ */
+class TimingMemRouter : public MemRouter {
+    private:
+        class ProcDispatcher : public GlobAlloc {
+            private:
+                uint64_t lastCycle;
+
+                uint32_t cnt;
+                const uint32_t width;
+
+            public:
+                explicit ProcDispatcher(uint32_t _width) : lastCycle(0), cnt(0), width(_width) {}
+
+                inline uint64_t dispatch(uint64_t cycle) {
+                    if (cycle > lastCycle) {
+                        lastCycle = cycle;
+                        cnt = 0;
+                    }
+                    cnt++;
+                    if (cnt > width) {
+                        lastCycle++;
+                        cnt -= width;
+                    }
+                    return lastCycle;
+                }
+        };
+
+    private:
+        const uint64_t latency;
+        const uint32_t bytesPerCycle;  // per port
+
+        uint64_t evId;
+
+        // Weave phase.
+        ProcDispatcher procDisp;
+        g_vector<uint64_t> lastOutDoneCycle;
+
+        // Stats.
+        Counter profQueuingProcCycles;
+        VectorCounter profQueuingOutCycles;
+
+        int32_t domain;
+
+    public:
+        TimingMemRouter(uint32_t numPorts, uint64_t _latency, uint32_t _bytesPerCycle, uint32_t _processWidth, const g_string& name, const int32_t _domain)
+            : MemRouter(numPorts, name), latency(_latency), bytesPerCycle(_bytesPerCycle),
+              evId(0), procDisp(_processWidth), lastOutDoneCycle(numPorts, 0), domain(_domain)
+        {}
+
+        void initStats(AggregateStat* parentStat);
+
+        uint64_t transfer(uint64_t cycle, uint64_t size, uint32_t portId, bool lastHop, uint32_t srcCoreId);
+
+        bool needsCSim() const { return true; }
+
+        // Weave phase.
+        void simProc(MemRouterProcEvent* ev, uint64_t cycle);
+        void simOutPort(MemRouterOutEvent* ev, uint64_t cycle);
 };
 
 #endif  // MEM_ROUTER_H_

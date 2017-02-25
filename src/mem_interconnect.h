@@ -141,6 +141,8 @@ class MemInterconnect : public GlobAlloc {
         g_vector<BottomInterface*> botIfs;
         TopInterface* topIf;
 
+        bool needsCSim;
+
         const g_string name;
 
     private:

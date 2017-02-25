@@ -491,6 +491,19 @@ vector<MemRouter*> BuildMemRouterGroup(Config& config, const string& prefix, uin
             g_string routerName(ss.str().c_str());
             rg[i] = new MD1MemRouter(numPorts, latency, bytesPerCycle, routerName);
         }
+    } else if (type == "Timing") {
+        uint32_t latency = config.get<uint32_t>(prefix + "latency");
+        uint32_t portWidth = config.get<uint32_t>(prefix + "portWidth");
+        uint32_t processWidth = config.get<uint32_t>(prefix + "processWidth", 1);
+        if (portWidth % 8) panic("Port width for router %s must be a multiple of 8 bits.", name.c_str());
+        uint32_t bytesPerCycle = portWidth / 8;
+        for (uint32_t i = 0; i < numRouters; i++) {
+            stringstream ss;
+            ss << name << "-r" << i;
+            g_string routerName(ss.str().c_str());
+            uint32_t domain = i * zinfo->numDomains / numRouters;
+            rg[i] = new TimingMemRouter(numPorts, latency, bytesPerCycle, processWidth, routerName, domain);
+        }
     } else {
         panic("Unknown router type %s", type.c_str());
     }
