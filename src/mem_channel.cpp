@@ -330,6 +330,8 @@ uint64_t MemChannel::issue(uint64_t memCycle) {
 
     delete req;
 
-    return be->getTickCycleLowerBound();
+    auto nextTickCycle = be->getTickCycleLowerBound();
+    assert(nextTickCycle > memCycle);
+    return nextTickCycle;
 }
 

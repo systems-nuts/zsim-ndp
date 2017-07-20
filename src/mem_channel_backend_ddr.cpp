@@ -221,6 +221,7 @@ bool MemChannelBackendDDR::dequeue(uint64_t memCycle, MemChannelAccReq** req, ui
 
         uint64_t c = requestHandler(*ir);
         if (c <= memCycle) {
+            if (c < memCycle) warn("%s DDR dequeue: tick at %lu too late, should be %lu", name.c_str(), memCycle, c);
             r = *ir;
             break;
         }
