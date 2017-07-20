@@ -360,7 +360,7 @@ void MemChannelBackendDDR::refresh(uint64_t memCycle) {
     DEBUG("%s: refresh rank %u at mem cycle %lu", name.c_str(), nextRankToRefresh, memCycle);
 
     uint64_t minREFCycle = memCycle;
-    for (uint32_t ib = nextRankToRefresh * rankCount; ib < (nextRankToRefresh + 1) * rankCount; ib++) {
+    for (uint32_t ib = nextRankToRefresh * bankCount; ib < (nextRankToRefresh + 1) * bankCount; ib++) {
         const auto& b = banks[ib];
         // Issue PRE to close all banks before REF.
         minREFCycle = std::max(minREFCycle, b.minPRECycle + t.RPab);
@@ -371,7 +371,7 @@ void MemChannelBackendDDR::refresh(uint64_t memCycle) {
     updateEnergyREF();
     uint64_t finREFCycle = minREFCycle + t.RFC;
     assert(t.RFC >= t.RP);
-    for (uint32_t ib = nextRankToRefresh * rankCount; ib < (nextRankToRefresh + 1) * rankCount; ib++) {
+    for (uint32_t ib = nextRankToRefresh * bankCount; ib < (nextRankToRefresh + 1) * bankCount; ib++) {
         auto& b = banks[ib];
         // Banks are closed after REF.
         // ACT is able to issue right after refresh done, equiv. to PRE tRP earlier.
