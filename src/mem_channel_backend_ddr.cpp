@@ -393,6 +393,7 @@ void MemChannelBackendDDR::adjustPowerState(uint64_t memCycle, uint32_t rankIdx,
 
         uint64_t forwardCycles = endCycle - rankState->lastEnergyBKGDUpdateCycle;
         uint64_t activeCycles = rankState->activeIntRec.getCoverage(endCycle);
+        assert(activeCycles <= forwardCycles);
 
         updateEnergyBKGD(activeCycles, false, true);
         updateEnergyBKGD(forwardCycles - activeCycles, false, false);
