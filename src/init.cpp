@@ -328,8 +328,8 @@ DDRMemory* BuildDDRMemory(Config& config, uint32_t lineSize, uint32_t frequency,
 
 MemChannel* BuildMemChannel(Config& config, uint32_t lineSize, uint32_t sysFreqMHz, uint32_t domain, g_string name, const string& prefix) {
     string channelType = config.get<const char*>(prefix + "channelType");
-    uint32_t memFreqMHz = config.get<uint32_t>(prefix + "channelFreq", 1000);   // MHz
-    uint32_t channelWidth = config.get<uint32_t>(prefix + "channelWidth", 64);  // bits
+    uint32_t memFreqMHz = config.get<uint32_t>(prefix + "channelFreq");   // MHz
+    uint32_t channelWidth = config.get<uint32_t>(prefix + "channelWidth");  // bits
 
     uint32_t queueDepth = config.get<uint32_t>(prefix + "queueDepth", 16);
     uint32_t controllerLatency = config.get<uint32_t>(prefix + "controllerLatency", 0);
@@ -340,7 +340,7 @@ MemChannel* BuildMemChannel(Config& config, uint32_t lineSize, uint32_t sysFreqM
 
     if (channelType == "Simple") {
         uint32_t latency = config.get<uint32_t>(prefix + "latency", 50);    // memory cycles
-        be = new MemChannelBackendSimple(memFreqMHz, latency, channelWidth);
+        be = new MemChannelBackendSimple(memFreqMHz, latency, channelWidth, queueDepth);
     } else if (channelType == "DDR") {
         uint32_t ranksPerChannel = config.get<uint32_t>(prefix + "ranksPerChannel", 1);
         uint32_t banksPerRank = config.get<uint32_t>(prefix + "banksPerRank", 8);   // DDR3

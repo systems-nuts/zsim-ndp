@@ -3,6 +3,7 @@
 
 #include "intrusive_list.h"
 #include "memory_hierarchy.h"
+#include "zsim.h"
 
 class MemChannelAccEvent;
 
@@ -74,10 +75,12 @@ class MemChannelBackend : public GlobAlloc {
  */
 class MemChannelBackendSimple : public MemChannelBackend {
     public:
-        MemChannelBackendSimple(const uint32_t _freqMHz, const uint32_t _latency, const uint32_t _queueDepth)
-            : freqMHz(_freqMHz), latency(_latency), queueDepth(_queueDepth), lastRespCycle(0)
+        MemChannelBackendSimple(const uint32_t _freqMHz, const uint32_t _latency, const uint32_t _channelWidth,
+                const uint32_t _queueDepth)
+            : freqMHz(_freqMHz), latency(_latency), channelWidth(_channelWidth), queueDepth(_queueDepth), lastRespCycle(0)
         {
             reqQueue.init(queueDepth);
+            burstCycles = (zinfo->lineSize * 8 + channelWidth - 1) / channelWidth;
         }
 
         uint64_t enqueue(const Address& addr, const bool isWrite, uint64_t startCycle,
@@ -121,7 +124,7 @@ class MemChannelBackendSimple : public MemChannelBackend {
 
         uint64_t process(const MemChannelAccReq* req) {
             uint64_t respCycle = req->schedCycle + latency;
-            respCycle = std::max(respCycle, lastRespCycle + 1);
+            respCycle = std::max(respCycle, lastRespCycle + burstCycles);
             lastRespCycle = respCycle;
             return respCycle;
         }
@@ -137,8 +140,10 @@ class MemChannelBackendSimple : public MemChannelBackend {
     private:
         // Frequency.
         uint32_t freqMHz;
-        // Fix latency.
+        // Fixed latency.
         uint32_t latency;
+        // Channel width decides peak bandwidth.
+        uint32_t channelWidth;
 
         // Request queue.
         uint32_t queueDepth;
@@ -146,6 +151,8 @@ class MemChannelBackendSimple : public MemChannelBackend {
 
         // Last respond cycle.
         uint64_t lastRespCycle;
+        // Burst cycles to transfer data on channel.
+        uint32_t burstCycles;
 };
 
 #endif  // MEM_CHANNEL_BACKEND_H_
