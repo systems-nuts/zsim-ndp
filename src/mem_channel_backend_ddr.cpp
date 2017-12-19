@@ -577,7 +577,7 @@ uint64_t MemChannelBackendDDR::calcRWCycle(const Bank& bank, uint64_t schedCycle
             actCycle + t.RCD,
             (lastIsWrite && !isWrite) ? bank.rankState->lastBurstCycle + getBL(isWrite) + t.WTR : 0,  // lastBurstCycle has not updated, i.e. last access
             bank.rankState->lastRWCycle + t.CCD,
-            std::max<int64_t>(0, dataOnBus - (isWrite ? t.CWL : t.CAS)), // avoid underflow
+            (uint64_t)std::max<int64_t>(0, dataOnBus - (isWrite ? t.CWL : t.CAS)), // avoid underflow
             bank.rankState->lastPowerUpCycle + t.XP,
             actCycle + t.CMD);
 }
