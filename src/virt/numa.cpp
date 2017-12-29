@@ -133,6 +133,12 @@ static inline void removeAddrRange(void* addr, unsigned long len) {
     zinfo->numaMap->removePages(begin, end - begin);
 }
 
+static inline size_t addAddrRangeThreadPolicy(void* addr, unsigned long len, uint32_t tid, NUMAPolicy* policy = nullptr) {
+    auto begin = getPageAddress(addr);
+    auto end = getPageAddressEnd(addr, len);
+    return zinfo->numaMap->addPagesThreadPolicy(begin, end - begin, tid, policy);
+}
+
 
 /* Patches. */
 
@@ -166,17 +172,16 @@ PostPatchFn PatchGetMempolicy(PrePatchArgs args) {
     return [=](PostPatchArgs args){
         if (!flags) {
             // Return policy through mode and nodemask.
-            // See PatchSetMempolicy(), only allow MPOL_DEFAULT for now.
-            // MPOL_DEFAULT associates with empty nodemask.
+            const auto& policy = zinfo->numaMap->getThreadPolicy(args.tid);
             if (mode != nullptr) {
-                int resMode = MPOL_DEFAULT;
+                int resMode = static_cast<int>(policy.getMode());
                 if (!safeCopy(&resMode, mode)) {
                     PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EFAULT);
                     return PPA_NOTHING;
                 }
             }
             if (nodemask != nullptr) {
-                g_vector<bool> resMask(zinfo->numaMap->getMaxNode() + 1, false);
+                const auto& resMask = policy.getMask();
                 auto err = vector2nodemask(resMask, nodemask, maxnode);
                 if (err) {
                     PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-err);
@@ -197,12 +202,6 @@ PostPatchFn PatchGetMempolicy(PrePatchArgs args) {
         } else if ((flags & MPOL_F_ADDR) && (flags & MPOL_F_NODE)) {
             // Return node ID in mode for addr.
             const auto node = getNodeOfAddr(addr);
-            if (node == NUMAMap::INVALID_NODE) {
-                // Currently no way to figure out the node for implicit bound address.
-                // Make it a failure.
-                PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EPERM);
-                return PPA_NOTHING;
-            }
             if (mode != nullptr) {
                 int resMode = static_cast<int>(node);
                 if (!safeCopy(&resMode, mode)) {
@@ -221,33 +220,27 @@ PostPatchFn PatchGetMempolicy(PrePatchArgs args) {
             }
         } else if (flags & MPOL_F_ADDR) {
             // Return policy for addr through mode and nodemask, if not null.
-            // See PatchSetMempolicy(), default policy is always MPOL_DEFAULT.
-            int resMode = MPOL_DEFAULT;
-            g_vector<bool> resMask(zinfo->numaMap->getMaxNode() + 1, false);
-            const auto node = getNodeOfAddr(addr);
-            if (node != NUMAMap::INVALID_NODE) {
-                // Was done through mbind()
-                resMode = MPOL_BIND;
-                resMask[node] = true;
+            // FIXME(mgao12): currently we do not store the allocation policy.
+            warn("SYS_get_mempolicy does not support MPOL_F_ADDR for allocation policy!");
+            PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EINVAL);
+            return PPA_NOTHING;
+        } else if (flags & MPOL_F_NODE) {
+            // Return next interleaving node ID.
+            const auto& policy = zinfo->numaMap->getThreadPolicy(args.tid);
+            if (policy.getMode() != MPOL_INTERLEAVE) {
+                // The policy must be MPOL_INTERLEAVE.
+                PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EINVAL);
+                return PPA_NOTHING;
             }
+            const auto nextNode = zinfo->numaMap->getThreadNextAllocNode(args.tid);
+            assert(nextNode != NUMAMap::INVALID_NODE);
             if (mode != nullptr) {
+                int resMode = static_cast<int>(nextNode);
                 if (!safeCopy(&resMode, mode)) {
                     PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EFAULT);
                     return PPA_NOTHING;
                 }
             }
-            if (nodemask != nullptr) {
-                auto err = vector2nodemask(resMask, nodemask, maxnode);
-                if (err) {
-                    PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-err);
-                    return PPA_NOTHING;
-                }
-            }
-        } else if (flags & MPOL_F_NODE) {
-            // Return next interleaving node ID.
-            // See PatchSetMempolicy(), MPOL_INTERLEAVE is not supported, return EINVAL.
-            PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EINVAL);
-            return PPA_NOTHING;
         } else {
             // Invalid flags.
             PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EINVAL);
@@ -281,20 +274,9 @@ PostPatchFn PatchSetMempolicy(PrePatchArgs args) {
     err = validate(mode, vec, "SYS_set_mempolicy");
     if (err) return getErrorPostPatch(err);
 
-    // FIXME(mgao12): only allow mempolicy of MPOL_DEFAULT.
-    // In theory we could support MPOL_BIND and MPOL_PREFERRED, or even
-    // MPOL_INTERLEAVE by having a per-processing array of size MAX_THREADS tracking
-    // the policy of each thread, but this complicates the node info of the implicit
-    // bound pages. Then it is needed to limit the change of bound node (e.g., one
-    // node for each thread forever, etc.). Since this is dirty and not necessary, we
-    // ignore them here. But if you fix this, make sure you also update
-    // PatchGetMempolicy() to match.
-    if (mode != MPOL_DEFAULT) {
-        warn("SYS_set_mempolicy tries to set policy other than MPOL_DEFAULT, ignored!");
-        return getErrorPostPatch(EINVAL);
-    }
-
-    return [](PostPatchArgs args) {
+    // Update policy.
+    return [mode, vec](PostPatchArgs args) {
+        zinfo->numaMap->setThreadPolicy(args.tid, mode, vec);
         PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)0);  // return 0 on success
         return PPA_NOTHING;
     };
@@ -329,45 +311,27 @@ PostPatchFn PatchMbind(PrePatchArgs args) {
         return getErrorPostPatch(EPERM);
     }
 
-    return [&](PostPatchArgs args) {
-        if (mode == MPOL_DEFAULT) {
-            // See PatchSetMempolicy(), no effects, use default local alloc.
-            PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)0);  // return 0 on success
-            return PPA_NOTHING;
-        } else if (mode == MPOL_INTERLEAVE) {
-            warn("SYS_mbind does not support MPOL_INTERLEAVE!");
-            PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EINVAL);
-            return PPA_NOTHING;
-        }
-        assert(mode == MPOL_BIND || mode == MPOL_PREFERRED);
-        // Get the first node.
-        uint32_t node = 0;
-        while (!vec[node] && node <= zinfo->numaMap->getMaxNode()) node++;
-        if (node > zinfo->numaMap->getMaxNode()) {
-            if (mode == MPOL_PREFERRED) {
-                // See PatchSetMempolicy(), local alloc is default, do nothing.
-                PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)0);  // return 0 on success
-                return PPA_NOTHING;
-            } else {
-                PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EINVAL);
-                return PPA_NOTHING;
-            }
+    return [=](PostPatchArgs args) {
+        // Construct the policy if not default.
+        NUMAPolicy* policy = nullptr;
+        if (mode != MPOL_DEFAULT) {
+            policy = new NUMAPolicy(mode, vec);
         }
 
         // Add all non-existing pages; either move or ignore existing pages depending on flags.
-        // FIXME(mgao12): a potential issue here is that some implicit bound pages are treated
-        // as non-existing because we do not track them in NUMAMap.
         bool isStrict = (flags & MPOL_MF_STRICT);
         bool movePages = (flags & MPOL_MF_MOVE);
         if (movePages) {
             removeAddrRange(addr, len);
         }
-        auto ignoredCount = addAddrRangeToNode(addr, len, node);
+        auto ignoredCount = addAddrRangeThreadPolicy(addr, len, args.tid, policy);
         if (isStrict && ignoredCount != 0) {
             // Some pages do not follow the policy or could not be moved.
             PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EIO);
             return PPA_NOTHING;
         }
+
+        delete policy;
 
         PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)0);  // return 0 on success
         return PPA_NOTHING;
@@ -416,7 +380,7 @@ PostPatchFn PatchMovePages(PrePatchArgs args) {
     }
     if (pages == nullptr) return getErrorPostPatch(EINVAL);
 
-    return [&](PostPatchArgs args) {
+    return [=](PostPatchArgs args) {
         int err = 0;
         for (unsigned long idx = 0; idx < count; idx++) {
             // Get page.
