@@ -1,7 +1,9 @@
 #include "numa_map.h"
+#include "constants.h"
 #include "g_std/g_unordered_map.h"
 #include "intrusive_list.h"
 #include "locks.h"
+#include "zsim.h"  // for getCid
 
 /* Thread-safe, bucket-based page-to-node map. */
 class PageMap : public GlobAlloc {
@@ -256,10 +258,21 @@ NUMAMap::NUMAMap(const char* _patchRoot, const uint32_t numCores)
             warn("Core %u has no associated NUMA node", cid);
         }
     }
+
+    // Initialize thread policy to default.
+    threadPolicy.assign(MAX_THREADS, NUMAPolicy(MPOL_DEFAULT, g_vector<bool>(maxNode + 1, false)));
 }
 
 uint32_t NUMAMap::getNodeOfPage(const Address pageAddr) {
     return pageNodeMap->get(pageAddr);
+}
+
+void NUMAMap::allocateAddress(const uint32_t tid, const Address addr) {
+    auto pageAddr = getPageAddress(addr);
+    if (pageNodeMap->get(pageAddr) != INVALID_NODE) return;
+    uint32_t cid = getCid(tid);
+    assert_msg(cid < zinfo->numCores, "Thread %u runs on core %u? Are we in FF?", tid, cid);
+    if (zinfo->numaMap->addPagesThreadPolicy(pageAddr, 1, tid, cid)) panic("Thread %u allocating address %lx failed!", tid, addr);
 }
 
 size_t NUMAMap::addPagesToNode(const Address pageAddr, const size_t pageCount, const uint32_t node) {
@@ -268,6 +281,57 @@ size_t NUMAMap::addPagesToNode(const Address pageAddr, const size_t pageCount, c
 
 void NUMAMap::removePages(const Address pageAddr, const size_t pageCount) {
     pageNodeMap->remove(pageAddr, pageCount);
+}
+
+size_t NUMAMap::addPagesThreadPolicy(const Address pageAddr, const size_t pageCount, const uint32_t tid, NUMAPolicy* policy) {
+    if (!policy) {
+        // Use the policy of the thread.
+        policy = &threadPolicy[tid];
+    }
+    const auto& mode = policy->getMode();
+
+    uint32_t cid = getCid(tid);
+    assert_msg(cid < zinfo->numCores, "Thread %u runs on core %u? Are we in FF?", tid, cid);
+
+    size_t ignoredCount = 0;
+    bool success = false;
+
+    // See Linux doc set_mempolicy(2).
+    if (mode == MPOL_DEFAULT
+#ifdef MPOL_LOCAL
+            || mode == MPOL_LOCAL
+#endif  // MPOL_LOCAL
+       ) {
+        // Local allocation.
+        success = tryAddPagesLocal(pageAddr, pageCount, getNodeOfCore(cid), false, ignoredCount);
+    } else if (mode == MPOL_PREFERRED) {
+        // Preferred node allocation.
+        // The preferred node is the first node in nodemask.
+        uint32_t node = 0;
+        while (node <= maxNode && !policy->isAllowed(node)) node++;
+        if (node > maxNode) {
+            // Empty nodemask. Fall back to default policy.
+            node = getNodeOfCore(cid);
+        }
+        success = tryAddPagesLocal(pageAddr, pageCount, node, false, ignoredCount);
+    } else if (mode == MPOL_BIND) {
+        // Strict bind allocation.
+        for (uint32_t node = 0; node <= maxNode; node++) {
+            if (!policy->isAllowed(node)) continue;
+            success = tryAddPagesLocal(pageAddr, pageCount, node, true, ignoredCount);
+            if (success) break;
+        }
+    } else if (mode == MPOL_INTERLEAVE) {
+        // Interleaving allocation.
+        // Interleave across the allowed nodes.
+        success = tryAddPagesInterleaved(pageAddr, pageCount, policy, ignoredCount);
+    } else {
+        panic("Invalid NUMA policy mode %d", mode);
+    }
+
+    if (!success) panic("NUMA allocation fails. Thread %u, mode %d, page count %lu", tid, mode, pageCount);
+    assert(ignoredCount <= pageCount);
+    return ignoredCount;
 }
 
 int NUMAMap::parseBitmap(const uint32_t node) {
@@ -327,5 +391,44 @@ int NUMAMap::parseBitmap(const uint32_t node) {
 
     free(line);
     return 0;
+}
+
+bool NUMAMap::tryAddPagesLocal(const Address pageAddr, const size_t pageCount, uint32_t node, bool strict, size_t& ignoredCount) {
+    if (node == INVALID_NODE) {
+        // This core does not belong to any node, i.e., memory-less node.
+        // Interleave the allocation across all nodes.
+        assert_msg(!strict, "Local allocation cannot be strict for memory-less node.");
+        NUMAPolicy ip(MPOL_INTERLEAVE, g_vector<bool>(maxNode + 1, true));
+        return tryAddPagesInterleaved(pageAddr, pageCount, &ip, ignoredCount);
+    }
+
+    if (strict) {
+        // TODO: fail if not enough memory.
+        ignoredCount += addPagesToNode(pageAddr, pageCount, node);
+        return true;
+    }
+
+    // Not strict, also try nearby nodes.
+    // We try the next node one by one.
+    for (uint32_t t = 0; t <= maxNode; t++) {
+        if (tryAddPagesLocal(pageAddr, pageCount, node, true, ignoredCount)) return true;
+        node = (node + 1) % (maxNode + 1);
+    }
+    return false;
+}
+
+bool NUMAMap::tryAddPagesInterleaved(const Address pageAddr, const size_t pageCount, NUMAPolicy* policy, size_t& ignoredCount) {
+    assert(policy && policy->getMode() == MPOL_INTERLEAVE);
+    size_t igcnt = 0;
+    for (size_t pa = pageAddr; pa < pageAddr + pageCount; pa++) {
+        bool success = false;
+        for (size_t t = 0; t <= maxNode && !success; t++) {
+            success = tryAddPagesLocal(pa, 1, policy->updateNext(), true, igcnt);
+        }
+        if (!success) return false;
+    }
+    assert(igcnt <= pageCount);
+    ignoredCount += igcnt;
+    return true;
 }
 
