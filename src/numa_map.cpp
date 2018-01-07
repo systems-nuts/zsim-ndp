@@ -283,15 +283,12 @@ void NUMAMap::removePages(const Address pageAddr, const size_t pageCount) {
     pageNodeMap->remove(pageAddr, pageCount);
 }
 
-size_t NUMAMap::addPagesThreadPolicy(const Address pageAddr, const size_t pageCount, const uint32_t tid, NUMAPolicy* policy) {
+size_t NUMAMap::addPagesThreadPolicy(const Address pageAddr, const size_t pageCount, const uint32_t tid, const uint32_t cid, NUMAPolicy* policy) {
     if (!policy) {
         // Use the policy of the thread.
         policy = &threadPolicy[tid];
     }
     const auto& mode = policy->getMode();
-
-    uint32_t cid = getCid(tid);
-    assert_msg(cid < zinfo->numCores, "Thread %u runs on core %u? Are we in FF?", tid, cid);
 
     size_t ignoredCount = 0;
     bool success = false;

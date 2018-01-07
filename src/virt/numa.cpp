@@ -133,10 +133,10 @@ static inline void removeAddrRange(void* addr, unsigned long len) {
     zinfo->numaMap->removePages(begin, end - begin);
 }
 
-static inline size_t addAddrRangeThreadPolicy(void* addr, unsigned long len, uint32_t tid, NUMAPolicy* policy = nullptr) {
+static inline size_t addAddrRangeThreadPolicy(void* addr, unsigned long len, uint32_t tid, uint32_t cid, NUMAPolicy* policy = nullptr) {
     auto begin = getPageAddress(addr);
     auto end = getPageAddressEnd(addr, len);
-    return zinfo->numaMap->addPagesThreadPolicy(begin, end - begin, tid, policy);
+    return zinfo->numaMap->addPagesThreadPolicy(begin, end - begin, tid, cid, policy);
 }
 
 
@@ -311,6 +311,10 @@ PostPatchFn PatchMbind(PrePatchArgs args) {
         return getErrorPostPatch(EPERM);
     }
 
+    // We must get the core info now, since thread will leave after entering syscall.
+    uint32_t cid = getCid(args.tid);
+    assert_msg(cid < zinfo->numCores, "Thread %u runs on core %u? Are we in FF?", args.tid, cid);
+
     return [=](PostPatchArgs args) {
         // Construct the policy if not default.
         NUMAPolicy* policy = nullptr;
@@ -324,7 +328,7 @@ PostPatchFn PatchMbind(PrePatchArgs args) {
         if (movePages) {
             removeAddrRange(addr, len);
         }
-        auto ignoredCount = addAddrRangeThreadPolicy(addr, len, args.tid, policy);
+        auto ignoredCount = addAddrRangeThreadPolicy(addr, len, args.tid, cid, policy);
         if (isStrict && ignoredCount != 0) {
             // Some pages do not follow the policy or could not be moved.
             PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EIO);

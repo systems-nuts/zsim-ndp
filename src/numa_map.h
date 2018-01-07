@@ -90,7 +90,7 @@ class NUMAMap : public GlobAlloc {
 
         // Add given pages to NUMA node from the thread according to the policy. If no policy is given, use the policy of the thread.
         // Return the pages that already exist and thus are ignored.
-        size_t addPagesThreadPolicy(const Address pageAddr, const size_t pageCount, const uint32_t tid, NUMAPolicy* policy = nullptr);
+        size_t addPagesThreadPolicy(const Address pageAddr, const size_t pageCount, const uint32_t tid, const uint32_t cid, NUMAPolicy* policy = nullptr);
 
         // Get the NUMA policy for the thread.
         const NUMAPolicy& getThreadPolicy(const uint32_t tid) const { return threadPolicy[tid]; }
