@@ -264,7 +264,9 @@ NUMAMap::NUMAMap(const char* _patchRoot, const uint32_t numCores)
 }
 
 uint32_t NUMAMap::getNodeOfPage(const Address pageAddr) {
-    return pageNodeMap->get(pageAddr);
+    auto node = pageNodeMap->get(pageAddr);
+    assert_msg(node != INVALID_NODE, "Page addr %lx has not been allocated!", pageAddr);
+    return node;
 }
 
 void NUMAMap::allocateAddress(const uint32_t tid, const Address addr) {
