@@ -49,6 +49,7 @@ PF(SYS_mbind, PatchMbind);
 PF(SYS_migrate_pages, PatchMigratePages);
 PF(SYS_move_pages, PatchMovePages);
 PF(SYS_munmap, PatchMunmap);
+PF(SYS_mremap, PatchMremap);
 
 // Conditional patches, only when not fast-forwarded
 

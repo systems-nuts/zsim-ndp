@@ -440,3 +440,17 @@ PostPatchFn PatchMunmap(PrePatchArgs args) {
     return NullPostPatch;
 }
 
+// SYS_mremap
+PostPatchFn PatchMremap(PrePatchArgs args) {
+    if (zinfo->numaMap) {
+        void* old_addr = reinterpret_cast<void*>(PIN_GetSyscallArgument(args.ctxt, args.std, 0));
+        size_t old_size = PIN_GetSyscallArgument(args.ctxt, args.std, 1);
+
+        warn("mremap will NOT preserve the NUMA memory policy with the original allocation!");
+
+        removeAddrRange(old_addr, old_size);
+    }
+
+    return NullPostPatch;
+}
+
