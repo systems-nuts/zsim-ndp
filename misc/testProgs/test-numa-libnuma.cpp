@@ -12,6 +12,7 @@
 #define MASK_SIZE ((NNODES)/sizeof(unsigned long)/8+1)
 #define MASK_NBYTES ((MASK_SIZE)*sizeof(unsigned long))
 
+#define ADDR ((void*)0x20000000)
 #define SIZE (1024*1024)
 
 static inline void print_bitmask(struct bitmask* bmp, int num, const char* header) {
@@ -94,11 +95,74 @@ int main() {
     assert(touch_and_get_node(addr) == preferred_node);
     numa_free(addr, SIZE*2);
 
-    // Not supported:
-    // numa_get_interleave_node()
     // numa_get_interleave_mask(), numa_set_interleave_mask()
+    struct bitmask* itlv_mask = numa_get_interleave_mask();
+    assert(numa_bitmask_equal(itlv_mask, numa_no_nodes_ptr));
+    for (int i = 0; i <= n / 2; i++) {
+        numa_bitmask_setbit(itlv_mask, i);
+    }
+    numa_set_interleave_mask(itlv_mask);
+    numa_free_nodemask(itlv_mask);
+    itlv_mask = numa_get_interleave_mask();
+    for (int i = 0; i <= numa_max_node(); i++) {
+        assert(numa_bitmask_isbitset(itlv_mask, i) == (i <= n / 2));
+    }
+    numa_free_nodemask(itlv_mask);
+    addr = numa_alloc(SIZE);
+    int node = -1;
+    for (int i = 0; i < SIZE / numa_pagesize(); i++) {
+        void* p = (void*)((unsigned long)addr + i * numa_pagesize());
+        if (node >= 0) {
+            assert((node + 1) % (n / 2 + 1) == touch_and_get_node(p));
+        }
+        node = touch_and_get_node(p);
+    }
+
+    // numa_get_interleave_node()
+    for (int i = 0; i < 5; i++) {
+        int next = numa_get_interleave_node();
+        void* addr = numa_alloc(numa_pagesize());
+        assert(numa_get_interleave_node() == (next + 1) % (n / 2 + 1));
+    }
+
     // numa_interleave_memory()
+    itlv_mask = numa_allocate_nodemask();
+    numa_bitmask_setall(itlv_mask);
+    numa_bitmask_clearbit(itlv_mask, n);
+    addr = mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+    numa_interleave_memory(addr, SIZE, itlv_mask);
+    node = -1;
+    for (int i = 0; i < SIZE / numa_pagesize(); i++) {
+        void* p = (void*)((unsigned long)addr + i * numa_pagesize());
+        if (node >= 0) {
+            assert((node + 1) % (n - 1 + 1) == touch_and_get_node(p));
+        }
+        node = touch_and_get_node(p);
+    }
+    munmap(addr, SIZE);
+
     // numa_alloc_interleaved(), numa_alloc_interleaved_subset()
+    addr = numa_alloc_interleaved_subset(SIZE, itlv_mask);
+    node = -1;
+    for (int i = 0; i < SIZE / numa_pagesize(); i++) {
+        void* p = (void*)((unsigned long)addr + i * numa_pagesize());
+        if (node >= 0) {
+            assert((node + 1) % (n - 1 + 1) == touch_and_get_node(p));
+        }
+        node = touch_and_get_node(p);
+    }
+    numa_free(addr, SIZE);
+    numa_free_nodemask(itlv_mask);
+    addr = numa_alloc_interleaved(SIZE);
+    node = -1;
+    for (int i = 0; i < SIZE / numa_pagesize(); i++) {
+        void* p = (void*)((unsigned long)addr + i * numa_pagesize());
+        if (node >= 0) {
+            assert((node + 1) % numa_num_configured_nodes() == touch_and_get_node(p));
+        }
+        node = touch_and_get_node(p);
+    }
+    numa_free(addr, SIZE);
 
     // numa_sched_getaffinity(), numa_sched_setaffinity()
     struct bitmask* aff_bmp = numa_bitmask_alloc(ncpus);
@@ -139,9 +203,10 @@ int main() {
     struct bitmask* nodemask = numa_allocate_nodemask();
     numa_bitmask_setbit(nodemask, n);
     numa_bind(nodemask);
-    numa_bitmask_free(nodemask);
+    numa_free_nodemask(nodemask);
     nodemask = numa_get_membind();
     assert(numa_bitmask_isbitset(nodemask, n));
+    numa_free_nodemask(nodemask);
     addr = numa_alloc(SIZE);
     assert(touch_and_get_node(addr) == n);
     numa_free(addr, SIZE);
@@ -156,7 +221,7 @@ int main() {
     struct bitmask* tonode_bmp = numa_allocate_nodemask();
     numa_bitmask_setbit(tonode_bmp, n/2);
     numa_tonodemask_memory(addr, SIZE, tonode_bmp);
-    numa_bitmask_free(tonode_bmp);
+    numa_free_nodemask(tonode_bmp);
     assert(touch_and_get_node(addr) == n/2);
     munmap(addr, SIZE);
     // numa_setlocal_memory()
@@ -170,8 +235,22 @@ int main() {
     assert(touch_and_get_node(addr) == n);
     munmap(addr, SIZE);
 
-    // Not supported:
-    // numa_set_bind_policy(), numa_set_strict()
+    // Ignored:
+    // numa_set_bind_policy()
+
+    // numa_set_strict()
+    addr = numa_alloc_onnode(SIZE, n);
+    assert(touch_and_get_node(addr) == n);
+    itlv_mask = numa_allocate_nodemask();
+    numa_bitmask_setall(itlv_mask);
+    numa_bitmask_clearbit(itlv_mask, n);
+    numa_set_strict(0);
+    numa_interleave_memory(addr, SIZE, itlv_mask);
+    assert(errno == 0);
+    numa_set_strict(1);
+    numa_interleave_memory(addr, SIZE, itlv_mask);
+    assert(errno == EIO);
+    errno = 0;
 
     // numa_distance()
     printf("NUMA distance table:\n");
@@ -200,7 +279,7 @@ int main() {
         assert(numa_bitmask_isbitset(nodemaps[node], i));
     }
     for (int i = 0; i <= n; i++) {
-        numa_bitmask_free(nodemaps[i]);
+        numa_free_cpumask(nodemaps[i]);
     }
     delete nodemaps;
 
@@ -220,23 +299,25 @@ int main() {
         assert(touch_and_get_node(addr) == n);
     }
     numa_free(addr, SIZE);
+    numa_free_nodemask(fromnodes);
+    numa_free_nodemask(tonodes);
 
     // numa_move_pages()
-    unsigned long count = SIZE / getpagesize();
+    unsigned long count = SIZE / numa_pagesize();
     void** pages = new void*[count];
     int* nodes = new int[count];
     int* status = new int[count];
     addr = numa_alloc_onnode(SIZE, n);
     for (unsigned long i = 0; i < count; i++) {
-        pages[i] = (void*)((unsigned long)addr + getpagesize() * i);
+        pages[i] = (void*)((unsigned long)addr + numa_pagesize() * i);
         nodes[i] = n-1;
     }
     for (unsigned long i = 0; i < count; i++) {
-        assert(touch_and_get_node((void*)((unsigned long)addr + getpagesize() * i)) == n);
+        assert(touch_and_get_node((void*)((unsigned long)addr + numa_pagesize() * i)) == n);
     }
     assert(0 == numa_move_pages(0, count, pages, nodes, status, 0));
     for (unsigned long i = 0; i < count; i++) {
-        assert(touch_and_get_node((void*)((unsigned long)addr + getpagesize() * i)) == n-1);
+        assert(touch_and_get_node((void*)((unsigned long)addr + numa_pagesize() * i)) == n-1);
     }
     numa_free(addr, SIZE);
 
@@ -246,5 +327,4 @@ int main() {
 
     return 0;
 }
-
 
