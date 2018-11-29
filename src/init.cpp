@@ -995,6 +995,11 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     zinfo->lineSize = config.get<uint32_t>("sys.lineSize", 64);
     assert(zinfo->lineSize > 0);
 
+    zinfo->pageSize = config.get<uint32_t>("sys.pageSize", 4096);
+    assert(zinfo->pageSize > 0);
+    if (zinfo->pageSize < zinfo->lineSize) panic("Page size must be no smaller than line size.");
+    if (!isPow2(zinfo->pageSize)) panic("Page size must be power-of-two.");
+
     //Port virtualization
     for (uint32_t i = 0; i < MAX_PORT_DOMAINS; i++) zinfo->portVirt[i] = new PortVirtualizer();
 

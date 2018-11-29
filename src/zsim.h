@@ -77,6 +77,7 @@ struct GlobSimInfo {
     //System configuration values, all read-only, set at initialization
     uint32_t numCores;
     uint32_t lineSize;
+    uint32_t pageSize;
 
     //Cores
     Core** cores;
@@ -190,6 +191,7 @@ struct GlobSimInfo {
 extern Core* cores[MAX_THREADS]; //tid->core array
 extern uint32_t procIdx;
 extern uint32_t lineBits; //process-local for performance, but logically global
+extern uint32_t pageBits; //process-local for performance, but logically global
 extern uint64_t procMask;
 
 extern GlobSimInfo* zinfo;
