@@ -243,11 +243,6 @@ NUMAMap::NUMAMap(const char* _patchRoot, const uint32_t numCores)
     : patchRoot(_patchRoot == nullptr ? "" : _patchRoot),
       coreNodeMap(numCores, INVALID_NODE), pageNodeMap(new PageMap())
 {
-    uint64_t pageSize = 4096;  // getpagesize()
-    assert(isPow2(pageSize));
-    pageBits = ilog2(pageSize);
-    assert(pageBits > lineBits);
-
     // Use patched root to figure out NUMA core map.
     if (patchRoot.empty()) panic("NUMA needs to patch the root path in the main process!");
     uint32_t node = 0;

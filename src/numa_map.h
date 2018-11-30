@@ -77,7 +77,7 @@ class NUMAMap : public GlobAlloc {
 
         inline Address getPageAddress(const Address addr) {
             // NOTE: this must be equivalent to vAddr -> pLineAddr logic in filter_cache.h.
-            return (addr >> 12) | (procMask >> (12 - lineBits));
+            return (addr >> pageBits) | (procMask >> (pageBits - lineBits));
         }
 
         // Allocate the given address if not yet allocated, use the policy of the thread.
@@ -121,8 +121,6 @@ class NUMAMap : public GlobAlloc {
 
         /* NUMA memory map. */
 
-        // log2 of page size.
-        uint32_t pageBits;
         // Page-to-node map.
         PageMap* pageNodeMap;
 
