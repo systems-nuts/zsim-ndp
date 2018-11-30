@@ -10,7 +10,7 @@ test_numa_syscall: $(DEPS) test-numa-syscall.cpp
 	g++ -O3 -g -o test_numa_syscall test-numa-syscall.cpp -lnuma
 
 test_numa_libnuma: $(DEPS) test-numa-libnuma.cpp
-	g++ -O3 -g -o test_numa_libnuma test-numa-libnuma.cpp -lnuma
+	g++ -O3 -g -o test_numa_libnuma test-numa-libnuma.cpp --std=c++11 -pthread -lnuma
 
 run_tests: default
 	./test_affinity

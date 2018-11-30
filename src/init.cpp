@@ -796,7 +796,7 @@ static void InitNUMA(Config& config) {
         for (uint32_t i = 1; i < zinfo->numProcs; i++) {
             auto pr = zinfo->procArray[i]->getPatchRoot();
             if (!pr) {
-                info("[NUMA-PatchRoot] Inherit patch root for process %u from process 0.", i);
+                info("[NUMA-PatchRoot] Other processes patch root but process %u does not, so it cannot use NUMA.", i);
             } else {
                 if (!patchRoot) panic("[NUMA-PatchRoot] Must patch root for process 0 when using NUMA.");
                 if (strcmp(patchRoot, pr) != 0) panic("[NUMA-PatchRoot] All processes must have the same patch root when using NUMA.");

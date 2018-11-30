@@ -1,7 +1,12 @@
 #include <cassert>
+#include <cstdio>
 #include <cstdlib>
-#include <stdio.h>
-#include <string.h>
+#include <cstring>
+
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 
 #include <errno.h>
 #include <unistd.h>
@@ -33,13 +38,13 @@ static inline int touch_and_get_node(void* addr) {
     return node;
 }
 
-int main() {
-    printf("zsim numa libnuma test\n");
+void test1() {
+    printf("zsim numa libnuma test 1\n");
 
     // numa_available()
     if (numa_available() < 0) {
         printf("NUMA API not supported\n");
-        return 0;
+        return;
     }
 
     // numa_max_possible_node(), numa_num_possible_nodes()
@@ -323,8 +328,99 @@ int main() {
 
     // numa_move_pages(), get nodes, in touch_and_get_node()
 
-    printf("zsim numa libnuma test done\n");
+    printf("zsim numa libnuma test 1 done\n");
+}
 
+void test2() {
+    printf("zsim numa libnuma test 2\n");
+
+    if (numa_available() < 0) {
+        printf("NUMA API not supported\n");
+        return;
+    }
+
+    std::atomic<int> token(0);
+    std::mutex mtx;
+    std::condition_variable cv;
+
+    const int c0 = 0;
+    const int c1 = numa_num_configured_cpus() - 1;
+    const int n0 = numa_node_of_cpu(c0);
+    const int n1 = numa_node_of_cpu(c1);
+
+    auto func0 = [&]() {
+        auto aff = numa_allocate_cpumask();
+        numa_bitmask_setbit(aff, c0);
+        numa_sched_setaffinity(0, aff);
+        numa_free_cpumask(aff);
+
+        // Allocate with default.
+        void* addr = numa_alloc(SIZE);
+        assert(touch_and_get_node(addr) == n0);
+        numa_free(addr, SIZE); addr = nullptr;
+
+        {
+            std::unique_lock<std::mutex> lk(mtx);
+            assert(token == 0);
+
+            // Set policy to allocate on this node.
+            numa_set_preferred(n0);
+
+            token = 1;
+            lk.unlock();
+            cv.notify_one();
+        }
+    };
+
+    auto func1 = [&]() {
+        auto aff = numa_allocate_cpumask();
+        numa_bitmask_setbit(aff, c1);
+        numa_sched_setaffinity(0, aff);
+        numa_free_cpumask(aff);
+
+        // Allocate with default.
+        void* addr = numa_alloc(SIZE);
+        assert(touch_and_get_node(addr) == n1);
+        numa_free(addr, SIZE); addr = nullptr;
+
+        {
+            std::unique_lock<std::mutex> lk(mtx);
+            cv.wait(lk, [&]{ return token == 1; });
+
+            // Allocate after the sibling thread sets policy.
+            // Not affected.
+            addr = numa_alloc(SIZE);
+            assert(touch_and_get_node(addr) == n1);
+            numa_free(addr, SIZE); addr = nullptr;
+
+            // Locally set policy.
+            numa_set_preferred(n0);
+            addr = numa_alloc(SIZE);
+            assert(touch_and_get_node(addr) == n0);
+            numa_free(addr, SIZE); addr = nullptr;
+
+            token = 2;
+            lk.unlock();
+            cv.notify_one();
+        }
+    };
+
+    std::thread th0(func0);
+    std::thread th1(func1);
+
+    th0.join();
+    th1.join();
+
+    printf("zsim numa libnuma test 2 done\n");
+}
+
+int main(int argc, char* argv[]) {
+    if (argc > 1 && std::string(argv[1]) == "2") {
+        test2();
+        return 0;
+    }
+
+    test1();
     return 0;
 }
 
