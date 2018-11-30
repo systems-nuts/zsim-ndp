@@ -40,6 +40,7 @@ static inline int nodemask2vector(unsigned long* nodemask, unsigned long maxnode
 // vector<bool> -> nodemask.
 static inline int vector2nodemask(const g_vector<bool>& vec, unsigned long* nodemask, unsigned long maxnode) {
     // Check input vector.
+    if (vec.empty()) return 0;
     uint32_t sysMaxNode = zinfo->numaMap->getMaxNode();
     assert(vec.size() == sysMaxNode + 1);
 

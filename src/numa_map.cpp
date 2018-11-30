@@ -253,9 +253,6 @@ NUMAMap::NUMAMap(const char* _patchRoot, const uint32_t numCores)
             warn("Core %u has no associated NUMA node", cid);
         }
     }
-
-    // Initialize thread policy to default.
-    threadPolicy.assign(MAX_THREADS, NUMAPolicy(MPOL_DEFAULT, g_vector<bool>(maxNode + 1, false)));
 }
 
 uint32_t NUMAMap::getNodeOfPage(const Address pageAddr) {

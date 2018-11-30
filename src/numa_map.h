@@ -5,6 +5,7 @@
 #include "bithacks.h"
 #include "galloc.h"
 #include "g_std/g_string.h"
+#include "g_std/g_unordered_map.h"
 #include "g_std/g_vector.h"
 #include "memory_hierarchy.h"
 #include "zsim.h"  // for lineBits
@@ -20,13 +21,14 @@ class NUMAPolicy : public GlobAlloc {
             }
         }
 
+        // Default policy.
+        NUMAPolicy() : NUMAPolicy(MPOL_DEFAULT, g_vector<bool>()) {}
+
         int getMode() const { return mode; }
 
         const g_vector<bool>& getMask() const { return mask; }
 
-        uint32_t getNodeCount() const { return mask.size(); }
-
-        bool isAllowed(const uint32_t node) const { return mask[node]; }
+        bool isAllowed(const uint32_t node) const { return node < mask.size() ? mask[node] : false; }
 
         uint32_t getNext() const {
             assert_msg(mode == MPOL_INTERLEAVE, "Next node to allocate is only valid for MPOL_INTERLEAVE.");
@@ -50,6 +52,8 @@ class NUMAPolicy : public GlobAlloc {
 
         // The next node of interleaving allocation.
         uint32_t next;
+
+        uint32_t getNodeCount() const { return mask.size(); }
 };
 
 class PageMap;
@@ -92,8 +96,8 @@ class NUMAMap : public GlobAlloc {
         // Return the pages that already exist and thus are ignored.
         size_t addPagesThreadPolicy(const Address pageAddr, const size_t pageCount, const uint32_t tid, const uint32_t cid, NUMAPolicy* policy = nullptr);
 
-        // Get the NUMA policy for the thread.
-        const NUMAPolicy& getThreadPolicy(const uint32_t tid) const { return threadPolicy[tid]; }
+        // Get the NUMA policy for the thread. Record and return default policy if absent.
+        const NUMAPolicy& getThreadPolicy(const uint32_t tid) { return threadPolicy[tid]; }
 
         // Set the NUMA policy for the thread.
         void setThreadPolicy(const uint32_t tid, const int mode, const g_vector<bool>& mask) {
@@ -102,7 +106,7 @@ class NUMAMap : public GlobAlloc {
         }
 
         // Get the next NUMA node of interleaving allocation for the thread.
-        uint32_t getThreadNextAllocNode(const uint32_t tid) const { return threadPolicy[tid].getNext(); }
+        uint32_t getThreadNextAllocNode(const uint32_t tid) const { return threadPolicy.at(tid).getNext(); }
 
         // Use glob mem.
         using GlobAlloc::operator new;
@@ -126,7 +130,7 @@ class NUMAMap : public GlobAlloc {
 
         /* Thread NUMA policy. */
 
-        g_vector<NUMAPolicy> threadPolicy;
+        g_unordered_map<uint32_t, NUMAPolicy> threadPolicy;
 
     private:
         // Parse the character string found in /sys/devices/system/node/nodeN/cpumap
