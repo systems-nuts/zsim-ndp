@@ -51,7 +51,6 @@
 #include "galloc.h"
 #include "init.h"
 #include "log.h"
-#include "numa_map.h"
 #include "pin.H"
 #include "pin_cmd.h"
 #include "process_tree.h"
@@ -136,11 +135,6 @@ uint32_t getCid(uint32_t tid) {
     return cid;
 }
 
-// NUMA page allocation when first touching the page.
-static inline VOID NUMAAlloc(THREADID tid, ADDRINT addr, BOOL pred = true) {
-    if (pred && zinfo->numaMap) zinfo->numaMap->allocateAddress(tid, addr);
-}
-
 // Internal function declarations
 void EnterFastForward();
 void ExitFastForward();
@@ -173,12 +167,10 @@ VOID FFThread(VOID* arg);
 InstrFuncPtrs fPtrs[MAX_THREADS] ATTR_LINE_ALIGNED; //minimize false sharing
 
 VOID PIN_FAST_ANALYSIS_CALL IndirectLoadSingle(THREADID tid, ADDRINT addr) {
-    NUMAAlloc(tid, addr);
     fPtrs[tid].loadPtr(tid, addr);
 }
 
 VOID PIN_FAST_ANALYSIS_CALL IndirectStoreSingle(THREADID tid, ADDRINT addr) {
-    NUMAAlloc(tid, addr);
     fPtrs[tid].storePtr(tid, addr);
 }
 
@@ -191,12 +183,10 @@ VOID PIN_FAST_ANALYSIS_CALL IndirectRecordBranch(THREADID tid, ADDRINT branchPc,
 }
 
 VOID PIN_FAST_ANALYSIS_CALL IndirectPredLoadSingle(THREADID tid, ADDRINT addr, BOOL pred) {
-    NUMAAlloc(tid, addr, pred);
     fPtrs[tid].predLoadPtr(tid, addr, pred);
 }
 
 VOID PIN_FAST_ANALYSIS_CALL IndirectPredStoreSingle(THREADID tid, ADDRINT addr, BOOL pred) {
-    NUMAAlloc(tid, addr, pred);
     fPtrs[tid].predStorePtr(tid, addr, pred);
 }
 

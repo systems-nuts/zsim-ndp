@@ -555,6 +555,8 @@ class Scheduler : public GlobAlloc, public Callee {
 
         uint32_t getScheduledPid(uint32_t cid) const { return (contexts[cid].state == USED)? getPid(contexts[cid].curThread->gid) : (uint32_t)-1; }
 
+        uint32_t getScheduledTid(uint32_t cid) const { return (contexts[cid].state == USED)? getTid(contexts[cid].curThread->gid) : (uint32_t)-1; }
+
         const g_vector<bool> getMask(uint32_t pid, uint32_t tid) {
             g_vector<bool> mask;
             futex_lock(&schedLock);

@@ -84,16 +84,17 @@ class NUMAMap : public GlobAlloc {
             return (addr >> pageBits) | (procMask >> (pageBits - lineBits));
         }
 
-        // Allocate the given address if not yet allocated, use the policy of the thread.
-        void allocateAddress(const uint32_t tid, const Address addr);
+        // Allocate an address from a core if not yet allocated, use the policy of the thread running on the core.
+        void allocateFromCore(const Address addr, const uint32_t cid);
 
         // Add given pages to NUMA node. Return the pages that already exist and thus are ignored.
         size_t addPagesToNode(const Address pageAddr, const size_t pageCount, const uint32_t node);
         // Remove given pages from NUMA map.
         void removePages(const Address pageAddr, const size_t pageCount);
 
-        // Add given pages to NUMA node from the thread according to the policy. If no policy is given, use the policy of the thread.
+        // Add given pages according to the policy, from the thread running on the core. If no policy is given, use the policy of the thread.
         // Return the pages that already exist and thus are ignored.
+        // NOTE: when called inside a syscall, the thread has left the core, so we need to specify both tid and cid.
         size_t addPagesThreadPolicy(const Address pageAddr, const size_t pageCount, const uint32_t tid, const uint32_t cid, NUMAPolicy* policy = nullptr);
 
         // Get the NUMA policy for the thread. Record and return default policy if absent.

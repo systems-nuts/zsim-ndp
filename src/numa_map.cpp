@@ -3,6 +3,7 @@
 #include "g_std/g_unordered_map.h"
 #include "intrusive_list.h"
 #include "locks.h"
+#include "scheduler.h"
 #include "zsim.h"  // for getCid
 
 /* Thread-safe, bucket-based page-to-node map. */
@@ -261,12 +262,14 @@ uint32_t NUMAMap::getNodeOfPage(const Address pageAddr) {
     return node;
 }
 
-void NUMAMap::allocateAddress(const uint32_t tid, const Address addr) {
+void NUMAMap::allocateFromCore(const Address addr, const uint32_t cid) {
     auto pageAddr = getPageAddress(addr);
-    if (pageNodeMap->get(pageAddr) != INVALID_NODE) return;
-    uint32_t cid = getCid(tid);
-    assert_msg(cid < zinfo->numCores, "Thread %u runs on core %u? Are we in FF?", tid, cid);
-    if (zinfo->numaMap->addPagesThreadPolicy(pageAddr, 1, tid, cid)) panic("Thread %u allocating address %lx failed!", tid, addr);
+    if (unlikely(pageNodeMap->get(pageAddr) == INVALID_NODE)) {
+        assert(cid < zinfo->numCores);
+        uint32_t tid = zinfo->sched->getScheduledTid(cid);
+        assert_msg(tid != -1u, "Core %u has no thread running! Who is allocating the line?", cid);
+        assert(addPagesThreadPolicy(pageAddr, 1, tid, cid) == 0);
+    }
 }
 
 size_t NUMAMap::addPagesToNode(const Address pageAddr, const size_t pageCount, const uint32_t node) {
