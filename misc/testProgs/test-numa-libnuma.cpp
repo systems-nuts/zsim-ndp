@@ -414,10 +414,96 @@ void test2() {
     printf("zsim numa libnuma test 2 done\n");
 }
 
+void test3() {
+    printf("zsim numa libnuma test 3\n");
+
+    if (numa_available() < 0) {
+        printf("NUMA API not supported\n");
+        return;
+    }
+
+    std::atomic<int> token(0);
+    std::mutex mtx;
+    std::condition_variable cv;
+
+    const int c0 = 0;
+    const int c1 = numa_num_configured_cpus() - 1;
+    const int n0 = numa_node_of_cpu(c0);
+    const int n1 = numa_node_of_cpu(c1);
+
+    void* gaddr = nullptr;
+
+    auto func0 = [&]() {
+        // Set bind policy.
+        auto memb = numa_allocate_nodemask();
+        numa_bitmask_setbit(memb, n0);
+        numa_set_membind(memb);
+        numa_free_nodemask(memb);
+
+        // Allocate.
+        void* addr = numa_alloc(SIZE);
+        assert(touch_and_get_node(addr) == n0);
+        numa_free(addr, SIZE); addr = nullptr;
+
+        {
+            std::unique_lock<std::mutex> lk(mtx);
+            assert(token == 0);
+
+            // Allocate but not touch.
+            gaddr = mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+
+            token = 1;
+            lk.unlock();
+            cv.notify_one();
+        }
+    };
+
+    auto func1 = [&]() {
+        // Set bind policy.
+        auto memb = numa_allocate_nodemask();
+        numa_bitmask_setbit(memb, n1);
+        numa_set_membind(memb);
+        numa_free_nodemask(memb);
+
+        // Allocate.
+        void* addr = numa_alloc(SIZE);
+        assert(touch_and_get_node(addr) == n1);
+        numa_free(addr, SIZE); addr = nullptr;
+
+        {
+            std::unique_lock<std::mutex> lk(mtx);
+            cv.wait(lk, [&]{ return token == 1; });
+
+            // Touch pages allocated by the other thread.
+            // Will use this thread policy.
+            assert(gaddr != nullptr);
+            assert(touch_and_get_node(gaddr) == n1);
+            munmap(gaddr, SIZE); gaddr = nullptr;
+
+            token = 2;
+            lk.unlock();
+            cv.notify_one();
+        }
+    };
+
+    std::thread th0(func0);
+    std::thread th1(func1);
+
+    th0.join();
+    th1.join();
+
+    printf("zsim numa libnuma test 3 done\n");
+}
+
 int main(int argc, char* argv[]) {
-    if (argc > 1 && std::string(argv[1]) == "2") {
-        test2();
-        return 0;
+    if (argc > 1) {
+        if (std::string(argv[1]) == "2") {
+            test2();
+            return 0;
+        } else if (std::string(argv[1]) == "3") {
+            test3();
+            return 0;
+        }
     }
 
     test1();
