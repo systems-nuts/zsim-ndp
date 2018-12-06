@@ -1,3 +1,4 @@
+#include <bitset>
 #include "numa_map.h"
 #include "constants.h"
 #include "g_std/g_unordered_map.h"
@@ -5,6 +6,9 @@
 #include "locks.h"
 #include "scheduler.h"
 #include "zsim.h"  // for getCid
+
+//#define DEBUG(args...) info(args)
+#define DEBUG(args...)
 
 /* Thread-safe, bucket-based page-to-node map. */
 class PageMap : public GlobAlloc {
@@ -14,66 +18,46 @@ class PageMap : public GlobAlloc {
         }
 
         bool isPresent(const Address pageAddr) {
-            uint64_t chunkIdx = pageAddr >> chunkBits;
-            bool p = false;
-            futex_lock(&futex);
-            auto chunkIter = pageMaps.find(chunkIdx);
-            if (chunkIter != pageMaps.end()) {
-                p = chunkIter->second.isPresent(pageAddr);
-            }
-            futex_unlock(&futex);
-            return p;
+            auto chunk = findChunk(pageAddr);
+            return chunk && chunk->isPresent(pageAddr);
         }
 
         uint32_t get(const Address pageAddr) {
-            uint64_t chunkIdx = pageAddr >> chunkBits;
-            uint32_t node = NUMAMap::INVALID_NODE;
-            futex_lock(&futex);
-            auto chunkIter = pageMaps.find(chunkIdx);
-            if (chunkIter != pageMaps.end()) {
-                node = chunkIter->second.lookup(pageAddr);
-            }
-            futex_unlock(&futex);
-            return node;
+            auto chunk = findChunk(pageAddr);
+            return chunk ? chunk->lookup(pageAddr) : NUMAMap::INVALID_NODE;
         }
 
         size_t add(Address pageAddr, size_t pageCount, const uint32_t node) {
             if (pageCount == 0) return 0;
             if (node == NUMAMap::INVALID_NODE) return pageCount;
+            DEBUG("[PageMap] add %lx (%lu) -> %u", pageAddr, pageCount, node);
             size_t ignoredCount = 0;
-            futex_lock(&futex);
             while (pageCount > 0) {
-                uint64_t chunkIdx = pageAddr >> chunkBits;
-                Address nextPageAddr = (chunkIdx + 1) << chunkBits;
-                size_t chunkNumPages = std::min(pageCount, nextPageAddr - pageAddr);
-                ignoredCount += pageMaps[chunkIdx].add(pageAddr, chunkNumPages, node);
-                pageMaps[chunkIdx].verify(chunkIdx);
-                pageCount -= chunkNumPages;
+                Address nextPageAddr = nextChunkPageAddr(pageAddr);
+                size_t cnt = std::min(pageCount, nextPageAddr - pageAddr);
+                ignoredCount += findChunk(pageAddr, true)->add(pageAddr, cnt, node);
+                pageCount -= cnt;
                 pageAddr = nextPageAddr;
             }
-            futex_unlock(&futex);
             return ignoredCount;
         }
 
         void remove(Address pageAddr, size_t pageCount) {
             if (pageCount == 0) return;
-            futex_lock(&futex);
+            DEBUG("[PageMap] remove %lx (%lu)", pageAddr, pageCount);
             while (pageCount > 0) {
-                uint64_t chunkIdx = pageAddr >> chunkBits;
-                Address nextPageAddr = (chunkIdx + 1) << chunkBits;
-                size_t chunkNumPages = std::min(pageCount, nextPageAddr - pageAddr);
-                auto chunkIter = pageMaps.find(chunkIdx);
-                if (chunkIter != pageMaps.end()) {
-                    chunkIter->second.remove(pageAddr, chunkNumPages);
-                    chunkIter->second.verify(chunkIdx);
-                }
-                pageCount -= chunkNumPages;
+                Address nextPageAddr = nextChunkPageAddr(pageAddr);
+                size_t cnt = std::min(pageCount, nextPageAddr - pageAddr);
+                auto chunk = findChunk(pageAddr);
+                if (chunk) chunk->remove(pageAddr, cnt);
+                pageCount -= cnt;
                 pageAddr = nextPageAddr;
             }
-            futex_unlock(&futex);
         }
 
     private:
+        static constexpr uint32_t CHUNK_BITS = 16;  // 2^16 pages, i.e., 256 MB
+
         struct PageRange : InListNode<PageRange> {
             Address pageAddrBegin;
             Address pageAddrEnd;
@@ -110,26 +94,44 @@ class PageMap : public GlobAlloc {
 
         class PageChunk {
         private:
+            static constexpr uint64_t CHUNK_SIZE = 1 << PageMap::CHUNK_BITS;
+            static constexpr Address CHUNK_MASK = (CHUNK_SIZE - 1);
+
             InList<PageRange> chunk;
+            std::bitset<CHUNK_SIZE> pmap;
+            lock_t futex;
 
         public:
-            bool isPresent(Address pageAddr) const {
-                auto pr = chunk.front();
-                while (pr != nullptr && pr->pageAddrBegin <= pageAddr) {
-                    if (pr->contains(pageAddr) && !pr->removed) return true;
-                    pr = pr->next;
-                }
-                return false;
+            PageChunk() {
+                futex_init(&futex);
             }
 
-            uint32_t lookup(Address pageAddr) const {
+            bool isPresent(Address pageAddr) {
+                // Check bitmap.
+                futex_lock(&futex);
+                bool p = pmap[pageAddr & CHUNK_MASK];
+                futex_unlock(&futex);
+                return p;
+            }
+
+            uint32_t lookup(Address pageAddr) {
                 // Look up in chunk to get the node for the page.
-                auto pr = chunk.front();
-                while (pr != nullptr && pr->pageAddrBegin <= pageAddr) {
-                    if (pr->contains(pageAddr)) return pr->node;
-                    pr = pr->next;
+                uint32_t node = NUMAMap::INVALID_NODE;
+                futex_lock(&futex);
+                if (pmap[pageAddr & CHUNK_MASK]) {
+                    auto pr = chunk.front();
+                    while (pr != nullptr) {
+                        if (pr->contains(pageAddr)) {
+                            node = pr->node;
+                            break;
+                        } else if (pr->pageAddrBegin > pageAddr) {
+                            break;
+                        }
+                        pr = pr->next;
+                    }
                 }
-                return NUMAMap::INVALID_NODE;
+                futex_unlock(&futex);
+                return node;
             }
 
             size_t add(Address pageAddr, size_t pageCount, const uint32_t node) {
@@ -137,6 +139,10 @@ class PageMap : public GlobAlloc {
                 // Return number of pages that already exist and thus are ignored.
                 size_t ignoredCount = 0;
                 auto newpr = new PageRange(pageAddr, pageCount, node);
+                futex_lock(&futex);
+                for (size_t i = 0; i < pageCount; i++) {
+                    pmap.set((pageAddr & CHUNK_MASK) + i);
+                }
                 auto pr = chunk.front();
                 while (pr && newpr) {
                     if (newpr->pageAddrEnd < pr->pageAddrBegin) {
@@ -211,6 +217,8 @@ class PageMap : public GlobAlloc {
                 }
                 // Push to the end.
                 if (newpr) chunk.push_back(newpr);
+                verify();
+                futex_unlock(&futex);
                 return ignoredCount;
             }
 
@@ -218,11 +226,15 @@ class PageMap : public GlobAlloc {
                 // Remove lazily from chunk, and split if necessary.
                 auto e = PageRange(pageAddr, pageCount, NUMAMap::INVALID_NODE, true);
                 auto rempr = &e;
+                futex_lock(&futex);
+                for (size_t i = 0; i < pageCount; i++) {
+                    pmap.set((pageAddr & CHUNK_MASK) + i, false);
+                }
                 auto pr = chunk.front();
                 while (pr) {
                     if (rempr->pageAddrEnd < pr->pageAddrBegin) {
                         // No overlap with following ones, return.
-                        return;
+                        break;
                     } else if (rempr->pageAddrBegin > pr->pageAddrEnd) {
                         // No overlap but after the current one, continue.
                         pr = pr->next;
@@ -279,23 +291,16 @@ class PageMap : public GlobAlloc {
                         pr = pr->next;
                     }
                 }
+                verify();
+                futex_unlock(&futex);
             }
 
-            void verify(uint64_t chunkIdx) const {
+            void verify() const {
 #if 0
-                auto pageAddrBase = chunkIdx << chunkBits;
-                uint64_t pageAddrMask = ~((1<<chunkBits) - 1);
-
                 auto pr = chunk.front();
                 uint64_t lastPageAddrEnd = 0;
                 uint64_t lastNode = NUMAMap::INVALID_NODE;
                 while (pr != nullptr) {
-                    assert_msg((pr->pageAddrBegin & pageAddrMask) == pageAddrBase,
-                            "Begin page addr 0x%lx does not match chunk base addr 0x%lx",
-                            pr->pageAddrBegin, pageAddrBase);
-                    assert_msg((pr->pageAddrEnd & pageAddrMask) == pageAddrBase,
-                            "End page addr 0x%lu does not match chunk base addr 0x%lx",
-                            pr->pageAddrEnd, pageAddrBase);
                     assert(pr->pageAddrBegin < pr->pageAddrEnd);
                     assert(pr->node != NUMAMap::INVALID_NODE);
                     if (pr->node == lastNode) {
@@ -336,11 +341,31 @@ class PageMap : public GlobAlloc {
             }
         };
 
-        static constexpr uint32_t chunkBits = 24;  // 2^24 pages, i.e., 64 GB
-
         g_unordered_map<uint64_t, PageChunk> pageMaps;
 
         lock_t futex;
+
+    private:
+        PageChunk* findChunk(const Address pageAddr, bool insert = false) {
+            uint64_t chunkIdx = pageAddr >> CHUNK_BITS;
+            PageChunk* chunk = nullptr;
+            futex_lock(&futex);
+            if (insert) {
+                chunk = &pageMaps[chunkIdx];
+            } else {
+                auto it = pageMaps.find(chunkIdx);
+                if (it != pageMaps.end()) {
+                    chunk = &it->second;
+                }
+            }
+            futex_unlock(&futex);
+            return chunk;
+        }
+
+        inline static Address nextChunkPageAddr(const Address pageAddr) {
+            uint64_t chunkIdx = pageAddr >> CHUNK_BITS;
+            return (chunkIdx + 1) << CHUNK_BITS;
+        }
 };
 
 
