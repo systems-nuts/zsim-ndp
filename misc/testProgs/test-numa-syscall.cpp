@@ -95,8 +95,17 @@ int main() {
     // allocate
     addr = mmap(ADDR, SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
     assert(addr != NULL && addr == ADDR);
-    for (int i = 0; i <= node; i++) *((int*)((unsigned long)addr + getpagesize() * i)) = i;
-    for (int i = 0; i <= node; i++) assert(get_node((void*)((unsigned long)addr + getpagesize() * i)) == i);
+    for (int i = 0; i < SIZE / getpagesize(); i++) {
+        *((int*)((unsigned long)addr + getpagesize() * i)) = i;
+    }
+    int j = -1;
+    for (int i = 0; i < SIZE / getpagesize(); i++) {
+        void* p = (void*)((unsigned long)addr + getpagesize() * i);
+        if (j >= 0) {
+            assert((j + 1) % (node + 1) == get_node(p));
+        }
+        j = get_node(p);
+    }
     munmap(addr, SIZE); addr = NULL;
 
     // get_mempolicy(), flags MPOL_F_NODE
