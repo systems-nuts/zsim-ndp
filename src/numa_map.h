@@ -95,19 +95,26 @@ class NUMAMap : public GlobAlloc {
         // Add given pages according to the policy, from the thread running on the core. If no policy is given, use the policy of the thread.
         // Return the pages that already exist and thus are ignored.
         // NOTE: when called inside a syscall, the thread has left the core, so we need to specify both tid and cid.
-        size_t addPagesThreadPolicy(const Address pageAddr, const size_t pageCount, const uint32_t tid, const uint32_t cid, NUMAPolicy* policy = nullptr);
+        size_t addPagesThreadPolicy(const Address pageAddr, const size_t pageCount, const uint32_t pid, const uint32_t tid, const uint32_t cid, NUMAPolicy* policy = nullptr);
 
         // Get the NUMA policy for the thread. Record and return default policy if absent.
-        const NUMAPolicy& getThreadPolicy(const uint32_t tid) { return threadPolicy[tid]; }
+        const NUMAPolicy& getThreadPolicy(const uint32_t pid, const uint32_t tid) {
+            uint64_t gid = (((uint64_t)pid) << 32) | tid;
+            return threadPolicy[gid];
+        }
 
         // Set the NUMA policy for the thread.
-        void setThreadPolicy(const uint32_t tid, const int mode, const g_vector<bool>& mask) {
+        void setThreadPolicy(const uint32_t pid, const uint32_t tid, const int mode, const g_vector<bool>& mask) {
             assert(mask.size() == maxNode + 1);
-            threadPolicy[tid] = NUMAPolicy(mode, mask);
+            uint64_t gid = (((uint64_t)pid) << 32) | tid;
+            threadPolicy[gid] = NUMAPolicy(mode, mask);
         }
 
         // Get the next NUMA node of interleaving allocation for the thread.
-        uint32_t getThreadNextAllocNode(const uint32_t tid) const { return threadPolicy.at(tid).getNext(); }
+        uint32_t getThreadNextAllocNode(const uint32_t pid, const uint32_t tid) const {
+            uint64_t gid = (((uint64_t)pid) << 32) | tid;
+            return threadPolicy.at(gid).getNext();
+        }
 
         // Use glob mem.
         using GlobAlloc::operator new;
@@ -131,7 +138,7 @@ class NUMAMap : public GlobAlloc {
 
         /* Thread NUMA policy. */
 
-        g_unordered_map<uint32_t, NUMAPolicy> threadPolicy;
+        g_unordered_map<uint64_t, NUMAPolicy> threadPolicy;  // indexed by ((pid << 32) | tid)
 
     private:
         // Parse the character string found in /sys/devices/system/node/nodeN/cpumap

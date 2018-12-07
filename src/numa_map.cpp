@@ -397,9 +397,11 @@ void NUMAMap::allocateFromCore(const Address addr, const uint32_t cid) {
     auto pageAddr = getPageAddress(addr);
     if (unlikely(!pageNodeMap->isPresent(pageAddr))) {
         assert(cid < zinfo->numCores);
+        uint32_t pid = zinfo->sched->getScheduledPid(cid);
         uint32_t tid = zinfo->sched->getScheduledTid(cid);
-        assert_msg(tid != -1u, "Core %u has no thread running! Who is allocating the line?", cid);
-        assert(addPagesThreadPolicy(pageAddr, 1, tid, cid) == 0);
+        assert_msg(pid != -1u && tid != -1u, "Core %u has no thread running! Who is allocating the line?", cid);
+        addPagesThreadPolicy(pageAddr, 1, pid, tid, cid);  // adding pages could race
+        assert(pageNodeMap->isPresent(pageAddr));
     }
 }
 
@@ -411,10 +413,11 @@ void NUMAMap::removePages(const Address pageAddr, const size_t pageCount) {
     pageNodeMap->remove(pageAddr, pageCount);
 }
 
-size_t NUMAMap::addPagesThreadPolicy(const Address pageAddr, const size_t pageCount, const uint32_t tid, const uint32_t cid, NUMAPolicy* policy) {
+size_t NUMAMap::addPagesThreadPolicy(const Address pageAddr, const size_t pageCount, const uint32_t pid, const uint32_t tid, const uint32_t cid, NUMAPolicy* policy) {
     if (!policy) {
         // Use the policy of the thread.
-        policy = &threadPolicy[tid];
+        uint64_t gid = (((uint64_t)pid) << 32) | tid;
+        policy = &threadPolicy[gid];
     }
     const auto& mode = policy->getMode();
 

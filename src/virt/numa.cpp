@@ -137,7 +137,7 @@ static inline void removeAddrRange(void* addr, unsigned long len) {
 static inline size_t addAddrRangeThreadPolicy(void* addr, unsigned long len, uint32_t tid, uint32_t cid, NUMAPolicy* policy = nullptr) {
     auto begin = getPageAddress(addr);
     auto end = getPageAddressEnd(addr, len);
-    return zinfo->numaMap->addPagesThreadPolicy(begin, end - begin, tid, cid, policy);
+    return zinfo->numaMap->addPagesThreadPolicy(begin, end - begin, procIdx, tid, cid, policy);
 }
 
 
@@ -173,7 +173,7 @@ PostPatchFn PatchGetMempolicy(PrePatchArgs args) {
     return [=](PostPatchArgs args){
         if (!flags) {
             // Return policy through mode and nodemask.
-            const auto& policy = zinfo->numaMap->getThreadPolicy(args.tid);
+            const auto& policy = zinfo->numaMap->getThreadPolicy(procIdx, args.tid);
             if (mode != nullptr) {
                 int resMode = static_cast<int>(policy.getMode());
                 if (!safeCopy(&resMode, mode)) {
@@ -227,13 +227,13 @@ PostPatchFn PatchGetMempolicy(PrePatchArgs args) {
             return PPA_NOTHING;
         } else if (flags & MPOL_F_NODE) {
             // Return next interleaving node ID.
-            const auto& policy = zinfo->numaMap->getThreadPolicy(args.tid);
+            const auto& policy = zinfo->numaMap->getThreadPolicy(procIdx, args.tid);
             if (policy.getMode() != MPOL_INTERLEAVE) {
                 // The policy must be MPOL_INTERLEAVE.
                 PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EINVAL);
                 return PPA_NOTHING;
             }
-            const auto nextNode = zinfo->numaMap->getThreadNextAllocNode(args.tid);
+            const auto nextNode = zinfo->numaMap->getThreadNextAllocNode(procIdx, args.tid);
             assert(nextNode != NUMAMap::INVALID_NODE);
             if (mode != nullptr) {
                 int resMode = static_cast<int>(nextNode);
@@ -277,7 +277,7 @@ PostPatchFn PatchSetMempolicy(PrePatchArgs args) {
 
     // Update policy.
     return [mode, vec](PostPatchArgs args) {
-        zinfo->numaMap->setThreadPolicy(args.tid, mode, vec);
+        zinfo->numaMap->setThreadPolicy(procIdx, args.tid, mode, vec);
         PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)0);  // return 0 on success
         return PPA_NOTHING;
     };
