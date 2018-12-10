@@ -13,24 +13,24 @@
 #define DEBUG(args...)
 
 MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
-        uint32_t ranksPerChannel, uint32_t banksPerRank, const char* _pagePolicy,
+        uint32_t ranksPerChannel, uint32_t banksPerRank, uint32_t bankGroupsPerRank, const char* _pagePolicy,
         uint32_t pageSizeBytes, uint32_t burstCount, uint32_t deviceIOBits, uint32_t channelWidthBits,
         uint32_t memFreqMHz, const Timing& _t, const Power& _p,
         const char* addrMapping, uint32_t _queueDepth, bool _deferWrites,
         uint32_t _maxRowHits, uint32_t _powerDownCycles)
-    : name(_name), rankCount(ranksPerChannel), bankCount(banksPerRank),
+    : name(_name), rankCount(ranksPerChannel), bankCount(banksPerRank), bgrpCount(bankGroupsPerRank),
       pageSize(pageSizeBytes), burstSize(burstCount*deviceIOBits),
       devicesPerRank(channelWidthBits/deviceIOBits), freqKHz(memFreqMHz*1000), t(_t), p(_p),
       powerDownCycles(_powerDownCycles), queueDepth(_queueDepth), deferWrites(_deferWrites),
       maxRowHits(_maxRowHits) {
 
-    info("%s: %u ranks x %u banks.", name.c_str(), rankCount, bankCount);
+    info("%s: %u ranks x %u banks (%u bank groups).", name.c_str(), rankCount, bankCount, bgrpCount);
     info("%s: page size %u bytes, %u devices per rank, burst %u bits from each device.",
             name.c_str(), pageSize, devicesPerRank, burstSize);
-    info("%s: tBL = %u, tCAS = %u, tCCD = %u, tCWL = %u, tRAS = %u, tRCD = %u",
-            name.c_str(), t.BL, t.CAS, t.CCD, t.CWL, t.RAS, t.RCD);
-    info("%s: tRP = %u, tRRD = %u, tRTP = %u, tWR = %u, tWTR = %u",
-            name.c_str(), t.RP, t.RRD, t.RTP, t.WR, t.WTR);
+    info("%s: tBL = %u, tCAS = %u, tCCD/_S = %u/%u, tCWL = %u, tRAS = %u, tRCD = %u",
+            name.c_str(), t.BL, t.CAS, t.CCD, t.CCD_S, t.CWL, t.RAS, t.RCD);
+    info("%s: tRP = %u, tRRD/_S = %u/%u, tRTP = %u, tWR = %u, tWTR/_S = %u/%u",
+            name.c_str(), t.RP, t.RRD, t.RRD_S, t.RTP, t.WR, t.WTR, t.WTR_S);
     info("%s: tRFC = %u, tREFI = %u, tRPab = %u, tFAW = %u, tRTRS = %u, tCMD = %u, tXP = %u",
             name.c_str(), t.RFC, t.REFI, t.RPab, t.FAW, t.RTRS, t.CMD, t.XP);
     info("%s: VDD = %u, IDD0 = %u, IDD2N = %u, IDD2P = %u, IDD3N = %u, IDD3P = %u, IDD4R = %u, IDD4W = %u, IDD5 = %u",
@@ -64,7 +64,9 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
     for (uint32_t r = 0; r < rankCount; r++) {
         auto rs = new RankState();
         for (uint32_t b = 0; b < bankCount; b++) {
-            banks.emplace_back(rs);
+            // Bank group bits are default to be the lower part of bank bits.
+            uint32_t bg = b % bgrpCount;
+            banks.emplace_back(bg, rs);
         }
     }
     assert(banks.size() == rankCount * bankCount);
@@ -73,6 +75,8 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
 
     assert_msg(isPow2(rankCount), "Only support power-of-2 ranks per channel, %u given.", rankCount);
     assert_msg(isPow2(bankCount), "Only support power-of-2 banks per rank, %u given.", bankCount);
+    assert_msg(isPow2(bgrpCount) && bankCount % bgrpCount == 0,
+            "Bank groups per rank (%u) should divide banks per rank (%u).", bgrpCount, bankCount);
     // One column has the size of deviceIO. LSB bits of column address are for burst. Here we only account for the high
     // bits of column which are in line address, since the low bits are hidden in lineSize.
     uint32_t colHCount = pageSize*8 / burstSize;
@@ -329,8 +333,8 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
     uint64_t burstCycle = calcBurstCycle(bank, rwCycle, isWrite);
     assert(burstCycle >= minBurstCycle);
     if (update) {
+        bank.recordBurst(burstCycle);  // increase monotonously
         bank.rankState->lastActivityCycle = std::max(bank.rankState->lastActivityCycle, burstCycle + getBL(isWrite));
-        bank.rankState->lastBurstCycle = burstCycle;  // increase monotonously
     }
 
     // (future) next PRE.
@@ -555,7 +559,7 @@ uint64_t MemChannelBackendDDR::calcACTCycle(const Bank& bank, uint64_t schedCycl
     return maxN<uint64_t>(
             schedCycle,
             preCycle + t.RP,
-            bank.rankState->lastACTCycle + t.RRD,
+            bank.rankState->lastACTCycle + (bank.rankState->lastACTBankGroupIdx == bank.bankGroupIdx ? t.RRD : t.RRD_S),
             bank.rankState->actWindow4.minACTCycle() + t.FAW,
             bank.rankState->lastPowerUpCycle + t.XP,
             preCycle + t.CMD);
@@ -575,8 +579,10 @@ uint64_t MemChannelBackendDDR::calcRWCycle(const Bank& bank, uint64_t schedCycle
     return maxN<uint64_t>(
             schedCycle,
             actCycle + t.RCD,
-            (lastIsWrite && !isWrite) ? bank.rankState->lastBurstCycle + getBL(isWrite) + t.WTR : 0,  // lastBurstCycle has not updated, i.e. last access
-            bank.rankState->lastRWCycle + t.CCD,
+            (lastIsWrite && !isWrite) ?
+                bank.rankState->lastBurstCycle + getBL(true) + (bank.rankState->lastBurstBankGroupIdx == bank.bankGroupIdx ? t.WTR : t.WTR_S)
+                : 0,  // lastBurstCycle has not updated, i.e. last access
+            bank.rankState->lastRWCycle + (bank.rankState->lastRWBankGroupIdx == bank.bankGroupIdx ? t.CCD : t.CCD_S),
             (uint64_t)std::max<int64_t>(0, dataOnBus - (isWrite ? t.CWL : t.CAS)), // avoid underflow
             bank.rankState->lastPowerUpCycle + t.XP,
             actCycle + t.CMD);
@@ -593,7 +599,7 @@ uint64_t MemChannelBackendDDR::updatePRECycle(Bank& bank, uint64_t rwCycle, bool
     bank.minPRECycle = maxN<uint64_t>(
             bank.minPRECycle,
             bank.lastACTCycle + t.RAS,
-            isWrite ? bank.rankState->lastBurstCycle + getBL(isWrite) + t.WR : rwCycle + t.RTP,  // lastBurstCycle has updated, i.e., this access
+            isWrite ? bank.rankState->lastBurstCycle + getBL(true) + t.WR : rwCycle + t.RTP,  // lastBurstCycle has updated, i.e., this access
             rwCycle + t.CMD);
     return bank.minPRECycle;
 }

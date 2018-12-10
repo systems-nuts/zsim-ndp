@@ -344,6 +344,7 @@ MemChannel* BuildMemChannel(Config& config, uint32_t lineSize, uint32_t sysFreqM
     } else if (channelType == "DDR") {
         uint32_t ranksPerChannel = config.get<uint32_t>(prefix + "ranksPerChannel", 1);
         uint32_t banksPerRank = config.get<uint32_t>(prefix + "banksPerRank", 8);   // DDR3
+        uint32_t bankGroupsPerRank = config.get<uint32_t>(prefix + "bankGroupsPerRank", 1);  // single bank group
         const char* pagePolicy = config.get<const char*>(prefix + "pagePolicy", "close");
         bool deferWrites = config.get<bool>(prefix + "deferWrites", true);
         uint32_t pageSize = config.get<uint32_t>(prefix + "pageSize", 1024);    // 1 kB
@@ -382,6 +383,9 @@ timing.name = config.get<uint32_t>(prefix + "timing.t" #name, defval)
         SETTDEFVAL(CMD, 1);
         SETTDEFVAL(XP, 0);
         SETTDEFVAL(CKE, 0);
+        SETTDEFVAL(RRD_S, timing.RRD);
+        SETTDEFVAL(CCD_S, timing.CCD);
+        SETTDEFVAL(WTR_S, timing.WTR);
 #undef SETT
 #undef SETTDEFVAL
         timing.BL = burstCount / 2; // double-data-rate
@@ -407,7 +411,7 @@ power.IDD##name = (uint32_t)(config.get<double>(prefix + "power.IDD" #name, 0) *
         double channelWirePicoJoulePerBit = config.get<double>(prefix + "power.channelWirePicoJoulePerBit", 0);
         power.channelWireFemtoJoulePerBit = (uint32_t)(channelWirePicoJoulePerBit * 1000);
 
-        be = new MemChannelBackendDDR(name, ranksPerChannel, banksPerRank, pagePolicy, pageSize, burstCount,
+        be = new MemChannelBackendDDR(name, ranksPerChannel, banksPerRank, bankGroupsPerRank, pagePolicy, pageSize, burstCount,
                 deviceIOWidth, channelWidth, memFreqMHz, timing, power, addrMapping, queueDepth, deferWrites,
                 maxRowHits, powerDownCycles);
     } else {

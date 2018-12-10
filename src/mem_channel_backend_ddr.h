@@ -17,15 +17,18 @@ class MemChannelBackendDDR : public MemChannelBackend {
         struct Timing {
             uint32_t BL;    // burst
             uint32_t CAS;   // RD/WR -> data
-            uint32_t CCD;   // RD/WR -> RD/WR
+            uint32_t CCD;   // RD/WR -> RD/WR, same bank group
+            uint32_t CCD_S; // RD/WR -> RD/WR, different bank groups
             uint32_t CWL;   // WR -> data begin, i.e., CWD
             uint32_t RAS;   // ACT -> PRE
             uint32_t RCD;   // ACT -> RD/WR
             uint32_t RP;    // PRE -> ACT
-            uint32_t RRD;   // ACT -> ACT same bank
+            uint32_t RRD;   // ACT -> ACT, same bank group
+            uint32_t RRD_S; // ACT -> ACT, different bank groups
             uint32_t RTP;   // RD -> PRE
             uint32_t WR;    // WR data end -> PRE
-            uint32_t WTR;   // WR data end -> RD
+            uint32_t WTR;   // WR data end -> RD, same bank group
+            uint32_t WTR_S; // WR data end -> RD, different bank groups
             // RC = RAS + RP
 
             // NOTE(mgao): tAL
@@ -68,7 +71,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
         };
 
     public:
-        MemChannelBackendDDR(const g_string& _name, uint32_t ranksPerChannel, uint32_t banksPerRank,
+        MemChannelBackendDDR(const g_string& _name, uint32_t ranksPerChannel, uint32_t banksPerRank, uint32_t bankGroupsPerRank,
                 const char* _pagePolicy, uint32_t pageSizeBytes,
                 uint32_t burstCount, uint32_t deviceIOBits, uint32_t channelWidthBits,
                 uint32_t memFreqMHz, const Timing& _t, const Power& _p,
@@ -200,20 +203,48 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
             // Last ACT cycle across all banks.
             uint64_t lastACTCycle;
+            uint32_t lastACTBankGroupIdx;
             // Last RD/WR cycle across all banks.
             uint64_t lastRWCycle;
+            uint32_t lastRWBankGroupIdx;
             // Last burst cycle across all banks.
             uint64_t lastBurstCycle;
+            uint32_t lastBurstBankGroupIdx;
 
             DDRActWindow actWindow4;
 
             RankState()
                 : lastActivityCycle(0), lastPowerUpCycle(0), lastPowerDownCycle(0), lastEnergyBKGDUpdateCycle(0), activeIntRec(),
-                  lastACTCycle(0), lastRWCycle(0), lastBurstCycle(0), actWindow4(4)
+                  lastACTCycle(0), lastACTBankGroupIdx(-1), lastRWCycle(0), lastRWBankGroupIdx(-1), lastBurstCycle(0), lastBurstBankGroupIdx(-1),
+                  actWindow4(4)
             {}
+
+            void recordACT(uint64_t actCycle, uint32_t bankGroupIdx) {
+                if (actCycle > lastACTCycle) {
+                    lastACTCycle = actCycle;
+                    lastACTBankGroupIdx = bankGroupIdx;
+                }
+                actWindow4.addACT(actCycle);
+            }
+
+            void recordRW(uint64_t rwCycle, uint32_t bankGroupIdx) {
+                if (rwCycle > lastRWCycle) {
+                    lastRWCycle = rwCycle;
+                    lastRWBankGroupIdx = bankGroupIdx;
+                }
+            }
+
+            void recordBurst(uint64_t burstCycle, uint32_t bankGroupIdx) {
+                if (burstCycle > lastBurstCycle) {
+                    lastBurstCycle = burstCycle;
+                    lastBurstBankGroupIdx = bankGroupIdx;
+                }
+            }
         };
 
         struct Bank : public GlobAlloc {
+            const uint32_t bankGroupIdx;
+
             // Bank state and open row.
             bool open;
             uint64_t row;
@@ -230,8 +261,8 @@ class MemChannelBackendDDR : public MemChannelBackend {
             // Sequence number for the last bank row hit.
             uint32_t rowHitSeq;
 
-            explicit Bank(RankState* rs)
-                : open(false), row(0), minPRECycle(0), lastACTCycle(0), lastRWCycle(0), rankState(rs) {}
+            Bank(uint32_t bg, RankState* rs)
+                : bankGroupIdx(bg), open(false), row(0), minPRECycle(0), lastACTCycle(0), lastRWCycle(0), rankState(rs) {}
 
             void recordPRE(uint64_t preCycle) {
                 assert(open);
@@ -245,14 +276,17 @@ class MemChannelBackendDDR : public MemChannelBackend {
                 open = true;
                 row = rowIdx;
                 lastACTCycle = actCycle;
-                rankState->lastACTCycle = std::max(rankState->lastACTCycle, actCycle);
-                rankState->actWindow4.addACT(actCycle);
+                rankState->recordACT(actCycle, bankGroupIdx);
             }
 
             void recordRW(uint64_t rwCycle) {
                 assert(open);
                 lastRWCycle = rwCycle;
-                rankState->lastRWCycle = std::max(rankState->lastRWCycle, rwCycle);
+                rankState->recordRW(rwCycle, bankGroupIdx);
+            }
+
+            void recordBurst(uint64_t burstCycle) {
+                rankState->recordBurst(burstCycle, bankGroupIdx);
             }
 
             // Use glob mem
@@ -293,7 +327,8 @@ class MemChannelBackendDDR : public MemChannelBackend {
         const g_string name;
 
         const uint32_t rankCount;
-        const uint32_t bankCount;
+        const uint32_t bankCount;  // per rank
+        const uint32_t bgrpCount;  // per rank, by default there is a single bank group, so tRRD = tRRD_L, etc.
 
         const uint32_t pageSize;  // in Bytes
         const uint32_t burstSize; // in bits, deviceIO * # burst
