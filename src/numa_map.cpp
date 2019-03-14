@@ -300,14 +300,20 @@ class PageMap : public GlobAlloc {
                 auto pr = chunk.front();
                 uint64_t lastPageAddrEnd = 0;
                 uint64_t lastNode = NUMAMap::INVALID_NODE;
+                bool lastRemoved = false;
                 while (pr != nullptr) {
+                    DEBUG("[PageMap] verify 0x%lx-0x%lx -> %u%s",
+                            pr->pageAddrBegin, pr->pageAddrEnd, pr->node, pr->removed ? " D" : "");
                     assert(pr->pageAddrBegin < pr->pageAddrEnd);
                     assert(pr->node != NUMAMap::INVALID_NODE);
-                    if (pr->node == lastNode) {
+                    if (pr->node == lastNode && !pr->removed && !lastRemoved) {
                         assert_msg(pr->pageAddrBegin > lastPageAddrEnd, "page ranges overlap");
                     } else {
                         assert_msg(pr->pageAddrBegin >= lastPageAddrEnd, "page ranges overlap");
                     }
+                    lastPageAddrEnd = pr->pageAddrEnd;
+                    lastNode = pr->node;
+                    lastRemoved = pr->removed;
                     pr = pr->next;
                 }
 #endif

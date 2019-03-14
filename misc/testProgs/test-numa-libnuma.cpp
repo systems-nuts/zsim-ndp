@@ -495,6 +495,39 @@ void test3() {
     printf("zsim numa libnuma test 3 done\n");
 }
 
+void test4() {
+    printf("zsim numa libnuma test 4\n");
+
+    if (numa_available() < 0) {
+        printf("NUMA API not supported\n");
+        return;
+    }
+
+    const uint32_t page_size = numa_pagesize();
+    const int node = 1;
+
+    // Allocate contiguous range.
+
+    void* expected1 = ADDR;
+    void* addr1 = mmap(expected1, page_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    numa_tonode_memory(addr1, page_size, node);
+    assert(addr1 == expected1);
+    assert(touch_and_get_node(addr1) == node);
+
+    void* expected2 = (void*)((size_t)ADDR + page_size);
+    void* addr2 = mmap(expected2, page_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    numa_tonode_memory(addr2, page_size, node);
+    assert(addr2 == expected2);
+    assert(touch_and_get_node(addr2) == node);
+
+    // Free partial range.
+
+    munmap(addr2, page_size);
+    assert(touch_and_get_node(addr1) == node);
+
+    printf("zsim numa libnuma test 4 done\n");
+}
+
 int main(int argc, char* argv[]) {
     if (argc > 1) {
         if (std::string(argv[1]) == "2") {
@@ -502,6 +535,9 @@ int main(int argc, char* argv[]) {
             return 0;
         } else if (std::string(argv[1]) == "3") {
             test3();
+            return 0;
+        } else if (std::string(argv[1]) == "4") {
+            test4();
             return 0;
         }
     }
