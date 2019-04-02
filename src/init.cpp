@@ -33,6 +33,7 @@
 #include <vector>
 #include "cache.h"
 #include "cache_arrays.h"
+#include "cc_exts.h"
 #include "config.h"
 #include "constants.h"
 #include "contention_sim.h"
@@ -264,12 +265,23 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
     CC* cc;
     if (isTerminal) {
         cc = new MESITerminalCC(numLines, name);
+    } else if (type == "CCHub") {
+        // Build specialized CC according to protocol.
+        string protocolType = config.get<const char*>(prefix + "protocol.type", "Directory");
+        if (protocolType == "Directory") {
+            cc = new MESIDirectoryHubCC(numLines, nonInclusiveHack, name);
+        } else {
+            panic("Invalid coherence protocol %s", protocolType.c_str());
+        }
     } else {
         cc = new MESICC(numLines, nonInclusiveHack, name);
     }
     rp->setCC(cc);
     if (!isTerminal) {
         if (type == "Simple") {
+            cache = new Cache(numLines, cc, array, rp, accLat, invLat, name);
+        } else if (type == "CCHub") {
+            // Use simple cache with specialized CC as coherence hub.
             cache = new Cache(numLines, cc, array, rp, accLat, invLat, name);
         } else if (type == "Timing") {
             uint32_t mshrs = config.get<uint32_t>(prefix + "mshrs", 16);
