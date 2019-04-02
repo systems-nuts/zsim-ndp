@@ -240,6 +240,10 @@ class MESITopCC : public GlobAlloc {
             return array[lineId].numSharers;
         }
 
+        /* Additional sharer info probe. */
+        inline bool hasExclusiveSharer(uint32_t lineId) const { return array[lineId].isExclusive(); }
+        inline bool isSharer(uint32_t lineId, uint32_t childId) const { return array[lineId].sharers[childId]; }
+
     private:
         uint64_t sendInvalidates(Address lineAddr, uint32_t lineId, InvType type, bool* reqWriteback, uint64_t cycle, uint32_t srcId);
 };
@@ -275,7 +279,7 @@ static inline bool CheckForMESIRace(AccessType& type, MESIState* state, MESIStat
 
 // Non-terminal CC; accepts GETS/X and PUTS/X accesses
 class MESICC : public CC {
-    private:
+    protected:
         MESITopCC* tcc;
         MESIBottomCC* bcc;
         uint32_t numLines;
@@ -409,7 +413,7 @@ class MESICC : public CC {
 
 // Terminal CC, i.e., without children --- accepts GETS/X, but not PUTS/X
 class MESITerminalCC : public CC {
-    private:
+    protected:
         MESIBottomCC* bcc;
         uint32_t numLines;
         g_string name;
