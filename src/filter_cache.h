@@ -149,7 +149,8 @@ class FilterCache : public Cache {
         }
 
         uint64_t invalidate(const InvReq& req) {
-            Cache::startInvalidate();  // grabs cache's downLock
+            bool skipInv = Cache::startInvalidate(req);  // grabs cache's downLock
+            assert(!skipInv);
             futex_lock(&filterLock);
             uint32_t idx = req.lineAddr & setMask; //works because of how virtual<->physical is done...
             if ((filterArray[idx].rdAddr | procMask) == req.lineAddr) { //FIXME: If another process calls invalidate(), procMask will not match even though we may be doing a capacity-induced invalidation!

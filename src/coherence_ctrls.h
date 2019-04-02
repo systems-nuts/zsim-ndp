@@ -53,7 +53,7 @@ class CC : public GlobAlloc {
         virtual void endAccess(const MemReq& req) = 0;
 
         //Inv methods
-        virtual void startInv() = 0;
+        virtual bool startInv(const InvReq& req) = 0;  // returns true if invalidation should be skipped.
         virtual uint64_t processInv(const InvReq& req, int32_t lineId, uint64_t startCycle) = 0;
 
         //Repl policy interface
@@ -394,8 +394,9 @@ class MESICC : public CC {
         }
 
         //Inv methods
-        void startInv() {
+        bool startInv(const InvReq& req) {
             bcc->lock(); //note we don't grab tcc; tcc serializes multiple up accesses, down accesses don't see it
+            return false;
         }
 
         uint64_t processInv(const InvReq& req, int32_t lineId, uint64_t startCycle) {
@@ -484,8 +485,9 @@ class MESITerminalCC : public CC {
         }
 
         //Inv methods
-        void startInv() {
+        bool startInv(const InvReq& req) {
             bcc->lock();
+            return false;
         }
 
         uint64_t processInv(const InvReq& req, int32_t lineId, uint64_t startCycle) {
