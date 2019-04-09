@@ -269,7 +269,9 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         // Build specialized CC according to protocol.
         string protocolType = config.get<const char*>(prefix + "protocol.type", "Directory");
         if (protocolType == "Directory") {
-            cc = new MESIDirectoryHubCC(numLines, nonInclusiveHack, name);
+            bool forwarding = config.get<bool>(prefix + "protocol.forwarding", true);
+            if (forwarding) cc = new MESIDirectoryHubCC<true>(numLines, nonInclusiveHack, name);
+            else cc = new MESIDirectoryHubCC<false>(numLines, nonInclusiveHack, name);
         } else {
             panic("Invalid coherence protocol %s", protocolType.c_str());
         }
