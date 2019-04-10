@@ -87,6 +87,11 @@ class MESIDirectoryHubCC : public MESICC {
         }
 
     protected:
+        // Filters repeated access from children, e.g., a directory CC without forwarding.
+        const bool filterAcc;
+        // Filters no-op invalidations to non-existing lines from parents, e.g., a broadcast CC.
+        const bool filterInv;
+
         // Children.
         g_vector<BaseCache*> children;
 
@@ -103,11 +108,20 @@ class MESIDirectoryHubCC : public MESICC {
 
         Counter profGETSFwd, profGETXFwdIM, profGETXFwdSM;
         Counter profGETSRly, profGETXRlyIM, profGETXRlySM;
+        Counter profGETSRep, profGETXRep;
+        Counter profINVNop, profINVXNop;
         Counter profGETRlyNextLevelLat, profGETRlyNetLat;
 
+        PAD();
+        lock_t nopStatsLock;  // used for invalidate filtering.
+        PAD();
+
     public:
-        MESIDirectoryHubCC(uint32_t _numLines, bool _nonInclusiveHack, g_string& _name)
-            : MESICC(_numLines, _nonInclusiveHack, _name), selfId(-1u), bottomLock(nullptr) {}
+        MESIDirectoryHubCC(uint32_t _numLines, bool _nonInclusiveHack, bool _filterAcc, bool _filterInv, g_string& _name)
+            : MESICC(_numLines, _nonInclusiveHack, _name), filterAcc(_filterAcc), filterInv(_filterInv), selfId(-1u), bottomLock(nullptr)
+        {
+            futex_init(&nopStatsLock);
+        }
 
         void setChildren(const g_vector<BaseCache*>& _children, Network* network) {
             children.assign(_children.begin(), _children.end());
@@ -137,6 +151,10 @@ class MESIDirectoryHubCC : public MESICC {
             profGETSRly.init("rlyGETS", "Relayed GETS fetches");
             profGETXRlyIM.init("rlyGETXIM", "Relayed GETX I->M fetches");
             profGETXRlySM.init("rlyGETXSM", "Relayed GETX S->M fetches (upgrade fetches)");
+            profGETSRep.init("repGETS", "Repeated GETS fetches");
+            profGETXRep.init("repGETX", "Repeated GETX fetches");
+            profINVNop.init("nopINV", "Invalidate non-ops (from upper level)");
+            profINVXNop.init("nopINVX", "Downgrade non-ops (from upper level)");
             profGETRlyNextLevelLat.init("latRlyGETnl", "Relayed GET request latency on next level");
             profGETRlyNetLat.init("latRlyGETnet", "Relayed GET request latency on network to next level");
 
@@ -148,6 +166,15 @@ class MESIDirectoryHubCC : public MESICC {
                 cacheStat->append(&profGETSRly);
                 cacheStat->append(&profGETXRlyIM);
                 cacheStat->append(&profGETXRlySM);
+            }
+
+            if (filterAcc) {
+                cacheStat->append(&profGETSRep);
+                cacheStat->append(&profGETXRep);
+            }
+            if (filterInv) {
+                cacheStat->append(&profINVNop);
+                cacheStat->append(&profINVXNop);
             }
 
             // All hits on the directory are replaced as forwarding.
@@ -174,12 +201,24 @@ class MESIDirectoryHubCC : public MESICC {
 
             uint32_t fwdId = -1u;
             bool needsParentAccess = false;  // whether a directory GETS/GETX hit cannot use forwarding and requires an access to parent.
+            bool skip = false;  // whether we should skip the access to the current level if it is a repeated access.
 
             if (req.type == GETS && lineId != -1 && bcc->isValid(lineId)) {
                 // GETS hit on the directory.
                 needsParentAccess = true;
-                if (ChildrenForwarding) {
-                    assert(!tcc->isSharer(lineId, req.childId));
+                if (tcc->isSharer(lineId, req.childId)) {
+                    // The child requesting GETS is already a sharer.
+                    assert_msg(filterAcc, "%s: encounter a repeated GETS access; did you forget to enable filterAcc?", name.c_str());
+                    skip = true;
+                    needsParentAccess = false;  // also skip parent access
+                    // If there are other sharers, use forwarding. Otherwise leave for access to parent.
+                    if (ChildrenForwarding && tcc->numSharers(lineId) > 1) {
+                        fwdId = findForwarder(lineId, req.childId);
+                        profGETSFwd.inc();
+                    } else {
+                        profGETSRep.inc();
+                    }
+                } else if (ChildrenForwarding) {
                     // When there is an exclusive sharer, the basic protocol sends INVX to represent FWD.
                     // Otherwise we find one sharer to forward.
                     if (!tcc->hasExclusiveSharer(lineId)) {
@@ -193,7 +232,15 @@ class MESIDirectoryHubCC : public MESICC {
             } else if (req.type == GETX && lineId != -1 && bcc->isExclusive(lineId)) {
                 // GETX hit on the directory.
                 needsParentAccess = true;
-                if (!tcc->isSharer(lineId, req.childId)) {
+                if (tcc->hasExclusiveSharer(lineId) && tcc->isSharer(lineId, req.childId)) {
+                    // The child requesting GETX is already the exclusive sharer.
+                    assert_msg(filterAcc, "%s: encounter a repeated GETX access; did you forget to enable filterAcc?", name.c_str());
+                    skip = true;
+                    needsParentAccess = false;  // also skip parent access
+                    // No other sharers, no forwarding.
+                    // Here we do not know what the child state should be, i.e., not distinguish I->M and S->M.
+                    profGETXRep.inc();
+                } else if (!tcc->isSharer(lineId, req.childId)) {
                     // When the requesting child is not a sharer.
                     if (ChildrenForwarding) {
                         // The basic protocol always sends INVs to other children, one of which represents FWD.
@@ -226,6 +273,23 @@ class MESIDirectoryHubCC : public MESICC {
                 // Forwarding cannot be used. Send a no-op relayed access to parent.
                 assert(fwdId == -1u);
 
+                /* NOTE(gaomy):
+                 *
+                 * Here a race may happen because we issue an access to parent and will release our bottom lock shortly
+                 * before the access. An intermediate invalidate may come in and cause the line states in this level as
+                 * well as any child levels to be invalid.
+                 *
+                 * In such case, we make sure that the relayed access could become an actual access to the parent if
+                 * needed, to restore the state in this level. This includes:
+                 * - use the true state in the CC of this level in the relayed access to the parent.
+                 * - treat filterAcc as a sanity check rather than a condition, so an access can adaptively switch
+                 *   between a relayed one or an actual one.
+                 * - check the state after access, to make sure it is restored to a valid state.
+                 *
+                 * Also, then the access to this level (after the access to parent) should not be skipped, and would
+                 * handle the states of child levels.
+                 */
+
                 auto lineInfo = lineInfoMap.at(req.lineAddr);
                 uint32_t parentId = lineInfo.parentId;
                 MESIState* state = lineInfo.state;  // use the true state of this level to detect race.
@@ -240,9 +304,15 @@ class MESIDirectoryHubCC : public MESICC {
                 profGETRlyNextLevelLat.inc(nextLevelLat);
                 profGETRlyNetLat.inc(netLat);
                 respCycle += nextLevelLat + netLat;
+
+                // Make sure the state of this level is restored (may not to the same original state, but a valid hit).
+                assert((req.type == GETS && *state != I) || (req.type == GETX && (*state == M || *state == E)));
+
+                // Do not skip the access to this level.
+                assert(!skip);
             }
 
-            respCycle = MESICC::processAccess(req, lineId, respCycle, getDoneCycle);
+            if (!skip) respCycle = MESICC::processAccess(req, lineId, respCycle, getDoneCycle);
 
             // Forward.
             if (fwdId != -1u) {
@@ -276,6 +346,53 @@ class MESIDirectoryHubCC : public MESICC {
             }
 
             return respCycle;
+        }
+
+        bool startInv(const InvReq& req) {
+            // Filter invalidates.
+            if (req.writeback == nullptr /* FIXME: use a new InvType. */) {
+                assert_msg(filterInv, "%s: encounter a broadcast invalidates; did you forget to enable filterInv?", name.c_str());
+                // No-op invalidation.
+                futex_lock(&nopStatsLock);
+                if (req.type == INV) {
+                    profINVNop.inc();
+                } else if (req.type == INVX) {
+                    profINVXNop.inc();
+                } else {
+                    assert(req.type == FWD);
+                    // FWD replaces INVX when already non-exclusive. See MESIBroadcastCC::broadcastNopInv().
+                    profINVXNop.inc();
+                }
+                futex_unlock(&nopStatsLock);
+                return true;
+            }
+
+            bool skipInv = MESICC::startInv(req);
+
+            if (!skipInv && req.type == INV) assert(removeLineInfo(req.lineAddr) == 1);
+
+            return skipInv;
+        }
+
+        bool startAccess(MemReq& req) {
+            if (filterAcc) {
+                // These checks should always match when MESIBottomCC::processAccess() does NOT issue parent accesses.
+                if ((req.type == GETS && req.initialState != I) ||
+                        (req.type == GETX && (req.initialState == M || req.initialState == E))) {
+                    // This is a repeated access expected to be filtered, which looks invalid to the race check logic. We need to fool it.
+                    MESIState dummyState = I;
+                    MemReq dummyReq = req;
+                    dummyReq.state = &dummyState;
+                    dummyReq.initialState = dummyState;
+                    // We still have the child lock, state should not change.
+                    assert(req.initialState == *req.state);
+                    assert(MESICC::startAccess(dummyReq) == false);
+                    // Now we have properly locked.
+                    assert(dummyReq.type == req.type);
+                    return false;
+                }
+            }
+            return MESICC::startAccess(req);
         }
 
     protected:
