@@ -29,7 +29,7 @@
 #include <string>
 #include <typeinfo>
 #include <vector>
-#include "libconfig.h++"
+#include "libconfig.h"
 #include "log.h"
 
 // We need minor specializations to work with older versions of libconfig
@@ -47,51 +47,60 @@ using std::vector;
 typedef long long lc_int64;  // NOLINT(runtime/int)
 
 Config::Config(const char* inFile) {
-    inCfg = new libconfig::Config();
-    outCfg = new libconfig::Config();
-    try {
-        inCfg->readFile(inFile);
-    } catch (libconfig::FileIOException fioe) {
+    inCfg = new config_t;
+    outCfg = new config_t;
+    config_init(inCfg);
+    config_init(outCfg);
+    config_read_file(inCfg, inFile);
+    auto err = config_error_type(inCfg);
+    if (err == CONFIG_ERR_FILE_IO) {
         panic("Input config file %s could not be read", inFile);
-    } catch (libconfig::ParseException pe) {
+    } else if (err == CONFIG_ERR_PARSE) {
 #if LIBCONFIG_VERSION >= 10408 // 1.4.8
-        const char* peFile = pe.getFile();
+        const char* peFile = config_error_file(inCfg);
 #else
         // Old versions of libconfig don't have libconfig::ParseException::getFile()
         // Using inFile is typically OK, but won't be accurate with multi-file configs (includes)
         const char* peFile = inFile;
 #endif
-        panic("Input config file %s could not be parsed, line %d, error: %s", peFile, pe.getLine(), pe.getError());
+        panic("Input config file %s could not be parsed, line %d, error: %s", peFile, config_error_line(inCfg), config_error_text(inCfg));
+    } else {
+        assert(err == CONFIG_ERR_NONE);
     }
 }
 
 Config::~Config() {
+    config_destroy(inCfg);
+    config_destroy(outCfg);
     delete inCfg;
     delete outCfg;
 }
 
 // Helper function: Add "*"-prefixed vars, which are used by our scripts but not zsim, to outCfg
 // Returns number of copied vars
-static uint32_t copyNonSimVars(libconfig::Setting& s1, libconfig::Setting& s2, std::string prefix) {
+static uint32_t copyNonSimVars(config_setting_t* s1, config_setting_t* s2, std::string prefix) {
     uint32_t copied = 0;
-    for (uint32_t i = 0; i < (uint32_t)s1.getLength(); i++) {
-        const char* name = s1[i].getName();
+    for (uint32_t i = 0; i < (uint32_t)config_setting_length(s1); i++) {
+        config_setting_t* s1i = config_setting_get_elem(s1, i);
+        const char* name = config_setting_name(s1i);
+        config_setting_t* s2i = config_setting_get_member(s2, name);
         if (name[0] == '*') {
-            if (s2.exists(name)) panic("Setting %s was read, should be private", (prefix + name).c_str());
+            if (s2i) panic("Setting %s was read, should be private", (prefix + name).c_str());
             // This could be as simple as:
-            //s2.add(s1[i].getType()) = s1[i];
+            // config_seeting_set(config_setting_add(s2, name, config_setting_type(s1i)), config_setting_get(s1i));
             // However, because Setting kinda sucks, we need to go type by type:
-            libconfig::Setting& ns = s2.add(name, s1[i].getType());
-            if      (libconfig::Setting::Type::TypeInt     == s1[i].getType()) ns = (int) s1[i];
-            else if (libconfig::Setting::Type::TypeInt64   == s1[i].getType()) ns = (lc_int64) s1[i];
-            else if (libconfig::Setting::Type::TypeBoolean == s1[i].getType()) ns = (bool) s1[i];
-            else if (libconfig::Setting::Type::TypeString  == s1[i].getType()) ns = (const char*) s1[i];
+            int s1iType = config_setting_type(s1i);
+            s2i = config_setting_add(s2, name, s1iType);
+            if      (CONFIG_TYPE_INT     == s1iType) config_setting_set_int    (s2i, config_setting_get_int    (s1i));
+            else if (CONFIG_TYPE_INT64   == s1iType) config_setting_set_int64  (s2i, config_setting_get_int64  (s1i));
+            else if (CONFIG_TYPE_BOOL    == s1iType) config_setting_set_bool   (s2i, config_setting_get_bool   (s1i));
+            else if (CONFIG_TYPE_STRING  == s1iType) config_setting_set_string (s2i, config_setting_get_string (s1i));
             else panic("Unknown type for priv setting %s, cannot copy", (prefix + name).c_str());
             copied++;
         }
 
-        if (s1[i].isGroup() && s2.exists(name)) {
-            copied += copyNonSimVars(s1[i], s2[name], prefix + name + ".");
+        if (config_setting_is_group(s1i) && s2i) {
+            copied += copyNonSimVars(s1i, s2i, prefix + name + ".");
         }
     }
     return copied;
@@ -99,15 +108,17 @@ static uint32_t copyNonSimVars(libconfig::Setting& s1, libconfig::Setting& s2, s
 
 // Helper function: Compares two settings recursively, checking for inclusion
 // Returns number of settings without inclusion (given but unused)
-static uint32_t checkIncluded(libconfig::Setting& s1, libconfig::Setting& s2, std::string prefix) {
+static uint32_t checkIncluded(config_setting_t* s1, config_setting_t* s2, std::string prefix) {
     uint32_t unused = 0;
-    for (uint32_t i = 0; i < (uint32_t)s1.getLength(); i++) {
-        const char* name = s1[i].getName();
-        if (!s2.exists(name)) {
+    for (uint32_t i = 0; i < (uint32_t)config_setting_length(s1); i++) {
+        config_setting_t* s1i = config_setting_get_elem(s1, i);
+        const char* name = config_setting_name(s1i);
+        config_setting_t* s2i = config_setting_get_member(s2, name);
+        if (!s2i) {
             warn("Setting %s not used during configuration", (prefix + name).c_str());
             unused++;
-        } else if (s1[i].isGroup()) {
-            unused += checkIncluded(s1[i], s2[name], prefix + name + ".");
+        } else if (config_setting_is_group(s1i)) {
+            unused += checkIncluded(s1i, s2i, prefix + name + ".");
         }
     }
     return unused;
@@ -117,8 +128,8 @@ static uint32_t checkIncluded(libconfig::Setting& s1, libconfig::Setting& s2, st
 
 //Called when initialization ends. Writes output config, and emits warnings for unused input settings
 void Config::writeAndClose(const char* outFile, bool strictCheck) {
-    uint32_t nonSimVars = copyNonSimVars(inCfg->getRoot(), outCfg->getRoot(), std::string(""));
-    uint32_t unused = checkIncluded(inCfg->getRoot(), outCfg->getRoot(), std::string(""));
+    uint32_t nonSimVars = copyNonSimVars(config_root_setting(inCfg), config_root_setting(outCfg), std::string(""));
+    uint32_t unused = checkIncluded(config_root_setting(inCfg), config_root_setting(outCfg), std::string(""));
 
     if (nonSimVars) info("Copied %d non-sim var%s to output config", nonSimVars, (nonSimVars > 1)? "s" : "");
     if (unused) {
@@ -129,16 +140,16 @@ void Config::writeAndClose(const char* outFile, bool strictCheck) {
         }
     }
 
-    try {
-        outCfg->writeFile(outFile);
-    } catch (libconfig::FileIOException fioe) {
+    config_write_file(outCfg, outFile);
+    auto err = config_error_type(outCfg);
+    if (err == CONFIG_ERR_FILE_IO) {
         panic("Output config file %s could not be written", outFile);
     }
 }
 
 
 bool Config::exists(const char* key) {
-    return inCfg->exists(key);
+    return config_lookup(inCfg, key) != nullptr;
 }
 
 //Helper functions
@@ -149,13 +160,13 @@ template<> const char* getTypeName<bool>() {return "bool";}
 template<> const char* getTypeName<const char*>() {return "string";}
 template<> const char* getTypeName<double>() {return "double";}
 
-typedef libconfig::Setting::Type SType;
+typedef int SType;
 template<typename T> static SType getSType();
-template<> SType getSType<int>() {return SType::TypeInt;}
-template<> SType getSType<lc_int64>() {return SType::TypeInt64;}
-template<> SType getSType<bool>() {return SType::TypeBoolean;}
-template<> SType getSType<const char*>() {return SType::TypeString;}
-template<> SType getSType<double>() {return SType::TypeFloat;}
+template<> SType getSType<int>() {return CONFIG_TYPE_INT;}
+template<> SType getSType<lc_int64>() {return CONFIG_TYPE_INT64;}
+template<> SType getSType<bool>() {return CONFIG_TYPE_BOOL;}
+template<> SType getSType<const char*>() {return CONFIG_TYPE_STRING;}
+template<> SType getSType<double>() {return CONFIG_TYPE_FLOAT;}
 
 template<typename T> static bool getEq(T v1, T v2);
 template<> bool getEq<int>(int v1, int v2) {return v1 == v2;}
@@ -164,7 +175,21 @@ template<> bool getEq<bool>(bool v1, bool v2) {return v1 == v2;}
 template<> bool getEq<const char*>(const char* v1, const char* v2) {return strcmp(v1, v2) == 0;}
 template<> bool getEq<double>(double v1, double v2) {return v1 == v2;}
 
-template<typename T> static void writeVar(libconfig::Setting& setting, const char* key, T val) {
+template<typename T> static T getValue(config_setting_t* s);
+template<> int getValue<int>(config_setting_t* s) { return config_setting_get_int(s); }
+template<> lc_int64 getValue<lc_int64>(config_setting_t* s) { return config_setting_get_int64(s); }
+template<> double getValue<double>(config_setting_t* s) { return config_setting_get_float(s); }
+template<> bool getValue<bool>(config_setting_t* s) { return config_setting_get_bool(s); }
+template<> const char* getValue<const char*>(config_setting_t* s) { return config_setting_get_string(s); }
+
+template<typename T> static int setValue(config_setting_t* s, T v);
+template<> int setValue<int>(config_setting_t* s, int v) { return config_setting_set_int(s, v); }
+template<> int setValue<lc_int64>(config_setting_t* s, lc_int64 v) { return config_setting_set_int64(s, v); }
+template<> int setValue<double>(config_setting_t* s, double v) { return config_setting_set_float(s, v); }
+template<> int setValue<bool>(config_setting_t* s, bool v) { return config_setting_set_bool(s, v); }
+template<> int setValue<const char*>(config_setting_t* s, const char* v) { return config_setting_set_string(s, v); }
+
+template<typename T> static void writeVar(config_setting_t* setting, const char* key, T val) {
     //info("writeVal %s", key);
     const char* sep = strchr(key, '.');
     if (sep) {
@@ -174,43 +199,43 @@ template<typename T> static void writeVar(libconfig::Setting& setting, const cha
         strncpy(prefix, key, plen);
         prefix[plen] = 0;
         // libconfig strdups all passed strings, so it's fine that prefix is local.
-        if (!setting.exists(prefix)) {
-            try {
-                setting.add((const char*)prefix, SType::TypeGroup);
-            } catch (libconfig::SettingNameException sne) {
+        if (!config_setting_lookup(setting, prefix)) {
+            if (!config_setting_add(setting, (const char*)prefix, CONFIG_TYPE_GROUP)) {
                 panic("libconfig error adding group setting %s", prefix);
             }
         }
-        libconfig::Setting& child = setting[(const char*)prefix];
+        config_setting_t* child = config_setting_get_member(setting, (const char*)prefix);
         writeVar(child, sep+1, val);
     } else {
-        if (!setting.exists(key)) {
-            try {
-                setting.add(key, getSType<T>()) = val;
-            } catch (libconfig::SettingNameException sne) {
+        config_setting_t* leaf = config_setting_get_member(setting, key);
+        if (!leaf) {
+            leaf = config_setting_add(setting, key, getSType<T>());
+            if (!leaf) {
                 panic("libconfig error adding leaf setting %s", key);
             }
+            assert(setValue<T>(leaf, val));
         } else {
             //If this panics, what the hell are you doing in the code? Multiple reads and different defaults??
-            T origVal = setting[key];
+            T origVal = getValue<T>(leaf);
             if (!getEq(val, origVal)) panic("Duplicate writes to out config key %s with different values!", key);
         }
     }
 }
 
-template<typename T> static void writeVar(libconfig::Config* cfg, const char* key, T val) {
-    libconfig::Setting& setting = cfg->getRoot();
-    writeVar(setting, key, val);
+template<typename T> static void writeVar(config_t* cfg, const char* key, T val) {
+    writeVar(config_root_setting(cfg), key, val);
 }
 
 
 template<typename T>
 T Config::genericGet(const char* key, T def) {
     T val;
-    if (inCfg->exists(key)) {
-        if (!inCfg->lookupValue(key, val)) {
+    auto setting = config_lookup(inCfg, key);
+    if (setting) {
+        if (config_setting_type(setting) != getSType<T>()) {
             panic("Type error on optional setting %s, expected type %s", key, getTypeName<T>());
         }
+        val = getValue<T>(setting);
     } else {
         val = def;
     }
@@ -221,10 +246,12 @@ T Config::genericGet(const char* key, T def) {
 template<typename T>
 T Config::genericGet(const char* key) {
     T val;
-    if (inCfg->exists(key)) {
-        if (!inCfg->lookupValue(key, val)) {
+    auto setting = config_lookup(inCfg, key);
+    if (setting) {
+        if (config_setting_type(setting) != getSType<T>()) {
             panic("Type error on mandatory setting %s, expected type %s", key, getTypeName<T>());
         }
+        val = getValue<T>(setting);
     } else {
         panic("Mandatory setting %s (%s) not found", key, getTypeName<T>())
     }
@@ -247,11 +274,12 @@ template<> double Config::get<double>(const char* key, double def) {return (doub
 
 //Get subgroups in a specific key
 void Config::subgroups(const char* key, std::vector<const char*>& grps) {
-    if (inCfg->exists(key)) {
-        libconfig::Setting& s = inCfg->lookup(key);
-        uint32_t n = s.getLength(); //0 if not a group or list
+    auto setting = config_lookup(inCfg, key);
+    if (setting) {
+        uint32_t n = config_setting_length(setting); //0 if not a group or list
         for (uint32_t i = 0; i < n; i++) {
-            if (s[i].isGroup()) grps.push_back(s[i].getName());
+            auto s = config_setting_get_elem(setting, i);
+            if (config_setting_is_group(s)) grps.push_back(config_setting_name(s));
         }
     }
 }

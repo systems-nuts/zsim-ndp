@@ -108,7 +108,7 @@ def buildSim(cppFlags, dir, type, pgo=None):
 
     # Non-pintool libraries
     env["LIBPATH"] = []
-    env["LIBS"] = ["config++"]
+    env["LIBS"] = ["config"]
 
     env["LINKFLAGS"] = ""
 

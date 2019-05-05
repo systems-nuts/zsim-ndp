@@ -37,16 +37,12 @@
 #include <vector>
 #include "log.h"
 
-namespace libconfig {
-    class Config;
-    class Setting;
-};
-
+struct config_t;
 
 class Config {
     private:
-        libconfig::Config* inCfg;
-        libconfig::Config* outCfg;
+        config_t* inCfg;
+        config_t* outCfg;
 
     public:
         explicit Config(const char* inFile);
