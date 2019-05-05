@@ -102,13 +102,7 @@ ContentionSim::ContentionSim(uint32_t _numDomains, uint32_t _numSimThreads) {
 
 void ContentionSim::postInit() {
     for (uint32_t i = 0; i < zinfo->numCores; i++) {
-        TimingCore* tcore = dynamic_cast<TimingCore*>(zinfo->cores[i]);
-        if (tcore) {
-            skipContention = false;
-            return;
-        }
-        OOOCore* ocore = dynamic_cast<OOOCore*>(zinfo->cores[i]);
-        if (ocore) {
+        if (zinfo->cores[i]->needsCSim()) {
             skipContention = false;
             return;
         }
@@ -151,10 +145,7 @@ void ContentionSim::simulatePhase(uint64_t limit) {
 
     //info("simulatePhase limit %ld", limit);
     for (uint32_t i = 0; i < zinfo->numCores; i++) {
-        TimingCore* tcore = dynamic_cast<TimingCore*>(zinfo->cores[i]);
-        if (tcore) tcore->cSimStart();
-        OOOCore* ocore = dynamic_cast<OOOCore*>(zinfo->cores[i]);
-        if (ocore) ocore->cSimStart();
+        zinfo->cores[i]->cSimStart();
     }
 
     inCSim = true;
@@ -172,10 +163,7 @@ void ContentionSim::simulatePhase(uint64_t limit) {
     __sync_synchronize();
 
     for (uint32_t i = 0; i < zinfo->numCores; i++) {
-        TimingCore* tcore = dynamic_cast<TimingCore*>(zinfo->cores[i]);
-        if (tcore) tcore->cSimEnd();
-        OOOCore* ocore = dynamic_cast<OOOCore*>(zinfo->cores[i]);
-        if (ocore) ocore->cSimEnd();
+        zinfo->cores[i]->cSimEnd();
     }
 
     lastLimit = limit;

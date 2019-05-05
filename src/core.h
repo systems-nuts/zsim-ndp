@@ -84,6 +84,11 @@ class Core : public GlobAlloc {
         virtual void leave() {}
         virtual void join() {}
 
+        //Contention simulation interface
+        virtual bool needsCSim() const { return false; }
+        virtual void cSimStart() {}
+        virtual void cSimEnd() {}
+
         virtual InstrFuncPtrs GetFuncPtrs() = 0;
 };
 
