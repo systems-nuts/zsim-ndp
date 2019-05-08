@@ -26,7 +26,7 @@
 
 #include "scheduler.h"
 #include <fstream>
-#include <regex>
+#include <regex.h>  // POSIX regex instead of C++11 regex
 #include <sys/stat.h>
 #include "config.h" // for ParseList
 #include "pin.H"
@@ -140,8 +140,10 @@ void Scheduler::watchdogThreadFunc() {
                 uint32_t cid = th->cid;
 
                 const g_string& sbRegexStr = zinfo->procArray[pid]->getSyscallBlacklistRegex();
-                std::regex sbRegex(sbRegexStr.c_str());
-                if (std::regex_match(GetSyscallName(fl->syscallNumber), sbRegex)) {
+                regex_t sbRegex;
+                if (regcomp(&sbRegex, sbRegexStr.c_str(), REG_EXTENDED | REG_NOSUB))
+                    panic("Scheduler fails to compile syscall blacklist regex (%s)", sbRegexStr.c_str());
+                if (regexec(&sbRegex, GetSyscallName(fl->syscallNumber), 0, nullptr, 0) == 0) {
                     // If this is the last leave we catch, it is the culprit for sure -> blacklist it
                     // Over time, this will blacklist every blocking syscall
                     // The root reason for being conservative though is that we don't have a sure-fire

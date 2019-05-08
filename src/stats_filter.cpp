@@ -24,15 +24,15 @@
  */
 
 #include "stats_filter.h"
-#include <regex>
+#include <regex.h>  // POSIX regex instead of C++11 regex
 #include <string>
 #include <vector>
 
-using std::regex; using std::regex_match; using std::string; using std::vector;
+using std::string; using std::vector;
 
 // FilterStats operates recursively, building up a filtered hierarchy of aggregates
 
-AggregateStat* FilterStatsLevel(const AggregateStat* src, const regex& filter, const char* prefix) {
+AggregateStat* FilterStatsLevel(const AggregateStat* src, const regex_t* filter, const char* prefix) {
     string base = prefix? (string(prefix) + src->name() + ".") : ""; //if nullptr prefix, omit our name (we're root)
     vector<Stat*> children;
     for (uint32_t i = 0; i < src->curSize(); i++) {
@@ -43,7 +43,7 @@ AggregateStat* FilterStatsLevel(const AggregateStat* src, const regex& filter, c
             if (fs) children.push_back(fs);
         } else {
             string name = base + child->name();
-            if (regex_match(name, filter)) children.push_back(child);
+            if (regexec(filter, name.c_str(), 0, nullptr, 0) == 0) children.push_back(child);
         }
     }
 
@@ -58,8 +58,9 @@ AggregateStat* FilterStatsLevel(const AggregateStat* src, const regex& filter, c
 }
 
 AggregateStat* FilterStats(const AggregateStat* rootStat, const char* regexStr) {
-    regex filter(regexStr);
-    AggregateStat* res = FilterStatsLevel(rootStat, filter, nullptr /*root*/);
+    regex_t filter;
+    if (regcomp(&filter, regexStr, REG_EXTENDED | REG_NOSUB)) panic("FilterStats fails to compile regex (%s)", regexStr);
+    AggregateStat* res = FilterStatsLevel(rootStat, &filter, nullptr /*root*/);
     if (res) res->makeImmutable();
     return res;
 }
