@@ -36,7 +36,7 @@
 PrePatchFn prePatchFunctions[MAX_SYSCALLS];
 PostPatchFn postPatchFunctions[MAX_THREADS];
 
-const PostPatchFn NullPostPatch = [](PostPatchArgs) {return PPA_NOTHING;};
+const PostPatchFn NullPostPatch;
 
 // Common prepatch functions
 PostPatchFn NullPatch(PrePatchArgs) {

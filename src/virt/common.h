@@ -29,7 +29,7 @@
 // Typedefs and common functions for Virt implementation
 // This is internal to virt, and should only be included withing virt/ files
 
-#include <functional>
+#include "galloc.h"
 #include "log.h"
 #include "pin.H"
 #include "virt/virt.h"
@@ -48,7 +48,72 @@ struct PostPatchArgs {
     SYSCALL_STANDARD std;
 };
 
-typedef std::function<PostPatchAction(PostPatchArgs)> PostPatchFn;
+// Define our own wrapper for lambda closures instead of std::function.
+class PostPatchFn {
+private:
+    class LambdaWrapperBase : public GlobAlloc {
+    public:
+        virtual ~LambdaWrapperBase() = default;
+        virtual PostPatchAction invoke(PostPatchArgs&) = 0;
+        virtual LambdaWrapperBase* clone() const = 0;
+    };
+
+    template<typename Lambda>
+    class LambdaWrapper : public LambdaWrapperBase {
+    private:
+        Lambda l;
+    public:
+        LambdaWrapper(const Lambda& _l) : l(_l) {}
+        ~LambdaWrapper() override = default;
+        PostPatchAction invoke(PostPatchArgs& args) { return l(args); }
+        LambdaWrapperBase* clone() const { return new LambdaWrapper<Lambda>(l); }
+    };
+
+private:
+    LambdaWrapperBase* w;
+
+public:
+    template<typename Lambda>
+    PostPatchFn(Lambda l) {
+        w = new LambdaWrapper<Lambda>(l);
+    }
+
+    PostPatchFn() {
+        w = nullptr;
+    }
+
+    PostPatchFn(const PostPatchFn& other) {
+        w = other.w ? other.w->clone() : nullptr;
+    }
+
+    PostPatchFn& operator=(const PostPatchFn& other) {
+        w = other.w ? other.w->clone() : nullptr;
+        return *this;
+    }
+
+    PostPatchFn(PostPatchFn&& other) {
+        delete w;
+        w = other.w;
+        other.w = nullptr;
+    }
+
+    PostPatchFn& operator=(PostPatchFn&& other) {
+        delete w;
+        w = other.w;
+        other.w = nullptr;
+        return *this;
+    }
+
+    ~PostPatchFn() {
+        delete w;
+        w = nullptr;
+    }
+
+    PostPatchAction operator()(PostPatchArgs args) {
+        return w ? w->invoke(args) : PPA_NOTHING;
+    }
+};
+
 typedef PostPatchFn (*PrePatchFn)(PrePatchArgs);
 
 extern const PostPatchFn NullPostPatch; // defined in virt.cpp
