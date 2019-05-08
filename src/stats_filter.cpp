@@ -37,7 +37,8 @@ AggregateStat* FilterStatsLevel(const AggregateStat* src, const regex& filter, c
     vector<Stat*> children;
     for (uint32_t i = 0; i < src->curSize(); i++) {
         Stat* child = src->get(i);
-        if (AggregateStat* as = dynamic_cast<AggregateStat*>(child)) {
+        if (child->isType(StatType::AGGREGATE)) {
+            AggregateStat* as = static_cast<AggregateStat*>(child);
             AggregateStat* fs = FilterStatsLevel(as, filter, base.c_str());
             if (fs) children.push_back(fs);
         } else {

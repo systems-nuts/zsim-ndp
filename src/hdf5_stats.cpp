@@ -54,13 +54,14 @@ class HDF5BackendImpl : public GlobAlloc {
 
         // Always have a single function to determine when to skip a stat to avoid inconsistencies in the code
         bool skipStat(Stat* s) {
-            return skipVectors && dynamic_cast<VectorStat*>(s);
+            return skipVectors && s->isType(StatType::VECTOR);
         }
 
         // Dump the stats, inorder walk
         void dumpWalk(Stat* s) {
             if (skipStat(s)) return;
-            if (AggregateStat* as = dynamic_cast<AggregateStat*>(s)) {
+            if (s->isType(StatType::AGGREGATE)) {
+                AggregateStat* as = static_cast<AggregateStat*>(s);
                 if (as->isRegular() && sumRegularAggregates) {
                     //Dump first record
                     uint64_t* startPtr = curPtr;
@@ -81,9 +82,11 @@ class HDF5BackendImpl : public GlobAlloc {
                         dumpWalk(as->get(i));
                     }
                 }
-            } else if (ScalarStat* ss = dynamic_cast<ScalarStat*>(s)) {
+            } else if (s->isType(StatType::SCALAR)) {
+                ScalarStat* ss = static_cast<ScalarStat*>(s);
                 *(curPtr++) = ss->get();
-            } else if (VectorStat* vs = dynamic_cast<VectorStat*>(s)) {
+            } else if (s->isType(StatType::VECTOR)) {
+                VectorStat* vs = static_cast<VectorStat*>(s);
                 for (uint32_t i = 0; i < vs->size(); i++) {
                     *(curPtr++) = vs->count(i);
                 }
@@ -124,10 +127,10 @@ class HDF5BackendImpl : public GlobAlloc {
 
         /* Code to create a large compund datatype from an aggregate stat. ALWAYS returns deduplicated types */
         hid_t getH5Type(Stat* stat) { //I'd like to make this functional, but passing a member function as an argument is non-trivial...
-            AggregateStat* aggrStat = dynamic_cast<AggregateStat*>(stat);
-            if (aggrStat == nullptr) {
+            if (!stat->isType(StatType::AGGREGATE))
                 return getBaseH5Type(stat);
-            } else if (aggrStat->isRegular()) {
+            AggregateStat* aggrStat = static_cast<AggregateStat*>(stat);
+            if (aggrStat->isRegular()) {
                 //This is a regular aggregate, i.e. an array of possibly compound types
                 assert(aggrStat->size() > 0);
                 assert(!skipStat(aggrStat->get(0))); //should not happen unless we start skipping compounds in the future.
@@ -171,10 +174,11 @@ class HDF5BackendImpl : public GlobAlloc {
 
         /* Return type of non-aggregates. ALWAYS returns deduplicated types. */
         hid_t getBaseH5Type(Stat* s) {
-            assert(dynamic_cast<AggregateStat*>(s) == nullptr); //this can't be an aggregate
+            assert(!s->isType(StatType::AGGREGATE)); //this can't be an aggregate
             hid_t res;
             uint32_t size = 1; //scalar by default
-            if (VectorStat* vs = dynamic_cast<VectorStat*>(s)) {
+            if (s->isType(StatType::VECTOR)) {
+                VectorStat* vs = static_cast<VectorStat*>(s);
                 size = vs->size();
             }
             if (size > 1) {

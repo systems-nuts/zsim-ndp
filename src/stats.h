@@ -72,12 +72,19 @@
 #ifndef STATS_H_
 #define STATS_H_
 
-/* TODO: I want these to be POD types, but polymorphism (needed by dynamic_cast) probably disables it. Dang. */
+/* TODO: I want these to be POD types, but polymorphism (needed by virtual functions) probably disables it. Dang. */
 
 #include <stdint.h>
 #include <string>
 #include "g_std/g_vector.h"
 #include "log.h"
+
+enum StatType {
+    AGGREGATE = (1u << 0),
+    SCALAR    = (1u << 1),
+    VECTOR    = (1u << 2),
+    COUNTER   = (1u << 3),
+};
 
 class Stat : public GlobAlloc {
     protected:
@@ -88,6 +95,8 @@ class Stat : public GlobAlloc {
         Stat() : _name(nullptr), _desc(nullptr) {}
 
         virtual ~Stat() {}
+
+        virtual bool isType(StatType t) const { return false; }
 
         const char* name() const {
             assert(_name);
@@ -124,6 +133,8 @@ class AggregateStat : public Stat {
          */
         explicit AggregateStat(bool isRegular = false) : Stat(), _isMutable(true), _isRegular(isRegular) {}
 
+        bool isType(StatType t) const { return (t & ~((uint32_t)StatType::AGGREGATE)) == 0; }
+
         void init(const char* name, const char* desc) {
             assert(_isMutable);
             initStat(name, desc);
@@ -138,8 +149,8 @@ class AggregateStat : public Stat {
             g_vector<Stat*> newChildren;
             for (it = _children.begin(); it != _children.end(); it++) {
                 Stat* s = *it;
-                AggregateStat* as = dynamic_cast<AggregateStat*>(s);
-                if (as) {
+                if (s->isType(StatType::AGGREGATE)) {
+                    AggregateStat* as = static_cast<AggregateStat*>(s);
                     bool emptyChild = as->makeImmutable();
                     if (!emptyChild) newChildren.push_back(s);
                 } else {
@@ -181,6 +192,8 @@ class ScalarStat : public Stat {
     public:
         ScalarStat() : Stat() {}
 
+        bool isType(StatType t) const { return (t & ~((uint32_t)StatType::SCALAR)) == 0; }
+
         virtual void init(const char* name, const char* desc) {
             initStat(name, desc);
         }
@@ -194,6 +207,8 @@ class VectorStat : public Stat {
 
     public:
         VectorStat() : _counterNames(nullptr) {}
+
+        bool isType(StatType t) const { return (t & ~((uint32_t)StatType::VECTOR)) == 0; }
 
         virtual uint64_t count(uint32_t idx) const = 0;
         virtual uint32_t size() const = 0;
@@ -218,6 +233,8 @@ class Counter : public ScalarStat {
 
     public:
         Counter() : ScalarStat(), _count(0) {}
+
+        bool isType(StatType t) const { return (t & ~((uint32_t)(StatType::SCALAR | StatType::COUNTER))) == 0; }
 
         void init(const char* name, const char* desc) {
             initStat(name, desc);
@@ -255,6 +272,8 @@ class VectorCounter : public VectorStat {
 
     public:
         VectorCounter() : VectorStat() {}
+
+        bool isType(StatType t) const { return (t & ~((uint32_t)(StatType::VECTOR | StatType::COUNTER))) == 0; }
 
         /* Without counter names */
         virtual void init(const char* name, const char* desc, uint32_t size) {
