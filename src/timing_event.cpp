@@ -25,7 +25,6 @@
 
 #include "timing_event.h"
 #include <sstream>
-#include <typeinfo>
 #include "contention_sim.h"
 #include "zsim.h"
 
@@ -71,8 +70,8 @@ TimingEvent* TimingEvent::handleCrossing(TimingEvent* childEv, EventRecorder* ev
         assert_msg(childEv->numParents, "child has %d parents, nonzero expected", childEv->numParents);
         childEv->numParents--;
     }
-    assert_msg(minStartCycle != ((uint64_t)-1L), "Crossing domain (%d -> %d), but parent's minStartCycle is not set (my class: %s)",
-            domain, childEv->domain, typeid(*this).name()); //we can only handle a crossing if this has been set
+    assert_msg(minStartCycle != ((uint64_t)-1L), "Crossing domain (%d -> %d), but parent's minStartCycle is not set",
+            domain, childEv->domain); //we can only handle a crossing if this has been set
     CrossingEvent* xe = new (evRec) CrossingEvent(this, childEv, minStartCycle+postDelay, evRec);
     return xe->getSrcDomainEvent();
 }
@@ -161,7 +160,7 @@ void CrossingEvent::simulate(uint64_t simCycle) {
     }
 
     //Runs if called
-    //assert_msg(simCycle <= doneCycle+preSlack+postSlack+1, "simCycle %ld doneCycle %ld, preSlack %d postSlack %d simCount %ld child %s", simCycle, doneCycle, preSlack, postSlack, simCount, typeid(*child).name());
+    //assert_msg(simCycle <= doneCycle+preSlack+postSlack+1, "simCycle %ld doneCycle %ld, preSlack %d postSlack %d simCount %ld child", simCycle, doneCycle, preSlack, postSlack, simCount);
     zinfo->contentionSim->setPrio(domain, 0);
 
 #if PROFILE_CROSSINGS

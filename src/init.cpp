@@ -144,6 +144,7 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
     //Replacement policy
     string replType = config.get<const char*>(prefix + "repl.type", (arrayType == "IdealLRUPart")? "IdealLRUPart" : "LRU");
     ReplPolicy* rp = nullptr;
+    IdealLRUPartReplPolicy* irp = nullptr;
 
     if (replType == "LRU" || replType == "LRUNoSh") {
         bool sharersAware = (replType == "LRU") && !isTerminal;
@@ -207,7 +208,7 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
             bool testMode = config.get<bool>(prefix + "repl.testMode", false);
             prp = new WayPartReplPolicy(mon, pm, numLines, ways, testMode);
         } else if (replType == "IdealLRUPart") {
-            prp = new IdealLRUPartReplPolicy(mon, pm, numLines, buckets);
+            prp = irp = new IdealLRUPartReplPolicy(mon, pm, numLines, buckets);
         } else { //Vantage
             uint32_t assoc = (arrayType == "Z")? candidates : ways;
             allocPortion = .85;
@@ -243,8 +244,8 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         array = ila;
     } else if (arrayType == "IdealLRUPart") {
         assert(!hf);
-        IdealLRUPartReplPolicy* irp = dynamic_cast<IdealLRUPartReplPolicy*>(rp);
         if (!irp) panic("IdealLRUPart array needs IdealLRUPart repl policy!");
+        assert(reinterpret_cast<void*>(rp) == reinterpret_cast<void*>(irp));
         array = new IdealLRUPartArray(numLines, irp);
     } else {
         panic("This should not happen, we already checked for it!"); //unless someone changed arrayStr...
@@ -666,7 +667,7 @@ static void InitSystem(Config& config) {
                     if (assignedCaches[icache] >= igroup.size()) {
                         panic("%s: icache group %s (%ld caches) is fully used, can't connect more cores to it", name.c_str(), icache.c_str(), igroup.size());
                     }
-                    FilterCache* ic = dynamic_cast<FilterCache*>(igroup[assignedCaches[icache]][0]);
+                    FilterCache* ic = static_cast<FilterCache*>(igroup[assignedCaches[icache]][0]);  // should be dynamic_cast
                     assert(ic);
                     ic->setSourceId(coreIdx);
                     ic->setFlags(MemReq::IFETCH | MemReq::NOEXCL);
@@ -675,7 +676,7 @@ static void InitSystem(Config& config) {
                     if (assignedCaches[dcache] >= dgroup.size()) {
                         panic("%s: dcache group %s (%ld caches) is fully used, can't connect more cores to it", name.c_str(), dcache.c_str(), dgroup.size());
                     }
-                    FilterCache* dc = dynamic_cast<FilterCache*>(dgroup[assignedCaches[dcache]][0]);
+                    FilterCache* dc = static_cast<FilterCache*>(dgroup[assignedCaches[dcache]][0]);  // should be dynamic_cast
                     assert(dc);
                     dc->setSourceId(coreIdx);
                     assignedCaches[dcache]++;
@@ -738,7 +739,7 @@ static void InitSystem(Config& config) {
             if (isTerminal(grp)) {
                 for (vector<BaseCache*> cv : *cMap[grp]) {
                     assert(cv.size() == 1);
-                    TraceDriverProxyCache* proxy = dynamic_cast<TraceDriverProxyCache*>(cv[0]);
+                    TraceDriverProxyCache* proxy = static_cast<TraceDriverProxyCache*>(cv[0]);  // should be dynamic_cast
                     assert(proxy);
                     proxies.push_back(proxy);
                 }

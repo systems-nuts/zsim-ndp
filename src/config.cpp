@@ -27,7 +27,6 @@
 #include <sstream>
 #include <string.h>
 #include <string>
-#include <typeinfo>
 #include <vector>
 #include "libconfig.h"
 #include "log.h"

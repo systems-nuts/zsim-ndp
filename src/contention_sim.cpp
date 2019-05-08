@@ -28,7 +28,6 @@
 #include <queue>
 #include <sstream>
 #include <string>
-#include <typeinfo>
 #include <unordered_map>
 #include <vector>
 #include "log.h"
@@ -316,12 +315,7 @@ void ContentionSim::simulatePhaseThread(uint32_t thid) {
                 std::string desc = evsSeen[te];
                 if (desc == "") { //non-existnt
                     std::stringstream ss;
-                    ss << uniqueEvs << " " << typeid(*te).name();
-                    CrossingEvent* ce = dynamic_cast<CrossingEvent*>(te);
-                    if (ce) {
-                        ss << " slack " << (ce->preSlack + ce->postSlack) << " osc " << ce->origStartCycle << " cnt " << ce->simCount;
-                    }
-
+                    ss << uniqueEvs;
                     evsSeen[te] = ss.str();
                     uniqueEvs++;
                     desc = ss.str();
