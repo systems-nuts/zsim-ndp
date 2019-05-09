@@ -123,6 +123,12 @@ def buildSim(cppFlags, dir, type, pgo=None):
         env["LIBPATH"] += [joinpath(LIBCONFIGPATH, "lib")]
         env["CPPPATH"] += [joinpath(LIBCONFIGPATH, "include")]
 
+    if "MBEDTLSPATH" in os.environ:
+        MBEDTLSPATH = os.environ["MBEDTLSPATH"]
+        env["PINLIBPATH"] += [joinpath(MBEDTLSPATH, "lib")]
+        env["CPPPATH"] += [joinpath(MBEDTLSPATH, "include")]
+        env["PINLIBS"] += ["mbedcrypto"]
+        env["CPPFLAGS"] += " -D_WITH_MBEDTLS_=1 "
 
     if "POLARSSLPATH" in os.environ:
         POLARSSLPATH = os.environ["POLARSSLPATH"]

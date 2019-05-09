@@ -71,10 +71,11 @@ External dependencies: `gcc >=4.6, pin, scons, libconfig, libhdf5, libelfg0`
   3.2 libhdf5, http://www.hdfgroup.org (v1.8.4 path 1 or higher), and libelfg0.
       The SConstruct file assumes these are installed in the system.
 
-  3.3 (OPTIONAL) polarssl (currently used just for their SHA-1 hash function),
-      http://www.polarssl.org Install locally as in 3.1 and define the env var
-      `POLARSSLPATH=<polarssl install path>`.
-      
+  3.3 (OPTIONAL) mbedtls or polarssl (currently used just for their SHA-1 hash
+      function), https://tls.mbed.org/ (or previously http://www.polarssl.org).
+      Install locally as in 3.1 and define the env var `MBEDTLSPATH=<mbedtls
+      install path>` or `POLARSSLPATH=<polarssl install path>`.
+
       NOTE: You may need to add `-fPIC` to the Makefile's C(PP/XX)FLAGS depending
       on the version.
 
