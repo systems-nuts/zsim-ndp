@@ -44,7 +44,7 @@ software, and that you send us a citation of your work.
 Setup
 -----
 
-External dependencies: `gcc >=4.6, pin, scons, libconfig, libhdf5, libelfg0`
+External dependencies: `gcc >=4.6, pin, scons, libconfig, libhdf5`
 
 **Natively:** If you use a relatively recent Linux distribution:
 
@@ -68,7 +68,7 @@ External dependencies: `gcc >=4.6, pin, scons, libconfig, libhdf5, libelfg0`
       run `./configure --prefix=<libconfig install path> && make install`.  Then
       define the env var `LIBCONFIGPATH=<libconfig install path>`.
 
-  3.2 libhdf5, http://www.hdfgroup.org (v1.8.4 path 1 or higher), and libelfg0.
+  3.2 libhdf5, http://www.hdfgroup.org (v1.8.4 path 1 or higher).
       The SConstruct file assumes these are installed in the system.
 
   3.3 (OPTIONAL) mbedtls or polarssl (currently used just for their SHA-1 hash
