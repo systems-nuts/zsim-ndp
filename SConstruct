@@ -108,7 +108,7 @@ def buildSim(cppFlags, dir, type, pgo=None):
 
     # Non-pintool libraries
     env["LIBPATH"] = []
-    env["LIBS"] = ["config"]
+    env["LIBS"] = ["config", "hdf5", "hdf5_hl"]
 
     env["LINKFLAGS"] = ""
 
@@ -122,6 +122,12 @@ def buildSim(cppFlags, dir, type, pgo=None):
         env["LINKFLAGS"] += " -Wl,-R" + joinpath(LIBCONFIGPATH, "lib")
         env["LIBPATH"] += [joinpath(LIBCONFIGPATH, "lib")]
         env["CPPPATH"] += [joinpath(LIBCONFIGPATH, "include")]
+
+    if "HDF5PATH" in os.environ:
+        HDF5PATH = os.environ["HDF5PATH"]
+        env["LINKFLAGS"] += " -Wl,-R" + joinpath(HDF5PATH, "lib")
+        env["LIBPATH"] += [joinpath(HDF5PATH, "lib")]
+        env["CPPPATH"] += [joinpath(HDF5PATH, "include")]
 
     if "MBEDTLSPATH" in os.environ:
         MBEDTLSPATH = os.environ["MBEDTLSPATH"]
@@ -148,8 +154,6 @@ def buildSim(cppFlags, dir, type, pgo=None):
 
     env["CPPPATH"] += ["."]
 
-    # HDF5
-    env["PINLIBS"] += ["hdf5", "hdf5_hl"]
 
     # Harness needs these defined
     env["CPPFLAGS"] += ' -DPIN_PATH="' + joinpath(PINPATH, "intel64/bin/pinbin") + '" '

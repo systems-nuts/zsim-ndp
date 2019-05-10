@@ -33,9 +33,8 @@ libSrcs += [str(x) for x in syscallSrc]
 libSrcs = list(set(libSrcs)) # ensure syscallSrc is not duplicated
 libEnv.SharedLibrary("zsim.so", libSrcs)
 
-# Build tracing utilities (need hdf5 & dynamic linking)
+# Build tracing utilities
 traceEnv = env.Clone()
-traceEnv["LIBS"] += ["hdf5", "hdf5_hl"]
 traceEnv["OBJSUFFIX"] += "t"
 traceEnv.Program("dumptrace", ["dumptrace.cpp", "access_tracing.cpp", "memory_hierarchy.cpp"] + commonSrcs)
 traceEnv.Program("sorttrace", ["sorttrace.cpp", "access_tracing.cpp"] + commonSrcs)

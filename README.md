@@ -69,7 +69,8 @@ External dependencies: `gcc >=4.6, pin, scons, libconfig, libhdf5`
       define the env var `LIBCONFIGPATH=<libconfig install path>`.
 
   3.2 libhdf5, http://www.hdfgroup.org (v1.8.4 path 1 or higher).
-      The SConstruct file assumes these are installed in the system.
+      The library should be either installed in the system path, or installed
+      locally and define the env var `HDF5PATH=<hdf5 install path>`.
 
   3.3 (OPTIONAL) mbedtls or polarssl (currently used just for their SHA-1 hash
       function), https://tls.mbed.org/ (or previously http://www.polarssl.org).
