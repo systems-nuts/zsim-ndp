@@ -49,10 +49,14 @@ class PinCmd : public GlobAlloc {
         g_vector<ProcCmdInfo> procInfo; //one entry for each process that the harness launches (not for child procs)
 
     public:
+        // Callback type for shell expansion.
+        typedef g_vector<g_string> (*wordExpFunc)(const char*);
+
+    public:
         PinCmd(Config* conf, const char* configFile, const char* outputDir, uint64_t shmid);
         g_vector<g_string> getPinCmdArgs(uint32_t procIdx);
-        g_vector<g_string> getFullCmdArgs(uint32_t procIdx, const char** inputFile);
-        void setEnvVars(uint32_t procIdx);
+        g_vector<g_string> getFullCmdArgs(uint32_t procIdx, const char** inputFile, wordExpFunc f);
+        void setEnvVars(uint32_t procIdx, wordExpFunc f);
 
         uint32_t getNumCmdProcs() {return procInfo.size();}
 };

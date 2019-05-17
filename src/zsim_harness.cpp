@@ -82,6 +82,28 @@ PinCmd* pinCmd;
 
 /* Defs & helper functions */
 
+// Posix shell command expansion. #include <wordexp.h>
+extern "C" {
+typedef struct {
+    size_t we_wordc;
+    char **we_wordv;
+    size_t we_offs;
+} wordexp_t;
+extern int wordexp(const char *s, wordexp_t *p, int flags);
+extern void wordfree(wordexp_t *p);
+}
+
+g_vector<g_string> wordexpfunc(const char *s) {
+    g_vector<g_string> words;
+    wordexp_t p;
+    wordexp(s, &p, 0);
+    for (uint32_t i = 0; i < p.we_wordc; i++) {
+        words.push_back(g_string(p.we_wordv[i]));
+    }
+    wordfree(&p);
+    return words;
+}
+
 void LaunchProcess(uint32_t procIdx);
 
 int getNumChildren() {
@@ -239,9 +261,9 @@ void LaunchProcess(uint32_t procIdx) {
     } else { //child
         // Set the child's vars and get the command
         // NOTE: We set the vars first so that, when parsing the command, wordexp takes those vars into account
-        pinCmd->setEnvVars(procIdx);
+        pinCmd->setEnvVars(procIdx, wordexpfunc);
         const char* inputFile;
-        g_vector<g_string> args = pinCmd->getFullCmdArgs(procIdx, &inputFile);
+        g_vector<g_string> args = pinCmd->getFullCmdArgs(procIdx, &inputFile, wordexpfunc);
 
         //Copy args to a const char* [] for exec
         int nargs = args.size()+1;

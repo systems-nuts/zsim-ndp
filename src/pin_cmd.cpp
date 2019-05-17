@@ -27,7 +27,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <wordexp.h> //for posix-shell command expansion
+#include <vector>
 #include "config.h"
 
 //Funky macro expansion stuff
@@ -58,12 +58,9 @@ PinCmd::PinCmd(Config* conf, const char* configFile, const char* outputDir, uint
 
     //Additional options (e.g., -smc_strict for Java), parsed from config
     const char* pinOptions = conf->get<const char*>("sim.pinOptions", "");
-    wordexp_t p;
-    wordexp(pinOptions, &p, 0);
-    for (uint32_t i = 0; i < p.we_wordc; i++) {
-        args.push_back(g_string(p.we_wordv[i]));
-    }
-    wordfree(&p);
+    std::vector<std::string> tokens;
+    Tokenize(pinOptions, tokens, " ");
+    for (auto t : tokens) if (t != "") args.push_back(g_string(t.c_str()));
 
     //Load tool
     args.push_back("-t");
@@ -124,7 +121,7 @@ g_vector<g_string> PinCmd::getPinCmdArgs(uint32_t procIdx) {
     return res;
 }
 
-g_vector<g_string> PinCmd::getFullCmdArgs(uint32_t procIdx, const char** inputFile) {
+g_vector<g_string> PinCmd::getFullCmdArgs(uint32_t procIdx, const char** inputFile, wordExpFunc f) {
     assert(procIdx < procInfo.size()); //must be one of the topmost processes
     g_vector<g_string> res = getPinCmdArgs(procIdx);
 
@@ -144,31 +141,23 @@ g_vector<g_string> PinCmd::getFullCmdArgs(uint32_t procIdx, const char** inputFi
              "will not work! You can homogeneize the loaders instead by editing the .interp ELF section");
     }
 
-    //Parse command -- use glibc's wordexp to parse things like quotes, handle argument expansion, etc correctly
-    wordexp_t p;
-    wordexp(cmd.c_str(), &p, 0);
-    for (uint32_t i = 0; i < p.we_wordc; i++) {
-        res.push_back(g_string(p.we_wordv[i]));
-    }
-    wordfree(&p);
+    //Parse command
+    for (auto s : f(cmd.c_str())) res.push_back(s);
 
     //Input redirect
     *inputFile = (procInfo[procIdx].input == "")? nullptr : procInfo[procIdx].input.c_str();
     return res;
 }
 
-void PinCmd::setEnvVars(uint32_t procIdx) {
+void PinCmd::setEnvVars(uint32_t procIdx, wordExpFunc f) {
     assert(procIdx < procInfo.size()); //must be one of the topmost processes
     if (procInfo[procIdx].env != "") {
-        wordexp_t p;
-        wordexp(procInfo[procIdx].env.c_str(), &p, 0);
-        for (uint32_t i = 0; i < p.we_wordc; i++) {
-            char* var = strdup(p.we_wordv[i]); //putenv() does not make copies, and takes non-const char* in
+        for (auto s : f(procInfo[procIdx].env.c_str())) {
+            char* var = strdup(s.c_str()); //putenv() does not make copies, and takes non-const char* in
             if (putenv(var) != 0) {
                 panic("putenv(%s) failed", var);
             }
         }
-        wordfree(&p);
     }
 }
 
