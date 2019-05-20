@@ -1444,7 +1444,7 @@ int main(int argc, char *argv[]) {
     //If parent dies, kill us
     //This avoids leaving strays running in any circumstances, but may be too heavy-handed with arbitrary process hierarchies.
     //If you ever need this disabled, sim.pinOptions = "-injection child" does the trick
-    if (prctl(PR_SET_PDEATHSIG, 9 /*SIGKILL*/) != 0) {
+    if (syscall(SYS_prctl, PR_SET_PDEATHSIG, 9 /*SIGKILL*/) != 0) {
         panic("prctl() failed");
     }
 

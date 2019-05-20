@@ -30,6 +30,8 @@
 #include <string>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 #include "log.h"  // NOLINT must precede dlmalloc, which defines assert if undefined
 #include "g_heap/dlmalloc.h.c"
@@ -76,16 +78,16 @@ int gm_init(size_t segmentSize) {
 
     assert(GM == nullptr);
     assert(gm_shmid == 0);
-    gm_shmid = shmget(IPC_PRIVATE, segmentSize, 0644 | IPC_CREAT /*| SHM_HUGETLB*/);
+    gm_shmid = syscall(SYS_shmget, IPC_PRIVATE, segmentSize, 0644 | IPC_CREAT /*| SHM_HUGETLB*/);
     if (gm_shmid == -1) {
         perror("gm_create failed shmget");
         exit(1);
     }
-    GM = static_cast<gm_segment*>(shmat(gm_shmid, GM_BASE_ADDR, 0));
+    GM = reinterpret_cast<gm_segment*>(syscall(SYS_shmat, gm_shmid, GM_BASE_ADDR, 0));
     if (GM != GM_BASE_ADDR) {
         perror("gm_create failed shmat");
         warn("shmat failed, shmid %d. Trying not to leave garbage behind before dying...", gm_shmid);
-        int ret = shmctl(gm_shmid, IPC_RMID, nullptr);
+        int ret = syscall(SYS_shmctl, gm_shmid, IPC_RMID, nullptr);
         if (ret) {
             perror("shmctl failed, we're leaving garbage behind!");
             panic("Check /proc/sysvipc/shm and manually delete segment with shmid %d", gm_shmid);
@@ -95,7 +97,7 @@ int gm_init(size_t segmentSize) {
     }
 
     //Mark the segment to auto-destroy when the number of attached processes becomes 0.
-    int ret = shmctl(gm_shmid, IPC_RMID, nullptr);
+    int ret = syscall(SYS_shmctl, gm_shmid, IPC_RMID, nullptr);
     assert(!ret);
 
     char* alloc_start = reinterpret_cast<char*>(GM) + 1024;
@@ -113,7 +115,7 @@ void gm_attach(int shmid) {
     assert(GM == nullptr);
     assert(gm_shmid == 0);
     gm_shmid = shmid;
-    GM = static_cast<gm_segment*>(shmat(gm_shmid, GM_BASE_ADDR, 0));
+    GM = reinterpret_cast<gm_segment*>(syscall(SYS_shmat, gm_shmid, GM_BASE_ADDR, 0));
     if (GM != GM_BASE_ADDR) {
         warn("shmid %d \n", shmid);
         panic("gm_attach failed allocation");
@@ -205,7 +207,7 @@ bool gm_isready() {
 
 void gm_detach() {
     assert(GM);
-    shmdt(GM);
+    syscall(SYS_shmdt, GM);
     GM = nullptr;
     gm_shmid = 0;
 }

@@ -35,7 +35,7 @@
 inline uint64_t getNs() {
     struct timespec ts;
     //guaranteed synchronized across processors, averages 20ns/call on Ubuntu 12.04... Linux hrtimers have gotten really good! In comparison, rdtsc is 9ns.
-    clock_gettime(CLOCK_REALTIME, &ts);
+    syscall(SYS_clock_gettime, CLOCK_REALTIME, &ts);
     return 1000000000L*ts.tv_sec + ts.tv_nsec;
 }
 

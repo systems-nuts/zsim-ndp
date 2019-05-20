@@ -24,6 +24,7 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <syscall.h>
 #include <unistd.h>
 #include "log.h"
 #include "process_tree.h"
@@ -112,13 +113,13 @@ void VirtClockGettime(uint32_t tid, ADDRINT arg0, ADDRINT arg1) {
         trace(TimeVirt, "Patching clock_gettime()");
         trace(TimeVirt, "Orig %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
 
-        clock_gettime(CLOCK_MONOTONIC, &ts);
+        syscall(SYS_clock_gettime, CLOCK_MONOTONIC, &ts);
         trace(TimeVirt, "MONOTONIC %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
-        clock_gettime(CLOCK_REALTIME, &ts);
+        syscall(SYS_clock_gettime, CLOCK_REALTIME, &ts);
         trace(TimeVirt, "REALTIME %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
-        clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
+        syscall(SYS_clock_gettime, CLOCK_PROCESS_CPUTIME_ID, &ts);
         trace(TimeVirt, "PROCESS_CPUTIME_ID %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
-        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+        syscall(SYS_clock_gettime, CLOCK_THREAD_CPUTIME_ID, &ts);
         trace(TimeVirt, "THREAD_CPUTIME_ID %ld sec, %ld nsec", ts.tv_sec, ts.tv_nsec);
 
         uint64_t simNs = cyclesToNs(zinfo->globPhaseCycles);
@@ -280,9 +281,9 @@ void VirtCaptureClocks(bool isDeffwd) {
         struct timespec realtime;
         struct timespec monotonic;
         struct timespec process;
-        clock_gettime(CLOCK_REALTIME, &realtime);
-        clock_gettime(CLOCK_MONOTONIC, &monotonic);
-        clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &process);
+        syscall(SYS_clock_gettime, CLOCK_REALTIME, &realtime);
+        syscall(SYS_clock_gettime, CLOCK_MONOTONIC, &monotonic);
+        syscall(SYS_clock_gettime, CLOCK_PROCESS_CPUTIME_ID, &process);
         uint64_t realRdtsc = rdtsc();
 
         uint64_t curCycles = zinfo->globPhaseCycles;

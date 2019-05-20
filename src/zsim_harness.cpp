@@ -366,7 +366,7 @@ int main(int argc, char *argv[]) {
     if (sigaction(SIGUSR1, &debugSa, nullptr) != 0)
         panic("sigaction() failed");
 
-    waitid(P_ALL, 0, nullptr, WEXITED);
+    syscall(SYS_waitid, P_ALL, 0, nullptr, WEXITED);
 
     //Remove all zsim.log.* files (we append to them, and want to avoid outputs from multiple simulations)
     uint32_t removedLogfiles = 0;
