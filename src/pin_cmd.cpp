@@ -108,6 +108,16 @@ PinCmd::PinCmd(Config* conf, const char* configFile, const char* outputDir, uint
         ProcCmdInfo pi = {g_string(cmd), g_string(input), g_string(loader), g_string(env)};
         procInfo.push_back(pi);
     }
+
+    // Set env vars required before invoking pintool.
+    // See launcher_u.c and os_specific_l.c
+    // These env vars are generally required; the others are set per process.
+#ifdef PIN_CRT_TZDATA
+    assert(setenv("PIN_CRT_TZDATA", QUOTED(PIN_CRT_TZDATA), 1) == 0);
+#endif
+    assert(setenv("PIN_VM64_LD_LIBRARY_PATH", QUOTED(LDLIB_PATH), 1) == 0);
+    assert(setenv("PIN_INJECTOR64_LD_LIBRARY_PATH", QUOTED(LDLIB_PATH), 1) == 0);
+    assert(setenv("PIN_LD_RESTORE_REQUIRED", "t", 1) == 0);
 }
 
 g_vector<g_string> PinCmd::getPinCmdArgs(uint32_t procIdx) {
@@ -158,6 +168,28 @@ void PinCmd::setEnvVars(uint32_t procIdx, wordExpFunc f) {
                 panic("putenv(%s) failed", var);
             }
         }
+    }
+
+    // Backup env vars required by the app but not by pintool.
+    const char* libraryPath = getenv("LD_LIBRARY_PATH");
+    if (libraryPath) {
+        assert(setenv("PIN_APP_LD_LIBRARY_PATH", libraryPath, 1) == 0);
+    }
+    assert(setenv("LD_LIBRARY_PATH", QUOTED(LDLIB_PATH), 1) == 0);
+    const char* assumeKernel = getenv("LD_ASSUME_KERNEL");
+    if (assumeKernel) {
+        assert(setenv("PIN_APP_LD_ASSUME_KERNEL", assumeKernel, 1) == 0);
+        assert(unsetenv("LD_ASSUME_KERNEL") == 0);
+    }
+    const char* bindNow = getenv("LD_BIND_NOW");
+    if (bindNow) {
+        assert(setenv("PIN_APP_LD_BIND_NOW", bindNow, 1) == 0);
+        assert(unsetenv("LD_BIND_NOW") == 0);
+    }
+    const char* preload = getenv("LD_PRELOAD");
+    if (preload) {
+        assert(setenv("PIN_APP_LD_PRELOAD", preload, 1) == 0);
+        assert(unsetenv("LD_PRELOAD") == 0);
     }
 }
 

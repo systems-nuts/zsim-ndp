@@ -158,6 +158,9 @@ def buildSim(cppFlags, dir, type, pgo=None):
     # Harness needs these defined
     env["CPPFLAGS"] += ' -DPIN_PATH="' + joinpath(PINPATH, "intel64/bin/pinbin") + '" '
     env["CPPFLAGS"] += ' -DZSIM_PATH="' + joinpath(ROOT, joinpath(buildDir, "libzsim.so")) + '" '
+    env["CPPFLAGS"] += ' -DLDLIB_PATH="' + ":".join(env["LIBPATH"] + env["PINLIBPATH"]) + '" '
+    if withPinCrt:
+        env["CPPFLAGS"] += ' -DPIN_CRT_TZDATA="' + joinpath(PINPATH, "extras/crt/tzdata") + '" '
 
     # Do PGO?
     if pgo == "generate":
