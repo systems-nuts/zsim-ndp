@@ -80,11 +80,6 @@ void MemParam::LoadConfigMain(Config &cfg, uint32_t _cacheLineSize)
     info("Reports are in each %d phase, Start phase cycle=%ld, Finish phase cycle=%ld",
          reportPhase, reportStart, reportFinish);
 
-    addrTrace = cfg.get<bool>("sim.addressTrace", false);
-    if(addrTrace == true) {
-        info("Address Traces are output to file");
-    }
-
     // loading Memory Controller parameters
     totalCapacity = cfg.get<uint32_t>("mc_spec.capacityMB", 4096);
     channelCount = cfg.get<uint32_t>("mc_spec.channels", 2);

@@ -69,7 +69,6 @@ class MemParam : public GlobAlloc{
         bool accAvgPowerReport;
         bool curAvgPowerReport;
         bool bandwidthReport;
-        bool addrTrace;
 
         // Memory Controller Parameter
         uint32_t totalCapacity; // mega byte

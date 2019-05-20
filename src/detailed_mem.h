@@ -31,7 +31,6 @@
 #include "memory_hierarchy.h"
 #include "stats.h"
 #include "timing_event.h"
-#include <zlib.h>
 
 /* Detailed memory model from Makoto/Kenta */
 
@@ -299,8 +298,6 @@ class MemControllerBase : public MemObject {
         uint64_t lastAccesses;
         uint64_t maxBandwidth;
         uint64_t minBandwidth;
-
-        gzFile addrTraceLog;
 
         // Power
         uint64_t lastMemCycle;

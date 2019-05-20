@@ -1025,14 +1025,6 @@ MemControllerBase::MemControllerBase(g_string _memCfg, uint32_t _cacheLineSize, 
         tickEv->queue(0); //start the sim at time 0
         info("MemControllerBase::tick() will be call in each %ld sysCycle", nextSysTick);
     }
-
-    addrTraceLog = nullptr;
-    if (mParam->addrTrace == true) {
-        g_string gzFileName = g_string("ZsimMemAddrTrace_") + name.c_str() + ".gz";
-        addrTraceLog = gzopen(gzFileName.c_str(), "wb1");
-        if (addrTraceLog == nullptr)
-            panic("Fail to open file %s for addrTraceLog.", gzFileName.c_str());
-    }
 }
 
 MemControllerBase::~MemControllerBase() {
@@ -1229,9 +1221,6 @@ void MemControllerBase::finish(void) {
     EstimatePowers(endCycle, true);
     EstimateBandwidth(realTime, lastRealTime, true);
     UpdateCmdCounters();
-
-    if (addrTraceLog != nullptr)
-        gzclose(addrTraceLog);
 }
 
 // See also MemChannelBase::AddressMap
@@ -1290,9 +1279,6 @@ uint64_t MemControllerBase::LatencySimulate(Address lineAddr, uint64_t sysCycle,
                sysLatency, memMinLatency[type]);
     uint32_t bin = std::min(sysLatency/lhBinSize, (uint64_t)(lhNumBins-1));
     latencyHist.inc(bin);
-
-    if (addrTraceLog != nullptr)
-        gzwrite(addrTraceLog, (char*)&lineAddr, sizeof(uint64_t));
 
     if (type == WRITE) {
         profWrites.atomicInc();
