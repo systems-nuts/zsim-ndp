@@ -51,7 +51,7 @@ typedef Elf64_Shdr Elf_Shdr;
 // arch/x86/kernel/module.c: module_finalize()
 
 static int pp_callback(dl_phdr_info* info, size_t size, void* data) {
-    if (strstr(info->dlpi_name, "libzsim.so")) {
+    if (info->dlpi_name && strstr(info->dlpi_name, "libzsim.so")) {
         int fd;
         if ((fd = open (info->dlpi_name, O_RDONLY , 0)) < 0)
             panic("Opening %s failed", info->dlpi_name);
