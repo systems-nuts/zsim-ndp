@@ -44,7 +44,9 @@ template <typename T> class g_vector : public std::vector<T, StlGlobAlloc<T> >, 
             }
         }
 
+#if __cplusplus >= 201103L && !defined(PIN_CRT)
         g_vector(std::initializer_list<T> list) : std::vector<T, StlGlobAlloc<T>>(list) {}
+#endif
         g_vector(size_t n, const T& t = T()) : std::vector<T, StlGlobAlloc<T>>(n, t) {}
 };
 

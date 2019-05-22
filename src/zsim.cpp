@@ -1341,10 +1341,8 @@ VOID FFThread(VOID* arg) {
 
         futex_lock(&zinfo->ffLock);
         if (procTreeNode->isInFastForward()) {
-            GetVmLock(); //like a callback. This disallows races on all syscall instrumentation, etc.
             info("Exiting fast forward");
             ExitFastForward();
-            ReleaseVmLock();
         } else {
             SyncEvent* syncEv = new SyncEvent();
             zinfo->eventQueue->insert(syncEv); //will run on next phase
@@ -1390,13 +1388,20 @@ static EXCEPT_HANDLING_RESULT InternalExceptionHandler(THREADID tid, EXCEPTION_I
     }
 
     void* array[40];
+#ifdef PIN_CRT  // backtrace in Pin CRT requires to hold the lock.
+    PIN_LockClient();
+#endif  // PIN_CRT
     size_t size = backtrace(array, 40);
     char** strings = backtrace_symbols(array, size);
+#ifdef PIN_CRT
+    PIN_UnlockClient();
+#endif  // PIN_CRT
     fprintf(stderr, "%s[%d] Backtrace (%ld/%d max frames)\n", logHeader, tid, size, 40);
     for (uint32_t i = 0; i < size; i++) {
         //For libzsim.so addresses, call addr2line to get symbol info (can't use -rdynamic on libzsim.so because of Pin's linker script)
         //NOTE: May be system-dependent, may not handle malformed strings well. We're going to die anyway, so in for a penny, in for a pound...
         std::string s = strings[i];
+#ifndef PIN_CRT  // Pin CRT itself provides some parsing already on top of posix backtrace.
         uint32_t lp = s.find_first_of("(");
         uint32_t cp = s.find_first_of(")");
         std::string fname = s.substr(0, lp);
@@ -1419,6 +1424,7 @@ static EXCEPT_HANDLING_RESULT InternalExceptionHandler(THREADID tid, EXCEPTION_I
                 }
             }
         }
+#endif  // PIN_CRT
 
         fprintf(stderr, "%s[%d]  %s\n", logHeader, tid, s.c_str());
     }

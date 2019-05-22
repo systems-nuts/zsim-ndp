@@ -108,11 +108,14 @@ class PrintExpr {
         template<typename T> const PrintExpr operator << (T t) const { ss << " << " << t; return *this; }
         template<typename T> const PrintExpr operator >> (T t) const { ss << " >> " << t; return *this; }
 
+#if __cplusplus >= 201103L
         // std::nullptr_t overloads (for nullptr's in assertions)
+        // NOTE(gaomy): PinCRT does not define nullptr_t, use decltype as in /usr/include/x86_64-linux-gnu/c++/5/bits/c++config.h.
         // Only a few are needed, since most ops w/ nullptr are invalid
-        const PrintExpr operator->* (std::nullptr_t t) const { ss << "nullptr"; return *this; }
-        const PrintExpr operator == (std::nullptr_t t) const { ss << " == nullptr"; return *this; }
-        const PrintExpr operator != (std::nullptr_t t) const { ss << " != nullptr"; return *this; }
+        const PrintExpr operator->* (decltype(nullptr) t) const { ss << "nullptr"; return *this; }
+        const PrintExpr operator == (decltype(nullptr) t) const { ss << " == nullptr"; return *this; }
+        const PrintExpr operator != (decltype(nullptr) t) const { ss << " != nullptr"; return *this; }
+#endif
 
     private:
         template<typename T> const PrintExpr operator =  (T t) const;  // will fail, can't assign in assertion
@@ -169,6 +172,16 @@ class PrintExpr {
 #define trace(type, args...)
 #endif
 
+
+// Disable PinCRT internal assert
+#ifdef PIN_CRT
+// See $PINPATH/extras/stlport/include/assert.h
+// This assert.h is searched before that in crt/include.
+#define _STLP_NATIVE_ASSERT_H_INCLUDED
+#ifdef assert
+#undef assert
+#endif  // assert
+#endif  // PIN_CRT
 
 #ifndef NASSERT
 #define assert(expr) \

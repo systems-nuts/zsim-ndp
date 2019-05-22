@@ -27,7 +27,6 @@
 #include "scheduler.h"
 #include <fstream>
 #include <regex.h>  // POSIX regex instead of C++11 regex
-#include <sys/stat.h>
 #include "config.h" // for ParseList
 #include "pin.H"
 #include "process_tree.h"
@@ -72,7 +71,7 @@ static void TrueSleep(uint32_t usecs) {
  */
 bool IsSleepingInFutex(uint32_t linuxPid, uint32_t linuxTid, uintptr_t futexAddr) {
     std::string fname = "/proc/" + Str(linuxPid) + "/task/" + Str(linuxTid) + "/syscall";
-    std::ifstream fs(fname);
+    std::ifstream fs(fname.c_str());
     if (!fs.is_open()) {
         warn("Could not open %s", fname.c_str());
         return false;
@@ -239,8 +238,7 @@ void Scheduler::watchdogThreadFunc() {
 
             std::stringstream ss;
             ss << "/proc/" << osPid;
-            struct stat dummy;
-            if (stat(ss.str().c_str(), &dummy) == 0) {
+            if (access(ss.str().c_str(), F_OK) == 0) {
                 info("[watchdog] Deferring cleanup of pid %d (%d), not finished yet", pid, osPid);
                 break;
             }

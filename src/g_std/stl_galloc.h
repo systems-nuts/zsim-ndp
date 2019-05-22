@@ -61,12 +61,12 @@ class StlGlobAlloc {
 
         // Construct/destroy
         // gcc keeps changing these interfaces. See /usr/include/c++/4.8/ext/new_allocator.h
-#if __cplusplus >= 201103L // >= 4.8
+#if __cplusplus >= 201103L && !defined(PIN_CRT) // >= 4.8 and no PinCRT
         template<typename _Up, typename... _Args>
         void construct(_Up* __p, _Args&&... __args) { ::new((void *)__p) _Up(std::forward<_Args>(__args)...); }
 
         template<typename _Up> void destroy(_Up* __p) { __p->~_Up(); }
-#else // < 4.8
+#else // < 4.8 or with PinCRT
         void construct(pointer p, const T& val) { new (static_cast<T*>(p)) T(val); }
         void construct(pointer p) { construct(p, value_type()); } //required by gcc 4.6
         void destroy(pointer p) { p->~T(); }

@@ -131,7 +131,7 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
             hf = new IdHashFamily;
         } else if (hashType == "H3") {
             //STL hash function
-            size_t seed = _Fnv_hash_bytes(prefix.c_str(), prefix.size()+1, 0xB4AC5B);
+            size_t seed = std::hash<std::string>()(prefix.c_str());
             //info("%s -> %lx", prefix.c_str(), seed);
             hf = new H3HashFamily(numHashes, setBits, 0xCAC7EAFFA1 + seed /*make randSeed depend on prefix*/);
         } else if (hashType == "SHA1") {

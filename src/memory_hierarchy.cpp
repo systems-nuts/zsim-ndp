@@ -44,9 +44,11 @@ const char* MESIStateName(MESIState s) {
     return mesiStateNames[s];
 }
 
+#if __cplusplus >= 201103L && !defined(PIN_CRT)
 #include <type_traits>
 
 static inline void CompileTimeAsserts() {
     static_assert(std::is_pod<MemReq>::value, "MemReq not POD!");
 }
+#endif
 

@@ -30,6 +30,14 @@
 #include <unordered_set>
 #include "g_std/stl_galloc.h"
 
+// PinCRT is pre-C++11 and has unordered_set in std::tr1.
+#ifdef PIN_CRT
+namespace std {
+    namespace tr1 {};  // in case not defined
+    using namespace tr1;
+};
+#endif  // PIN_CRT
+
 template <typename K> class g_unordered_set : public std::unordered_set<K, std::hash<K>, std::equal_to<K>, StlGlobAlloc<K> > {};
 
 #endif  // G_UNORDERED_SET_H_
