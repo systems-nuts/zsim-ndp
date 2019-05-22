@@ -40,14 +40,35 @@ def buildSim(cppFlags, dir, type, pgo=None):
        print "ERROR: You need to define the $PINPATH environment variable with Pin's path"
        sys.exit(1)
 
+    # Pin 3 introduces PinCRT.
+    withPinCrt = os.path.exists(joinpath(PINPATH, "extras/crt"))
+    if withPinCrt:
+        pinCrtDir = joinpath(PINPATH, "extras/crt")
+        pinCrtLibDir = joinpath(PINPATH, "intel64/runtime/pincrt")
+        assert os.path.exists(pinCrtDir)
+        assert os.path.exists(pinCrtLibDir)
+
     ROOT = Dir('.').abspath
 
     # NOTE: These flags are for the 28/02/2011 2.9 PIN kit (rev39599). Older versions will not build.
     # NOTE (dsm 10 Jan 2013): Tested with Pin 2.10 thru 2.12 as well
     # NOTE: Original Pin flags included -fno-strict-aliasing, but zsim does not do type punning
     # NOTE (dsm 16 Apr 2015): Update flags code to support Pin 2.14 while retaining backwards compatibility
+    # NOTE (gaomy May 2019): Set ABI version
     env["CPPFLAGS"] += " -g -std=c++0x -Wall -Wno-unknown-pragmas -fomit-frame-pointer -fno-stack-protector"
     env["CPPFLAGS"] += " -MMD -DBIGARRAY_MULTIPLIER=1 -DUSING_XED -DTARGET_IA32E -DHOST_IA32E -fPIC -DTARGET_LINUX"
+    env["CPPFLAGS"] += " -fabi-version=2"
+
+    # Add more flags and system paths for pintool if with PinCRT.
+    if withPinCrt:
+        env["CPPFLAGS"] += " -D__PIN__=1 -DPIN_CRT=1"
+        env["CPPFLAGS"] += " -fno-exceptions -fno-rtti -funwind-tables -fasynchronous-unwind-tables"
+        env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/stlport/include")
+        env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/libstdc++/include")
+        env["CPPFLAGS"] += " -isystem " + joinpath(pinCrtDir, "include")
+        env["CPPFLAGS"] += " -isystem " + joinpath(pinCrtDir, "include/arch-x86_64")
+        env["CPPFLAGS"] += " -isystem " + joinpath(pinCrtDir, "include/kernel/uapi")
+        env["CPPFLAGS"] += " -isystem " + joinpath(pinCrtDir, "include/kernel/uapi/asm-x86")
 
     # Pin 2.12+ kits have changed the layout of includes, detect whether we need
     # source/include/ or source/include/pin/
@@ -57,11 +78,14 @@ def buildSim(cppFlags, dir, type, pgo=None):
         assert os.path.exists(joinpath(pinInclDir, "pin.H"))
 
     # Pin 2.14 changes location of XED
+    # Pin 3 changes location of XED again
     xedName = "xed2"  # used below
     xedPath = joinpath(PINPATH, "extras/" + xedName + "-intel64/include")
     if not os.path.exists(xedPath):
         xedName = "xed"
         xedPath = joinpath(PINPATH, "extras/" + xedName + "-intel64/include")
+        if os.path.exists(joinpath(xedPath, "xed")):
+            xedPath = joinpath(xedPath, "xed")
         assert os.path.exists(xedPath)
 
     env["CPPPATH"] = [xedPath,
@@ -89,7 +113,9 @@ def buildSim(cppFlags, dir, type, pgo=None):
     # systems, Pin's libelf takes precedence over the system's, but it does not
     # include symbols that we need or it's a different variant (we need
     # libelfg0-dev in Ubuntu systems)
-    env["PINLIBPATH"] = ["/usr/lib", "/usr/lib/x86_64-linux-gnu", joinpath(PINPATH, "extras/" + xedName + "-intel64/lib"),
+    # NOTE(gaomy May 2019): PinCRT use its own libs and the system libs are
+    # disallowed, so libelf dependency is removed.
+    env["PINLIBPATH"] = [joinpath(PINPATH, "extras/" + xedName + "-intel64/lib"),
             joinpath(PINPATH, "intel64/lib"), joinpath(PINPATH, "intel64/lib-ext")]
 
     # Libdwarf is provided in static and shared variants, Ubuntu only provides
@@ -99,12 +125,18 @@ def buildSim(cppFlags, dir, type, pgo=None):
     # static version of libdwarf.
 
     # Pin 2.14 uses unambiguous libpindwarf
+    # Pin 3 uses libpin3dwarf
     pindwarfPath = joinpath(PINPATH, "intel64/lib-ext/libdwarf.a")
     pindwarfLib = File(pindwarfPath)
     if not os.path.exists(pindwarfPath):
+        pindwarfPath = joinpath(PINPATH, "intel64/lib-ext/libpindwarf.a")
         pindwarfLib = "pindwarf"
+        if not os.path.exists(pindwarfPath):
+            pindwarfPath = joinpath(PINPATH, "intel64/lib-ext/libpin3dwarf.so")
+            pindwarfLib = "pin3dwarf"
+            assert os.path.exists(pindwarfPath)
 
-    env["PINLIBS"] = ["pin", "xed", pindwarfLib, "elf", "dl", "rt"]
+    env["PINLIBS"] = ["pin", "xed", pindwarfLib]
 
     # Non-pintool libraries
     env["LIBPATH"] = []
@@ -131,6 +163,7 @@ def buildSim(cppFlags, dir, type, pgo=None):
 
     if "MBEDTLSPATH" in os.environ:
         MBEDTLSPATH = os.environ["MBEDTLSPATH"]
+        env["LINKFLAGS"] += " -Wl,-R" + joinpath(MBEDTLSPATH, "lib")
         env["PINLIBPATH"] += [joinpath(MBEDTLSPATH, "lib")]
         env["CPPPATH"] += [joinpath(MBEDTLSPATH, "include")]
         env["PINLIBS"] += ["mbedcrypto"]
@@ -138,6 +171,7 @@ def buildSim(cppFlags, dir, type, pgo=None):
 
     if "POLARSSLPATH" in os.environ:
         POLARSSLPATH = os.environ["POLARSSLPATH"]
+        env["LINKFLAGS"] += " -Wl,-R" + joinpath(POLARSSLPATH, "lib")
         env["PINLIBPATH"] += [joinpath(POLARSSLPATH, "library")]
         env["CPPPATH"] += [joinpath(POLARSSLPATH, "include")]
         env["PINLIBS"] += ["polarssl"]
@@ -154,6 +188,17 @@ def buildSim(cppFlags, dir, type, pgo=None):
 
     env["CPPPATH"] += ["."]
 
+    # PinCRT libs. These libs are needed by both the shared lib pintool and the utilities.
+    if withPinCrt:
+        env["LINKFLAGS"] += " -nostdlib -Wl,-R" + pinCrtLibDir
+        env["LIBPATH"] += [pinCrtLibDir]
+        env["LIBS"] += ["dl-dynamic", "stlport-dynamic", "m-dynamic", "c-dynamic", "unwind-dynamic"]
+        env["CRTBEGIN"] = [joinpath(pinCrtLibDir, "crtbegin.o")]
+        env["CRTEND"] = [joinpath(pinCrtLibDir, "crtend.o")]
+        env["CRTBEGINS"] = [joinpath(pinCrtLibDir, "crtbeginS.o")]
+        env["CRTENDS"] = [joinpath(pinCrtLibDir, "crtendS.o")]
+        env["LINKCOM"] = "$LINK -o $TARGET $LINKFLAGS $CRTBEGIN $SOURCES $_LIBDIRFLAGS $_LIBFLAGS $CRTEND"
+        env["SHLINKCOM"] = "$SHLINK -o $TARGET $SHLINKFLAGS $CRTBEGINS $SOURCES $_LIBDIRFLAGS $_LIBFLAGS $CRTENDS"
 
     # Harness needs these defined
     env["CPPFLAGS"] += ' -DPIN_PATH="' + joinpath(PINPATH, "intel64/bin/pinbin") + '" '
