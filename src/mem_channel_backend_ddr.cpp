@@ -250,8 +250,9 @@ MemChannelAccReq* MemChannelBackendDDR::dequeue(uint64_t memCycle, uint64_t* min
 }
 
 uint64_t MemChannelBackendDDR::process(const MemChannelAccReq* req) {
-    const DDRAccReq* ddrReq = dynamic_cast<const DDRAccReq*>(req);
-    assert(ddrReq);
+    //const DDRAccReq* ddrReq = dynamic_cast<const DDRAccReq*>(req);
+    //assert(ddrReq);
+    const DDRAccReq* ddrReq = static_cast<const DDRAccReq*>(req);
 
     uint64_t burstCycle = requestHandler(ddrReq, true);
     uint64_t respCycle = burstCycle + getBL(req->isWrite);
