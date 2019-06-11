@@ -255,6 +255,8 @@ void ContentionSim::simThreadLoop(uint32_t thid) {
     int r = sched_setaffinity(0 /*calling thread, equiv to syscall(SYS_gettid)*/, sizeof(cpuset), &cpuset);
     assert_msg(r == 0, "sched_setaffinity failed (%d)", r);
 #endif
+    terminate = false;
+    __sync_synchronize();
     while (true) {
         futex_lock_nospin(&simThreads[thid].wakeLock);
 
