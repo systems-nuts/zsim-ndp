@@ -66,7 +66,7 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
         for (uint32_t b = 0; b < bankCount; b++) {
             // Bank group bits are default to be the lower part of bank bits.
             uint32_t bg = b % bgrpCount;
-            banks.emplace_back(bg, rs);
+            banks.push_back(Bank(bg, rs));
         }
     }
     assert(banks.size() == rankCount * bankCount);
@@ -104,7 +104,7 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
     };
 
     // Reverse order, from LSB to MSB.
-    for (auto it = tokens.crbegin(); it != tokens.crend(); it++) {
+    for (auto it = tokens.rbegin(); it != tokens.rend(); it++) {
         auto t = *it;
         if (t == "row") {}
         else if (t == "rank") computeShiftMask(t, rankBitCount, rankShift, rankMask);

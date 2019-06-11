@@ -243,7 +243,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
         };
 
         struct Bank : public GlobAlloc {
-            const uint32_t bankGroupIdx;
+            uint32_t bankGroupIdx;
 
             // Bank state and open row.
             bool open;

@@ -200,7 +200,7 @@ void MemChannel::acceptAccEvent(MemChannelAccEvent* ev, uint64_t sysCycle) {
 
     // Request queue overflow check.
     if (be->queueOverflow(ev->isWrite())) {
-        overflowQueue.emplace_back(ev, sysCycle);
+        overflowQueue.push_back(std::make_pair(ev, sysCycle));
         DEBUG("Event added to overflow queue, queue size %lu", overflowQueue.size());
         return;
     }
