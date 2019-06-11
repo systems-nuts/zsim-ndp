@@ -298,8 +298,8 @@ uint64_t MemChannel::schedule(MemChannelAccEvent* ev, uint64_t startCycle, uint6
 
 uint64_t MemChannel::issue(uint64_t memCycle) {
     uint64_t minTickCycle = -1uL;
-    MemChannelAccReq* req = nullptr;
-    if (!be->dequeue(memCycle, &req, &minTickCycle)) {
+    MemChannelAccReq* req = be->dequeue(memCycle, &minTickCycle);
+    if (!req) {
         // If no request is ready, return minimum tick cycle as the next tick cycle.
         return minTickCycle;
     }

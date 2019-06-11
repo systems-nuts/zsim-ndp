@@ -191,7 +191,7 @@ uint64_t MemChannelBackendDDR::enqueue(const Address& addr, const bool isWrite,
     else return -1uL;
 }
 
-bool MemChannelBackendDDR::dequeue(uint64_t memCycle, MemChannelAccReq** req, uint64_t* minTickCycle) {
+MemChannelAccReq* MemChannelBackendDDR::dequeue(uint64_t memCycle, uint64_t* minTickCycle) {
     // Update read/write issue mode.
     // Without a successful issue, the issue mode decision should not change. This is because the unsuccessful
     // issue trial is a result of the weaving timing model. The decision (issue a read or write) has been made
@@ -235,18 +235,18 @@ bool MemChannelBackendDDR::dequeue(uint64_t memCycle, MemChannelAccReq** req, ui
     // If no request is ready, set min tick cycle.
     if (!r) {
         *minTickCycle = mtc;
-        return false;
+        return nullptr;
     }
 
     // Remove priority assignment.
     cancelPriority(r);
 
-    *req = new DDRAccReq(*r);
+    auto req = new DDRAccReq(*r);
     reqQueue(issueWrite).remove(ir);
     DEBUG("%s DDR dequeue: 0x%lx <- %s queue depth %lu, cycle %lu", name.c_str(),
-            (*req)->addr, issueWrite ? "write" : "read", reqQueue(issueWrite).size(), memCycle);
+            req->addr, issueWrite ? "write" : "read", reqQueue(issueWrite).size(), memCycle);
 
-    return true;
+    return req;
 }
 
 uint64_t MemChannelBackendDDR::process(const MemChannelAccReq* req) {

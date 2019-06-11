@@ -81,7 +81,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
         uint64_t enqueue(const Address& addr, const bool isWrite, uint64_t startCycle,
                 uint64_t memCycle, MemChannelAccEvent* respEv);
 
-        bool dequeue(uint64_t memCycle, MemChannelAccReq** req, uint64_t* minTickCycle);
+        MemChannelAccReq* dequeue(uint64_t memCycle, uint64_t* minTickCycle);
 
         bool queueOverflow(const bool isWrite) const;
 

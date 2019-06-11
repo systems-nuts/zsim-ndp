@@ -37,10 +37,10 @@ class MemChannelBackend : public GlobAlloc {
         virtual uint64_t enqueue(const Address& addr, const bool isWrite, uint64_t startCycle,
                 uint64_t memCycle, MemChannelAccEvent* respEv) = 0;
 
-        // Dequeue a request \c req to issue with tick cycle no later than \c memCycle.
-        // Return if succeed. If not, set the minimum tick cycle \c minTickCycle.
+        // Dequeue a request to issue with tick cycle no later than \c memCycle.
+        // Return a pointer to the request if succeed. Otherwise return null and set the minimum tick cycle \c minTickCycle.
         // The request \c req is dynamically allocated, which needs to be freed when used up.
-        virtual bool dequeue(uint64_t memCycle, MemChannelAccReq** req, uint64_t* minTickCycle) = 0;
+        virtual MemChannelAccReq* dequeue(uint64_t memCycle, uint64_t* minTickCycle) = 0;
 
         virtual bool queueOverflow(const bool isWrite) const = 0;
 
@@ -97,21 +97,21 @@ class MemChannelBackendSimple : public MemChannelBackend {
             else return -1uL;
         }
 
-        bool dequeue(uint64_t memCycle, MemChannelAccReq** req, uint64_t* minTickCycle) {
+        MemChannelAccReq* dequeue(uint64_t memCycle, uint64_t* minTickCycle) {
             if (reqQueue.empty()) {
                 *minTickCycle = -1uL;
-                return false;
+                return nullptr;
             }
             auto begin = reqQueue.begin();
             auto front = *begin;
             uint64_t tickCycle = front->schedCycle + latency;
             if (tickCycle > memCycle) {
                 *minTickCycle = tickCycle;
-                return false;
+                return nullptr;
             }
-            *req = new MemChannelAccReq(*front);
+            auto req = new MemChannelAccReq(*front);
             reqQueue.remove(begin);
-            return true;
+            return req;
         }
 
         bool queueOverflow(const bool isWrite) const {
