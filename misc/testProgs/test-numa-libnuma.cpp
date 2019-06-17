@@ -170,15 +170,15 @@ void test1() {
     numa_free(addr, SIZE);
 
     // numa_sched_getaffinity(), numa_sched_setaffinity()
-    struct bitmask* aff_bmp = numa_bitmask_alloc(ncpus);
+    struct bitmask* aff_bmp = numa_allocate_cpumask();
     numa_bitmask_setbit(aff_bmp, 0);
-    numa_sched_setaffinity(0, aff_bmp);
+    assert(numa_sched_setaffinity(0, aff_bmp) == 0);
     numa_bitmask_clearall(aff_bmp);
-    numa_sched_getaffinity(0, aff_bmp);
+    assert(numa_sched_getaffinity(0, aff_bmp) >= 0);  // syscall return value, NOT glibc wrapper return value
     for (int i = 0; i < ncpus; i++) {
         assert(numa_bitmask_isbitset(aff_bmp, i) == (i == 0));
     }
-    numa_bitmask_free(aff_bmp);
+    numa_free_cpumask(aff_bmp);
 
     // numa_alloc_local()
     addr = numa_alloc_local(SIZE);
@@ -245,7 +245,8 @@ void test1() {
 
     // numa_set_strict()
     addr = numa_alloc_onnode(SIZE, n);
-    assert(touch_and_get_node(addr) == n);
+    for (size_t p = 0; p < SIZE; p += numa_pagesize())
+        assert(touch_and_get_node(reinterpret_cast<char*>(addr) + p) == n);
     itlv_mask = numa_allocate_nodemask();
     numa_bitmask_setall(itlv_mask);
     numa_bitmask_clearbit(itlv_mask, n);
