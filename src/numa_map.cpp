@@ -99,6 +99,7 @@ class PageMap : public GlobAlloc {
 
             InList<PageRange> chunk;
             std::bitset<CHUNK_SIZE> pmap;
+            std::bitset<CHUNK_SIZE> pmapAll;  // only set and no reset, including pages marked removed.
             lock_t futex;
 
         public:
@@ -118,7 +119,7 @@ class PageMap : public GlobAlloc {
                 // Look up in chunk to get the node for the page.
                 uint32_t node = NUMAMap::INVALID_NODE;
                 futex_lock(&futex);
-                if (pmap[pageAddr & CHUNK_MASK]) {
+                if (pmapAll[pageAddr & CHUNK_MASK]) {
                     auto pr = chunk.front();
                     while (pr != nullptr) {
                         if (pr->contains(pageAddr)) {
@@ -142,6 +143,7 @@ class PageMap : public GlobAlloc {
                 futex_lock(&futex);
                 for (size_t i = 0; i < pageCount; i++) {
                     pmap.set((pageAddr & CHUNK_MASK) + i);
+                    pmapAll.set((pageAddr & CHUNK_MASK) + i);
                 }
                 auto pr = chunk.front();
                 while (pr && newpr) {
