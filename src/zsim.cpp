@@ -33,6 +33,7 @@
 #include <execinfo.h>
 #include <fstream>
 #include <iostream>
+#include <libunwind.h>
 #include <sched.h>
 #include <sstream>
 #include <string>
@@ -1387,21 +1388,71 @@ static EXCEPT_HANDLING_RESULT InternalExceptionHandler(THREADID tid, EXCEPTION_I
         fprintf(stderr, "%s[%d]  Caused by invalid %saccess to address 0x%lx\n", logHeader, tid, faultyAccessStr, faultyAccessAddr);
     }
 
-    void* array[40];
-#ifdef PIN_CRT  // backtrace in Pin CRT requires to hold the lock.
+#ifdef PIN_CRT
+    // With PinCRT, it seems Pin cannot backtrace to the original pintool stack from the exception handler.
+    // So we extract the instruction and stack pointers and manually unwind with libunwind.
+
     PIN_LockClient();
-#endif  // PIN_CRT
+    fprintf(stderr, "%s[%d] Backtrace\n", logHeader, tid);
+
+    unw_context_t ctxt;
+    unw_cursor_t cur;
+    unw_word_t ip;
+    unw_getcontext(&ctxt);
+    unw_init_local(&cur, &ctxt);
+
+    // Restore to the original pintool stack.
+    unw_set_reg(&cur, UNW_REG_IP, PIN_GetPhysicalContextReg(pPhysCtxt, REG_INST_PTR));
+    unw_set_reg(&cur, UNW_REG_SP, PIN_GetPhysicalContextReg(pPhysCtxt, REG_STACK_PTR));
+
+    // Get libzsim info.
+    struct LibInfo libzsimAddrs;
+    getLibzsimAddrs(&libzsimAddrs);
+    std::string libzsimFile = QUOTED(ZSIM_PATH);
+
+    do {
+        // Get instruction pointer.
+        unw_get_reg(&cur, UNW_REG_IP, &ip);
+
+        // We need to use relative instruction address as Pin seems to load libzsim.so in an unusual way.
+        ADDRINT relInstrAddr = ip - reinterpret_cast<uintptr_t>(libzsimAddrs.textAddr);
+        std::stringstream ss;
+        ss << "0x" << std::hex << relInstrAddr;
+        std::string relInstrAddrStr(ss.str());
+
+        std::string s = "Unknown instruction addr: " + libzsimFile + "+" + relInstrAddrStr;
+        // Get symbol.
+        std::string cmd = "addr2line -f -C -e " + libzsimFile + " -j .text " + relInstrAddrStr;
+        FILE* f = popen(cmd.c_str(), "r");
+        if (f) {
+            char buf[1024];
+            std::string func, loc;
+            func = fgets(buf, 1024, f); //first line is function name
+            loc = fgets(buf, 1024, f); //second is location
+            //Remove line breaks
+            func = func.substr(0, func.size()-1);
+            loc = loc.substr(0, loc.size()-1);
+
+            int status = pclose(f);
+            if (status == 0) {
+                s = loc + " / " + func;
+            }
+        }
+
+        fprintf(stderr, "%s[%d]  %s\n", logHeader, tid, s.c_str());
+    } while (unw_step(&cur) > 0);
+    fflush(stderr);
+
+    PIN_UnlockClient();
+#else  // PIN_CRT
+    void* array[40];
     size_t size = backtrace(array, 40);
     char** strings = backtrace_symbols(array, size);
-#ifdef PIN_CRT
-    PIN_UnlockClient();
-#endif  // PIN_CRT
     fprintf(stderr, "%s[%d] Backtrace (%ld/%d max frames)\n", logHeader, tid, size, 40);
     for (uint32_t i = 0; i < size; i++) {
         //For libzsim.so addresses, call addr2line to get symbol info (can't use -rdynamic on libzsim.so because of Pin's linker script)
         //NOTE: May be system-dependent, may not handle malformed strings well. We're going to die anyway, so in for a penny, in for a pound...
         std::string s = strings[i];
-#ifndef PIN_CRT  // Pin CRT itself provides some parsing already on top of posix backtrace.
         uint32_t lp = s.find_first_of("(");
         uint32_t cp = s.find_first_of(")");
         std::string fname = s.substr(0, lp);
@@ -1424,11 +1475,11 @@ static EXCEPT_HANDLING_RESULT InternalExceptionHandler(THREADID tid, EXCEPTION_I
                 }
             }
         }
-#endif  // PIN_CRT
 
         fprintf(stderr, "%s[%d]  %s\n", logHeader, tid, s.c_str());
     }
     fflush(stderr);
+#endif  // PIN_CRT
 
     return EHR_CONTINUE_SEARCH; //we never solve anything at all :P
 }

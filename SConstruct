@@ -65,6 +65,7 @@ def buildSim(cppFlags, dir, type, pgo=None):
         env["CPPFLAGS"] += " -fno-exceptions -fno-rtti -funwind-tables -fasynchronous-unwind-tables"
         env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/stlport/include")
         env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/libstdc++/include")
+        env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/libunwind/include")
         env["CPPFLAGS"] += " -isystem " + joinpath(pinCrtDir, "include")
         env["CPPFLAGS"] += " -isystem " + joinpath(pinCrtDir, "include/arch-x86_64")
         env["CPPFLAGS"] += " -isystem " + joinpath(pinCrtDir, "include/kernel/uapi")
