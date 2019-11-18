@@ -7,6 +7,7 @@
 #include "g_std/g_string.h"
 #include "g_std/g_unordered_map.h"
 #include "g_std/g_vector.h"
+#include "locks.h"
 #include "memory_hierarchy.h"
 #include "zsim.h"  // for lineBits
 
@@ -98,22 +99,30 @@ class NUMAMap : public GlobAlloc {
         size_t addPagesThreadPolicy(const Address pageAddr, const size_t pageCount, const uint32_t pid, const uint32_t tid, const uint32_t cid, NUMAPolicy* policy = nullptr);
 
         // Get the NUMA policy for the thread. Record and return default policy if absent.
-        const NUMAPolicy& getThreadPolicy(const uint32_t pid, const uint32_t tid) {
+        NUMAPolicy getThreadPolicy(const uint32_t pid, const uint32_t tid) {
             uint64_t gid = (((uint64_t)pid) << 32) | tid;
-            return threadPolicy[gid];
+            futex_lock(&lock);
+            auto policy = threadPolicy[gid];
+            futex_unlock(&lock);
+            return policy;
         }
 
         // Set the NUMA policy for the thread.
         void setThreadPolicy(const uint32_t pid, const uint32_t tid, const int mode, const g_vector<bool>& mask) {
             assert(mask.size() == maxNode + 1);
             uint64_t gid = (((uint64_t)pid) << 32) | tid;
+            futex_lock(&lock);
             threadPolicy[gid] = NUMAPolicy(mode, mask);
+            futex_unlock(&lock);
         }
 
         // Get the next NUMA node of interleaving allocation for the thread.
-        uint32_t getThreadNextAllocNode(const uint32_t pid, const uint32_t tid) const {
+        uint32_t getThreadNextAllocNode(const uint32_t pid, const uint32_t tid) {
             uint64_t gid = (((uint64_t)pid) << 32) | tid;
-            return threadPolicy.at(gid).getNext();
+            futex_lock(&lock);
+            uint32_t next = threadPolicy.at(gid).getNext();
+            futex_unlock(&lock);
+            return next;
         }
 
         // Use glob mem.
@@ -139,6 +148,7 @@ class NUMAMap : public GlobAlloc {
         /* Thread NUMA policy. */
 
         g_unordered_map<uint64_t, NUMAPolicy> threadPolicy;  // indexed by ((pid << 32) | tid)
+        lock_t lock;
 
     private:
         // Parse the character string found in /sys/devices/system/node/nodeN/cpumap

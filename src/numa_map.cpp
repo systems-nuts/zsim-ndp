@@ -393,6 +393,8 @@ NUMAMap::NUMAMap(const char* _patchRoot, const uint32_t numCores)
             warn("Core %u has no associated NUMA node", cid);
         }
     }
+
+    futex_init(&lock);
 }
 
 uint32_t NUMAMap::getNodeOfPage(const Address pageAddr) {
@@ -425,7 +427,9 @@ size_t NUMAMap::addPagesThreadPolicy(const Address pageAddr, const size_t pageCo
     if (!policy) {
         // Use the policy of the thread.
         uint64_t gid = (((uint64_t)pid) << 32) | tid;
+        futex_lock(&lock);
         policy = &threadPolicy[gid];
+        futex_unlock(&lock);
     }
     const auto& mode = policy->getMode();
 
