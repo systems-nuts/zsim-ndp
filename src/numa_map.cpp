@@ -1,8 +1,8 @@
 #include <bitset>
 #include "numa_map.h"
 #include "constants.h"
+#include "g_std/g_map.h"
 #include "g_std/g_unordered_map.h"
-#include "intrusive_list.h"
 #include "locks.h"
 #include "scheduler.h"
 #include "zsim.h"  // for getCid
@@ -58,7 +58,7 @@ class PageMap : public GlobAlloc {
     private:
         static constexpr uint32_t CHUNK_BITS = 16;  // 2^16 pages, i.e., 256 MB
 
-        struct PageRange : InListNode<PageRange> {
+        struct PageRange {
             Address pageAddrBegin;
             Address pageAddrEnd;
             uint32_t node;
@@ -70,6 +70,8 @@ class PageMap : public GlobAlloc {
 
             PageRange(const Address _pageAddr, const size_t _pageCount, const uint32_t _node, bool _removed = false)
                 : pageAddrBegin(_pageAddr), pageAddrEnd(_pageAddr + _pageCount), node(_node), removed(_removed) {}
+
+            PageRange() : PageRange(0, 0, NUMAMap::INVALID_NODE) {}
 
             inline bool contains(const Address pageAddr) const {
                 return (pageAddr >= pageAddrBegin) && (pageAddr < pageAddrEnd);
@@ -97,9 +99,10 @@ class PageMap : public GlobAlloc {
             static constexpr uint64_t CHUNK_SIZE = 1 << PageMap::CHUNK_BITS;
             static constexpr Address CHUNK_MASK = (CHUNK_SIZE - 1);
 
-            InList<PageRange> chunk;
+            using ChunkStorage = g_map<Address, PageRange>;  // use page range begin address as key
+
+            ChunkStorage chunk;
             std::bitset<CHUNK_SIZE> pmap;
-            std::bitset<CHUNK_SIZE> pmapAll;  // only set and no reset, including pages marked removed.
             lock_t futex;
 
         public:
@@ -119,17 +122,9 @@ class PageMap : public GlobAlloc {
                 // Look up in chunk to get the node for the page.
                 uint32_t node = NUMAMap::INVALID_NODE;
                 futex_lock(&futex);
-                if (pmapAll[pageAddr & CHUNK_MASK]) {
-                    auto pr = chunk.front();
-                    while (pr != nullptr) {
-                        if (pr->contains(pageAddr)) {
-                            node = pr->node;
-                            break;
-                        } else if (pr->pageAddrBegin > pageAddr) {
-                            break;
-                        }
-                        pr = pr->next;
-                    }
+                auto it = findBefore(pageAddr);
+                if (it->second.contains(pageAddr)) {
+                    node = it->second.node;
                 }
                 futex_unlock(&futex);
                 return node;
@@ -139,86 +134,84 @@ class PageMap : public GlobAlloc {
                 // Add to chunk and keep the order, and merge if necessary.
                 // Return number of pages that already exist and thus are ignored.
                 size_t ignoredCount = 0;
-                auto newpr = new PageRange(pageAddr, pageCount, node);
+                auto newpr = PageRange(pageAddr, pageCount, node);
                 futex_lock(&futex);
                 for (size_t i = 0; i < pageCount; i++) {
                     pmap.set((pageAddr & CHUNK_MASK) + i);
-                    pmapAll.set((pageAddr & CHUNK_MASK) + i);
                 }
-                auto pr = chunk.front();
-                while (pr && newpr) {
-                    if (newpr->pageAddrEnd < pr->pageAddrBegin) {
+                auto it = findBefore(pageAddr);
+                while (it != chunk.end() && newpr.count()) {
+                    auto& pr = it->second;
+                    if (newpr.pageAddrEnd < pr.pageAddrBegin) {
                         // No overlap with following ones, insert as new entry.
-                        safeInsertBefore(pr, newpr);
-                        newpr = nullptr;
-                    } else if (newpr->pageAddrBegin > pr->pageAddrEnd) {
+                        safeInsertBefore(it, newpr);
+                    } else if (newpr.pageAddrBegin > pr.pageAddrEnd) {
                         // No overlap but after the current one, do nothing.
-                        pr = pr->next;
-                    } else if (pr->removed) {
+                        ++it;
+                    } else if (pr.removed) {
                         // Overlaps with current one which has been removed.
                         // Overwrite the overlapped part.
 
                         // Split the current range.
-                        PageRange* before = nullptr;
-                        PageRange* after = nullptr;
-                        split(pr, newpr, &before, nullptr, &after);
-                        assert((before ? before->count() : 0) + (after ? after->count() : 0) <= pr->count());
+                        PageRange before, overlap, after;
+                        split(pr, newpr, before, overlap, after);
                         // Remove it.
-                        auto q = pr;
-                        pr = pr->next;
-                        chunk.remove(q);
-                        delete q;
+                        chunk.erase(it++);
 
-                        // Add back non-overlap range before the new range.
-                        if (before) {
-                            safeInsertBefore(pr, before);
+                        // If there is non-overlap range before the new range ...
+                        if (before.count()) {
+                            // Add back non-overlap range before the new range.
+                            safeInsertBefore(it, before);
+                        } else {
+                            // ... otherwise, try merge with the previous neighbor.
+                            if (it != chunk.begin()) {
+                                auto prev = it;
+                                --prev;
+                                if (newpr.tryMergeWith(prev->second)) {
+                                    chunk.erase(prev);
+                                }
+                            }
                         }
 
                         // If there is non-overlap range after the new range ...
-                        if (after) {
+                        if (after.count()) {
                             // Insert the new range.
-                            safeInsertBefore(pr, newpr);
-                            newpr = nullptr;
+                            safeInsertBefore(it, newpr);
 
                             // Add back non-overlap range after the new range.
-                            safeInsertBefore(pr, after);
+                            safeInsertBefore(it, after);
                         }
                         // ... otherwise, the current removed range is completely handled.
                         // We leave the new range unchanged to compare with the next one.
-                    } else if (node == pr->node) {
+                    } else if (newpr.node == pr.node) {
                         // Overlaps with current one and the same node.
                         // Remove the current one and merge into the new range.
-                        assert(newpr->tryMergeWith(*pr));
-                        auto q = pr;
-                        pr = pr->next;
-                        chunk.remove(q);
-                        delete q;
+                        assert(newpr.tryMergeWith(pr));
+                        chunk.erase(it++);
                     } else {
                         // Overlaps with current one but different nodes.
                         // Insert the non-overlapped part.
 
                         // Split the new range.
-                        PageRange* before = nullptr;
-                        PageRange* after = nullptr;
-                        split(newpr, pr, &before, nullptr, &after);
-                        assert((before ? before->count() : 0) + (after ? after->count() : 0) <= newpr->count());
+                        PageRange before, overlap, after;
+                        split(newpr, pr, before, overlap, after);
 
                         // Overlap range is ignored.
-                        ignoredCount += newpr->count() - (before ? before->count() : 0) - (after ? after->count() : 0);
+                        ignoredCount += overlap.count();
 
                         // Insert non-overlap range before the current one.
-                        if (before) {
-                            safeInsertBefore(pr, before);
+                        if (before.count()) {
+                            safeInsertBefore(it, before);
                         }
 
                         // Use non-overlap range after the current one as the new one.
                         newpr = after;
 
-                        pr = pr->next;
+                        ++it;
                     }
                 }
                 // Push to the end.
-                if (newpr) chunk.push_back(newpr);
+                if (newpr.count()) safeInsertBefore(it, newpr);
                 verify();
                 futex_unlock(&futex);
                 return ignoredCount;
@@ -226,71 +219,63 @@ class PageMap : public GlobAlloc {
 
             void remove(Address pageAddr, size_t pageCount) {
                 // Remove lazily from chunk, and split if necessary.
-                auto e = PageRange(pageAddr, pageCount, NUMAMap::INVALID_NODE, true);
-                auto rempr = &e;
+                auto rempr = PageRange(pageAddr, pageCount, NUMAMap::INVALID_NODE, true);
                 futex_lock(&futex);
                 for (size_t i = 0; i < pageCount; i++) {
                     pmap.set((pageAddr & CHUNK_MASK) + i, false);
                 }
-                auto pr = chunk.front();
-                while (pr) {
-                    if (rempr->pageAddrEnd < pr->pageAddrBegin) {
+                auto it = findBefore(pageAddr);
+                while (it != chunk.end()) {
+                    auto& pr = it->second;
+                    if (rempr.pageAddrEnd < pr.pageAddrBegin) {
                         // No overlap with following ones, return.
                         break;
-                    } else if (rempr->pageAddrBegin > pr->pageAddrEnd) {
+                    } else if (rempr.pageAddrBegin > pr.pageAddrEnd) {
                         // No overlap but after the current one, continue.
-                        pr = pr->next;
-                    } else if (!pr->removed) {
+                        ++it;
+                    } else if (!pr.removed) {
                         // Overlaps with current one which is not removed.
                         // Mark the overlapped part as removed.
 
                         // Split the current range.
-                        PageRange* before = nullptr;
-                        PageRange* overlap = nullptr;
-                        PageRange* after = nullptr;
-                        split(pr, rempr, &before, &overlap, &after);
-                        assert((before ? before->count() : 0)
-                                + (after ? after->count() : 0)
-                                + (overlap ? overlap->count() : 0) <= pr->count());
+                        PageRange before, overlap, after;
+                        split(pr, rempr, before, overlap, after);
                         // Remove it.
-                        auto q = pr;
-                        pr = pr->next;
-                        chunk.remove(q);
-                        delete q;
+                        chunk.erase(it++);
 
                         // Add back non-overlap range before the removing range.
-                        if (before) {
-                            safeInsertBefore(pr, before);
+                        if (before.count()) {
+                            safeInsertBefore(it, before);
                         }
 
                         // Add back overlap range as removed.
-                        if (overlap) {
-                            assert(!overlap->removed);
-                            overlap->removed = true;
+                        if (overlap.count()) {
+                            assert(!overlap.removed);
+                            overlap.removed = true;
 
                             // Try merge with removed neighbors.
-                            auto prev = pr ? pr->prev : chunk.back();
-                            if (prev && overlap->tryMergeWith(*prev)) {
-                                auto q = prev;
-                                chunk.remove(q);
-                                delete q;
+                            if (it != chunk.begin()) {
+                                auto prev = it;
+                                --prev;
+                                if (overlap.tryMergeWith(prev->second)) {
+                                    chunk.erase(prev);
+                                }
                             }
-                            if (pr && overlap->tryMergeWith(*pr)) {
-                                auto q = pr;
-                                pr = pr->next;
-                                chunk.remove(q);
-                                delete q;
+                            if (it != chunk.end()) {
+                                if (overlap.tryMergeWith(it->second)) {
+                                    chunk.erase(it++);
+                                }
                             }
-                            safeInsertBefore(pr, overlap);
+                            safeInsertBefore(it, overlap);
                         }
 
                         // Add back non-overlap range after the removing range.
-                        if (after) {
-                            safeInsertBefore(pr, after);
+                        if (after.count()) {
+                            safeInsertBefore(it, after);
                         }
                     } else {
                         // Overlaps with current one which has been removed, do nothing.
-                        pr = pr->next;
+                        ++it;
                     }
                 }
                 verify();
@@ -299,53 +284,65 @@ class PageMap : public GlobAlloc {
 
             void verify() const {
 #if 0
-                auto pr = chunk.front();
                 uint64_t lastPageAddrEnd = 0;
                 uint64_t lastNode = NUMAMap::INVALID_NODE;
                 bool lastRemoved = false;
-                while (pr != nullptr) {
+                for (auto it = chunk.begin(); it != chunk.end(); ++it) {
+                    const auto& pr = it->second;
                     DEBUG("[PageMap] verify 0x%lx-0x%lx -> %u%s",
-                            pr->pageAddrBegin, pr->pageAddrEnd, pr->node, pr->removed ? " D" : "");
-                    assert(pr->pageAddrBegin < pr->pageAddrEnd);
-                    assert(pr->node != NUMAMap::INVALID_NODE);
-                    if (pr->node == lastNode && !pr->removed && !lastRemoved) {
-                        assert_msg(pr->pageAddrBegin > lastPageAddrEnd, "page ranges overlap");
+                            pr.pageAddrBegin, pr.pageAddrEnd, pr.node, pr.removed ? " D" : "");
+                    assert(pr.pageAddrBegin < pr.pageAddrEnd);
+                    assert(pr.node != NUMAMap::INVALID_NODE);
+                    if (pr.node == lastNode && !pr.removed && !lastRemoved) {
+                        assert_msg(pr.pageAddrBegin > lastPageAddrEnd, "page ranges overlap");
                     } else {
-                        assert_msg(pr->pageAddrBegin >= lastPageAddrEnd, "page ranges overlap");
+                        assert_msg(pr.pageAddrBegin >= lastPageAddrEnd, "page ranges overlap");
                     }
-                    lastPageAddrEnd = pr->pageAddrEnd;
-                    lastNode = pr->node;
-                    lastRemoved = pr->removed;
-                    pr = pr->next;
+                    lastPageAddrEnd = pr.pageAddrEnd;
+                    lastNode = pr.node;
+                    lastRemoved = pr.removed;
                 }
 #endif
             }
 
         private:
-            inline void safeInsertBefore(PageRange* next, PageRange* e) {
-                if (next == nullptr) {
-                    chunk.push_back(e);
-                    return;
+            /* Get an iterator to a range (if any) whose begin address is before the given address.
+             * If the first range is after the address, return the begin iterator.
+             * If the address is after all ranges, return the last valid iterator.
+             */
+            inline ChunkStorage::iterator findBefore(Address pageAddr) {
+                auto it = chunk.upper_bound(pageAddr);
+                assert_msg(it == chunk.end() || it->first > pageAddr, "upper_bound." /* to workaround operator<< on iterator type. */);
+                if (it != chunk.begin()) {
+                    --it;
+                    assert(it->first <= pageAddr);
                 }
-                auto prev = next->prev;
-                if (prev == nullptr) {
-                    chunk.push_front(e);
-                    return;
-                }
-                assert(prev->pageAddrEnd < e->pageAddrBegin || prev->node != e->node || prev->removed != e->removed);
-                assert(!prev->next || e->pageAddrEnd < prev->next->pageAddrBegin || prev->next->node != e->node || prev->next->removed != e->removed);
-                chunk.insertAfter(prev, e);
+                return it;
             }
 
-            inline void split(const PageRange* orig, const PageRange* splitter,
-                    PageRange** before, PageRange** overlap, PageRange** after) {
-                auto makeRange = [orig](Address begin, Address end) -> PageRange* {
-                    if (begin < end) return new PageRange(begin, end - begin, orig->node, orig->removed);
-                    return nullptr;
+            inline void safeInsertBefore(ChunkStorage::iterator& next, PageRange& e) {
+                auto it = chunk.insert(next /* hint */, std::make_pair<Address, PageRange>(e.pageAddrBegin, e));
+                e.pageAddrEnd = e.pageAddrBegin;  // clear the inserted range.
+                assert(it->second.count() > 0);  // not affected
+                if (next != chunk.end()) {
+                    assert(it->second.pageAddrEnd <= next->second.pageAddrBegin);
+                }
+                if (it != chunk.begin()) {
+                    auto prev = it;
+                    --prev;
+                    assert(it->second.pageAddrBegin >= prev->second.pageAddrEnd);
+                }
+            }
+
+            inline void split(const PageRange& orig, const PageRange& splitter,
+                    PageRange& before, PageRange& overlap, PageRange& after) {
+                auto makeRange = [orig](Address begin, Address end) -> PageRange {
+                    return PageRange(begin, begin < end ? end - begin : 0, orig.node, orig.removed);
                 };
-                if (before != nullptr) *before = makeRange(orig->pageAddrBegin, splitter->pageAddrBegin);
-                if (overlap != nullptr) *overlap = makeRange(std::max(orig->pageAddrBegin, splitter->pageAddrBegin), std::min(orig->pageAddrEnd, splitter->pageAddrEnd));
-                if (after != nullptr) *after = makeRange(splitter->pageAddrEnd, orig->pageAddrEnd);
+                before = makeRange(orig.pageAddrBegin, splitter.pageAddrBegin);
+                overlap = makeRange(std::max(orig.pageAddrBegin, splitter.pageAddrBegin), std::min(orig.pageAddrEnd, splitter.pageAddrEnd));
+                after = makeRange(splitter.pageAddrEnd, orig.pageAddrEnd);
+                assert(before.count() + overlap.count() + after.count() == orig.count());
             }
         };
 
