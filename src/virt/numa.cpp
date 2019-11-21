@@ -314,7 +314,10 @@ PostPatchFn PatchMbind(PrePatchArgs args) {
 
     // We must get the core info now, since thread will leave after entering syscall.
     uint32_t cid = getCid(args.tid);
-    assert_msg(cid < zinfo->numCores, "Thread %u runs on core %u? Are we in FF?", args.tid, cid);
+    if (mode == MPOL_DEFAULT && cid >= zinfo->numCores) {
+        warn("Thread %u uses default mempolicy but runs on core %u (are we in FF?); fall back to default core 0", args.tid, cid);
+        cid = 0;
+    }
 
     return [=](PostPatchArgs args) {
         // Construct the policy if not default.
