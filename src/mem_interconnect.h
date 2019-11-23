@@ -7,7 +7,7 @@
 #include "memory_hierarchy.h"
 #include "stats.h"
 
-class AddressMap;
+class CoherentParentMap;
 class MemRouter;
 class RoutingAlgorithm;
 
@@ -106,7 +106,7 @@ class MemInterconnect : public GlobAlloc {
         uint64_t processInval(const InvReq& req, uint32_t childId);
 
     public:
-        MemInterconnect(RoutingAlgorithm* _ra, AddressMap* _am, const g_vector<MemRouter*>& _routers,
+        MemInterconnect(RoutingAlgorithm* _ra, CoherentParentMap* _pm, const g_vector<MemRouter*>& _routers,
                 uint32_t numParents, uint32_t numChildren, bool _centralizedParents,
                 uint32_t _ccHeaderSize, bool _ignoreInvLatency, const g_string& _name);
 
@@ -124,7 +124,7 @@ class MemInterconnect : public GlobAlloc {
 
     private:
         RoutingAlgorithm* ra;
-        AddressMap* am;
+        CoherentParentMap* pm;
         g_vector<MemRouter*> routers;
         const uint32_t numTerminals;
 

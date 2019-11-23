@@ -707,14 +707,14 @@ static void InitSystem(Config& config) {
                 routerGroupMap[rgName.c_str()] = rg;
             }
 
-            // Address map.
-            AddressMap* am = BuildAddressMap(config, prefix + "addressMap.", numParents);
+            // Parent map.
+            CoherentParentMap* pm = new CoherentParentMap(BuildAddressMap(config, prefix + "addressMap.", numParents));
 
             uint32_t ccHeaderSize = config.get<uint32_t>(prefix + "ccHeaderSize", 0);
             bool centralizedParents = config.get<bool>(prefix + "centralizedParents", false);
             bool ignoreInvLatency = config.get<bool>(prefix + "ignoreInvLatency", false);
 
-            auto interconnect = new MemInterconnect(ra, am, routers, numParents, numChildren, centralizedParents, ccHeaderSize, ignoreInvLatency, name.c_str());
+            auto interconnect = new MemInterconnect(ra, pm, routers, numParents, numChildren, centralizedParents, ccHeaderSize, ignoreInvLatency, name.c_str());
             interconnectVec.push_back(interconnect);
         }
 

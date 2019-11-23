@@ -11,10 +11,10 @@
 
 #define IDIVC(x, y) (((x) + (y) - 1) / (y))
 
-MemInterconnect::MemInterconnect(RoutingAlgorithm* _ra, AddressMap* _am, const g_vector<MemRouter*>& _routers,
+MemInterconnect::MemInterconnect(RoutingAlgorithm* _ra, CoherentParentMap* _pm, const g_vector<MemRouter*>& _routers,
         uint32_t numParents, uint32_t numChildren, bool _centralizedParents,
         uint32_t _ccHeaderSize, bool _ignoreInvLatency, const g_string& _name)
-    : ra(_ra), am(_am), routers(_routers), numTerminals(_ra->getNumTerminals()),
+    : ra(_ra), pm(_pm), routers(_routers), numTerminals(_ra->getNumTerminals()),
       centralizedParents(_centralizedParents), ccHeaderSize(_ccHeaderSize), ignoreInvLatency(_ignoreInvLatency),
       numParentsPerTerminal(IDIVC(numParents, numTerminals)), numTerminalsPerParent(IDIVC(numTerminals, numParents)),
       numChildrenPerTerminal(IDIVC(numChildren, numTerminals)), numTerminalsPerChild(IDIVC(numTerminals, numChildren)),
@@ -32,8 +32,8 @@ MemInterconnect::MemInterconnect(RoutingAlgorithm* _ra, AddressMap* _am, const g
     }
     assert(numChildrenPerTerminal == 1 || numTerminalsPerChild == 1);
 
-    if (am->getTotal() != numParents) {
-        panic("[mem_interconnect] %s: address map must have %u total destination for parents, now %u.", name.c_str(), numParents, am->getTotal());
+    if (pm->getTotal() != numParents) {
+        panic("[mem_interconnect] %s: parent map must have %u total destination for parents, now %u.", name.c_str(), numParents, pm->getTotal());
     }
 
     assert(ra->getNumRouters() == routers.size());
@@ -90,7 +90,7 @@ uint64_t MemInterconnect::processAccess(const MemReq& req) {
 
     // Child and parent.
     const uint32_t childId = req.childId;
-    const uint32_t parentId = am->getMap(req.lineAddr);
+    const uint32_t parentId = pm->getParentIdInAccess(req.lineAddr, childId, req);
     assert(parentId < parents.size());
     assert(childId < children.size());
 
@@ -187,7 +187,7 @@ uint64_t MemInterconnect::processInval(const InvReq& req, uint32_t childId) {
     const auto invType = req.type;
 
     // Child and parent.
-    uint32_t parentId = am->getMap(req.lineAddr);
+    uint32_t parentId = pm->getParentIdInInvalidate(req.lineAddr, childId, req);
     assert(parentId < parents.size());
     assert(childId < children.size());
 
