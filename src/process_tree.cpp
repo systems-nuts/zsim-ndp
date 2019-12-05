@@ -158,7 +158,7 @@ static void PopulateLevel(Config& config, const std::string& prefix, std::vector
         if (patchRoot != "") {
             //In case this is a relpath, convert it to absolute
             char* pathBuf = realpath(patchRoot.c_str(), nullptr); //mallocs the buffer
-            assert(pathBuf);
+            assert_msg(pathBuf, "Invalid patch root %s for process %u", patchRoot.c_str(), idx);
             gpr = gm_strdup(pathBuf);
             free(pathBuf);
         }
