@@ -73,14 +73,23 @@ PostPatchFn PatchGetcpu(PrePatchArgs args) {
 
 PostPatchFn PatchSchedGetaffinity(PrePatchArgs args) {
     return [](PostPatchArgs args) {
+        int err = -PIN_GetSyscallNumber(args.ctxt, args.std);
+        if (err == EINVAL || err == EFAULT) {
+            // SYS_sched_getaffinity may return EINVAL if the given cpusetsize is too small.
+            // If error, directly return to the user.
+            return PPA_NOTHING;
+        }
         // On success, the syscall returns the size of cpumask_t in bytes.
         const int maxSize = MAX(1024, (1 << (ilog2(zinfo->numCores) + 1))) / 8;
         PIN_SetSyscallNumber(args.ctxt, args.std, maxSize);
         uint32_t linuxTid = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
         uint32_t tid = (linuxTid == 0 ? args.tid : zinfo->sched->getTidFromLinuxTid(linuxTid));
+        std::vector<bool> cpumask(cpuenumNumCpus(procIdx), true);  // all core eligible
         if (tid == (uint32_t)-1) {
-            warn("SYS_sched_getaffinity cannot find thread with OS id %u, ignored", linuxTid);
+            warn("SYS_sched_getaffinity cannot find thread with OS id %u (maybe in FF?), default to be all core eligible", linuxTid);
             return PPA_NOTHING;
+        } else {
+            cpumask = cpuenumMask(procIdx, tid);
         }
         uint32_t size = PIN_GetSyscallArgument(args.ctxt, args.std, 1);
         if (size*8 < cpuenumNumCpus(procIdx)) {
@@ -91,7 +100,6 @@ PostPatchFn PatchSchedGetaffinity(PrePatchArgs args) {
         cpu_set_t* set = (cpu_set_t*)PIN_GetSyscallArgument(args.ctxt, args.std, 2);
         if (set) { //TODO: use SafeCopy, this can still segfault
             CPU_ZERO_S(size, set);
-            std::vector<bool> cpumask = cpuenumMask(procIdx, tid);
             for (uint32_t i = 0; i < MIN(cpumask.size(), size*8 /*size is in bytes, supports 1 cpu/bit*/); i++) {
                 if (cpumask[i]) CPU_SET_S(i, (size_t)size, set);
             }
@@ -105,7 +113,7 @@ PostPatchFn PatchSchedSetaffinity(PrePatchArgs args) {
     uint32_t linuxTid = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
     uint32_t tid = (linuxTid == 0 ? args.tid : zinfo->sched->getTidFromLinuxTid(linuxTid));
     if (tid == (uint32_t)-1) {
-        warn("SYS_sched_getaffinity cannot find thread with OS id %u, ignored!", linuxTid);
+        warn("SYS_sched_setaffinity cannot find thread with OS id %u (maybe in FF?), ignored!", linuxTid);
         PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT) SYS_getpid);  // squash
         return [](PostPatchArgs args) {
             PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EPERM);
