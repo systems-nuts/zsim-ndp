@@ -88,12 +88,13 @@ def main(args):
     if ncpus < 1:
         raise ValueError('Need >= 1 cores')
     if ncpus > mask_size:
-        if ncpus > 2048:
-            raise ValueError('Too many cores, currently support up to 2048')
+        # Increase mask size to a power-of-two that just covers all cores
+        mask_size = 1 << ((ncpus - 1).bit_length())
+        assert mask_size >= ncpus
         sys.stderr.write('WARN: These many CPUs have not been tested, '
                          'x2APIC systems may be different...\n'
-                         'WARN: Switch to long mask format, up to 2048 cores\n')
-        mask_size = 2048
+                         'WARN: Switch to long mask format with {} cores\n'
+                         .format(mask_size))
 
     # Number of NUMA memory nodes.
     if share_nodes:
@@ -132,9 +133,10 @@ def main(args):
             c2m[cpu] = mem
             m2cs[mem].append(cpu)
 
-    print 'Will produce a tree for {}/{} big/little cores with {} {}/{} NUMA memory nodes in {}' \
-            .format(ncpus_b, ncpus_l, 'shared' if share_nodes else 'separate',
-                    nmems_b, nmems_l, root)
+    print('Will produce a tree for {}/{} big/little cores '
+          'with {} {}/{} NUMA memory nodes in {}'
+          .format(ncpus_b, ncpus_l, 'shared' if share_nodes else 'separate',
+                  nmems_b, nmems_l, root))
 
     ## /proc
 
@@ -257,9 +259,9 @@ def main(args):
 
     for (p, ds, fs) in os.walk(root):
         for d in ds:
-            os.chmod(os.path.join(p, d), 0555)
+            os.chmod(os.path.join(p, d), 0o555)
         for f in fs:
-            os.chmod(os.path.join(p, f), 0444)
+            os.chmod(os.path.join(p, f), 0o444)
 
     return 0
 
