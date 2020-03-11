@@ -168,7 +168,7 @@ void Scheduler::watchdogThreadFunc() {
 
                         // also do real leave for other threads blocked at the same pc ...
                         fl = fakeLeaves.front();
-                        if (fl == nullptr || getPid(th->gid) != pid || fl->pc != pc)
+                        if (fl == nullptr || getPid(fl->th->gid) != pid || fl->pc != pc)
                             break;
                         th = fl->th;
                         tid = getTid(th->gid);
