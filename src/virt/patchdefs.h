@@ -43,6 +43,9 @@ PF(SYS_sched_getaffinity, PatchSchedGetaffinity);
 PF(SYS_sched_setaffinity, PatchSchedSetaffinity);
 
 
+// Thread control -- control.cpp
+PF(SYS_exit_group, PatchExitGroup);
+
 // Conditional patches, only when not fast-forwarded
 
 // Time virtualization -- time.cpp
