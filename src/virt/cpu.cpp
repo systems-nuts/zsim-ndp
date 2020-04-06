@@ -147,7 +147,8 @@ PostPatchFn PatchSchedSetaffinity(PrePatchArgs args) {
     PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT) SYS_getpid);  // squash
     return [](PostPatchArgs args) {
         PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)0);  // return 0 on success
-        return PPA_USE_JOIN_PTRS;
+        // SyscallEnter() in zsim.cpp makes sure that (fake) leaving syscalls will use join ptrs.
+        return PPA_NOTHING;
     };
 }
 
