@@ -2,6 +2,7 @@
 #define CC_EXTS_H_
 
 #include "coherence_ctrls.h"
+#include "bithacks.h"
 #include "event_recorder.h"
 #include "g_std/g_string.h"
 #include "g_std/g_unordered_map.h"
@@ -412,6 +413,112 @@ class MESIDirectoryHubCC : public MESICC {
             assert(fwdId != -1u && tcc->isSharer(lineId, fwdId));
 
             return fwdId;
+        }
+};
+
+
+/**
+ * MESI CC that does not use directory to track sharers.
+ *
+ * For access, it forwards to parents; for invalidation, it broadcasts to all children.
+ *
+ * Require parents to filter repeated accesses, and children to filter no-op invalidations.
+ */
+class MESIBroadcastHubCC : public MESIDirectoryHubCC<false> {
+    public:
+        typedef MESIDirectoryHubCC<false> BaseCC;
+
+    protected:
+        const uint32_t banksPerChild;
+
+    public:
+        MESIBroadcastHubCC(uint32_t _numLines, uint32_t _banksPerChild, bool _nonInclusiveHack, bool _filterAcc, bool _filterInv, g_string& _name)
+            : BaseCC(_numLines, _nonInclusiveHack, _filterAcc, _filterInv, _name), banksPerChild(_banksPerChild) {}
+
+        uint64_t processAccess(const MemReq& req, int32_t lineId, uint64_t startCycle, uint64_t* getDoneCycle = nullptr) {
+            // Check whether the requesting child has sufficient permission or we need to broadcast.
+            InvType broadcastType = FWD;  // FWD is a placeholder for no broadcast
+            if (req.type == GETS && !tcc->isSharer(lineId, req.childId)) {
+                // Broadcast unless the requesting child is already a sharer.
+                broadcastType = INVX;
+            } else if (req.type == GETX && !(tcc->hasExclusiveSharer(lineId) && tcc->isSharer(lineId, req.childId))) {
+                // Broadcast unless the requesting child is already the exclusive sharer.
+                broadcastType = INV;
+            }
+            // No broadcast for PUTs.
+
+            // Use basic protocol for parent access and sharer children invalidation.
+            uint64_t _getDoneCycle = startCycle;
+            uint64_t respCycle = BaseCC::processAccess(req, lineId, startCycle, &_getDoneCycle);
+            if (getDoneCycle) *getDoneCycle = _getDoneCycle;
+
+            // Additional no-op invalidation broadcast to non-sharer children.
+            uint64_t nopInvDoneCycle = _getDoneCycle;
+            if (broadcastType != FWD) {
+                nopInvDoneCycle = broadcastNopInv(req.lineAddr, broadcastType, req.childId, lineId, _getDoneCycle, req.srcId);
+            }
+
+            respCycle = MAX(respCycle, nopInvDoneCycle);
+            return respCycle;
+        }
+
+        uint64_t processInv(const InvReq& req, int32_t lineId, uint64_t startCycle) {
+            // Use basic protocol for sharer children invalidation.
+            uint64_t respCycle = BaseCC::processInv(req, lineId, startCycle);
+
+            // Additional no-op invalidation broadcast to non-sharer children.
+            uint64_t nopInvDoneCycle = startCycle;
+            if (req.type != FWD) {
+                // FWD does not propagate up.
+                nopInvDoneCycle = broadcastNopInv(req.lineAddr, req.type, -1, lineId, startCycle, req.srcId);
+            }
+
+            respCycle = MAX(respCycle, nopInvDoneCycle);
+            return respCycle;
+        }
+
+    protected:
+        uint64_t broadcastNopInv(Address lineAddr, InvType type, uint32_t reqChildId, int32_t lineId, uint64_t startCycle, uint32_t srcId) {
+            assert(type == INV || type == INVX);
+            uint32_t respCycle = startCycle;
+
+            // Go through children and send no-op invalidations.
+            // Only one invalidation needs to be sent to each multi-bank child, i.e., to the same offset in each child
+            // if assuming all children use the same address mapping. In any case, this is a no-op and will not cause
+            // any correctness issue.
+            uint32_t offset = reqChildId % banksPerChild;
+            for (uint32_t c0 = 0; c0 < children.size(); c0 += banksPerChild) {
+                uint32_t c = c0 + offset;
+                // Skip the requesting child.
+                if (c == reqChildId) continue;
+                // Skip sharers, which are handled by the basic protocol.
+                // We need to check all banks within this child.
+                uint32_t s = 0;
+                for (uint32_t i = 0; i < banksPerChild; i++) if (tcc->isSharer(lineId, c0 + i)) s++;
+                if (s) {
+                    assert_msg(s == 1, "%s: %u different banks of the same child all have the line; did you specify the correct banksPerChild?", name.c_str(), s);
+                    continue;
+                }
+
+                // Use invalid writeback pointer, so that a no-op invalidation will not fail silently if not properly filtered.
+                InvReq req = {lineAddr, type, nullptr, startCycle, srcId};
+                uint64_t cycle = children[c]->invalidate(req);
+                respCycle = MAX(respCycle, cycle);
+            }
+
+            // The basic protocol will ignore INVX if children are already non-exclusive. See MESITopCC::sendInvalidates().
+            // In this case the line is in S states in the children. We use no-op FWD.
+            if (type == INVX && !tcc->hasExclusiveSharer(lineId)) {
+                for (uint32_t c = 0; c < children.size(); c++) {
+                    if (tcc->isSharer(lineId, c)) {
+                        InvReq req = {lineAddr, FWD, nullptr, startCycle, srcId};
+                        uint64_t cycle = children[c]->invalidate(req);
+                        respCycle = MAX(respCycle, cycle);
+                    }
+                }
+            }
+
+            return respCycle;
         }
 };
 
