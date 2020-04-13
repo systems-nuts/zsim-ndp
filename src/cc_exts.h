@@ -13,6 +13,103 @@
 #include "zsim.h"
 
 /**
+ * MESI CC that bypasses, i.e., does not keep, specific lines.
+ *
+ * For a line that meets the bypass rule, the CC will evict it from the cache as long as all children evict it.
+ */
+class MESIBypassCC : public MESICC {
+    public:
+        /* Bypass rules. */
+
+        class BypassRule : public GlobAlloc {
+        public:
+            virtual bool bypass(const MemReq& req) = 0;
+            virtual void initStats(AggregateStat* parentStat) {}
+        };
+
+        class NoneBypassRule : public BypassRule {
+        public:
+            bool bypass(const MemReq&) override { return false; }
+        };
+
+        class AllBypassRule : public BypassRule {
+        public:
+            bool bypass(const MemReq&) override { return true; }
+        };
+
+        class BasePartialBypassRule : public BypassRule {
+        protected:
+            Counter profBypEvicts;
+        public:
+            void initStats(AggregateStat* parentStat) override {
+                profBypEvicts.init("bypassEvicts", "Bypass-introduced evictions");
+                parentStat->append(&profBypEvicts);
+            }
+        };
+
+        class AddressRangeBypassRule : public BasePartialBypassRule {
+        protected:
+            g_vector<std::pair<Address, Address>> vLineAddrRanges;
+
+        public:
+            AddressRangeBypassRule(const g_vector<std::pair<Address, Address>> addrRanges) {
+                for (const auto& r : addrRanges) vLineAddrRanges.push_back({r.first << lineBits, r.second << lineBits});
+            }
+
+            bool bypass(const MemReq& req) override {
+                Address vLineAddr = req.lineAddr ^ procMask;
+                for (const auto& r : vLineAddrRanges) {
+                    if (r.first <= vLineAddr && vLineAddr < r.second) {
+                        profBypEvicts.inc();
+                        return true;
+                    }
+                }
+                return false;
+            }
+        };
+
+    protected:
+        BypassRule* bypass;
+
+    public:
+        MESIBypassCC(uint32_t _numLines, BypassRule* _bypass, bool _nonInclusiveHack, g_string& _name)
+            : MESICC(_numLines, _nonInclusiveHack, _name), bypass(_bypass) {}
+
+        void initStats(AggregateStat* cacheStat) {
+            MESICC::initStats(cacheStat);
+            bypass->initStats(cacheStat);
+        }
+
+        uint64_t processAccess(const MemReq& req, int32_t lineId, uint64_t startCycle, uint64_t* getDoneCycle = nullptr) {
+            uint64_t respCycle = startCycle;
+            respCycle = MESICC::processAccess(req, lineId, respCycle, getDoneCycle);
+
+            if (lineId != -1 && tcc->numSharers(lineId) == 0) {
+                // Evict bypassing lines when no children hold them any more.
+                if (bypass->bypass(req)) {
+                    // Check single-record invariant.
+                    // This can only happen after a PUT, which ends in this level and creates no event thus far.
+                    assert(req.type == PUTS || req.type == PUTX);
+                    auto evRec = zinfo->eventRecorders[req.srcId];
+                    assert(!evRec || !evRec->hasRecord());
+                    // The following eviction, though, may create an event.
+                    processEviction(req, req.lineAddr, lineId, respCycle);
+                    if (unlikely(evRec && evRec->hasRecord())) {
+                        // Mark eviction off the critical path.
+                        // Note that this writeback happens in CC::processAccess(), so Cache::access() will not mark it.
+                        auto wbRec = evRec->popRecord();
+                        wbRec.endEvent = nullptr;
+                        evRec->pushRecord(wbRec);
+                    }
+                }
+            }
+
+            return respCycle;
+        }
+};
+
+
+/**
  * MESI CC for a coherence directory hub with no actual data storage.
  *
  * The CC maintains a directory of sharers of cachelines, and uses this directory to maintain coherence among children.

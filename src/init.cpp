@@ -280,6 +280,35 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         } else {
             panic("Invalid coherence protocol %s", protocolType.c_str());
         }
+    } else if (type == "Bypass") {
+        string bypassRule = config.get<const char*>(prefix + "bypass.rule", "None");
+        MESIBypassCC::BypassRule* bypass = nullptr;
+        if (bypassRule == "None") {
+            bypass = new MESIBypassCC::NoneBypassRule();
+        } else if (bypassRule == "All") {
+            bypass = new MESIBypassCC::AllBypassRule();
+        } else if (bypassRule == "AddressRange") {
+            string rangeStr = config.get<const char*>(prefix + "bypass.range", "");
+            vector<string> ranges;
+            Tokenize(rangeStr, ranges, " ");
+            g_vector<std::pair<Address, Address>> addrRanges;
+            for (const auto& r : ranges) {
+                if (r.empty()) continue;
+                vector<string> bnds;
+                Tokenize(r, bnds, ":");
+                if (bnds.size() != 2) panic("Invalid bypass address range %s", r.c_str());
+                uint64_t min = 0, sup = 0;
+                stringstream ss0(bnds[0]);
+                ss0 >> min;
+                stringstream ss1(bnds[1]);
+                ss1 >> sup;
+                addrRanges.push_back({min, sup});
+            }
+            bypass = new MESIBypassCC::AddressRangeBypassRule(addrRanges);
+        } else {
+            panic("Invalid bypass rule %s", bypassRule.c_str());
+        }
+        cc = new MESIBypassCC(numLines, bypass, nonInclusiveHack, name);
     } else {
         cc = new MESICC(numLines, nonInclusiveHack, name);
     }
@@ -289,6 +318,8 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
             cache = new Cache(numLines, cc, array, rp, accLat, invLat, name);
         } else if (type == "CCHub") {
             // Use simple cache with specialized CC as coherence hub.
+            cache = new Cache(numLines, cc, array, rp, accLat, invLat, name);
+        } else if (type == "Bypass") {
             cache = new Cache(numLines, cc, array, rp, accLat, invLat, name);
         } else if (type == "Timing") {
             uint32_t mshrs = config.get<uint32_t>(prefix + "mshrs", 16);
