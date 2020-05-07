@@ -52,6 +52,7 @@
 #include "log.h"
 #include "mem_ctrls.h"
 #include "mem_interconnect.h"
+#include "mem_interconnect_event_recorder.h"
 #include "mem_router.h"
 #include "network.h"
 #include "null_core.h"
@@ -992,6 +993,13 @@ static void InitSystem(Config& config) {
         groupStat->init(gm_strdup(group.c_str()), "Router stats");
         for (auto router : routerGroupMap[group]) router->initStats(groupStat);
         zinfo->rootStat->append(groupStat);
+    }
+
+    // Initialize interconnect event recorders.
+    zinfo->memInterconnectEventRecorders = gm_calloc<MemInterconnectEventRecorder*>(zinfo->numCores);
+    for (uint32_t i = 0; i < zinfo->numCores; i++) {
+        uint32_t domain = i * zinfo->numDomains / zinfo->numCores;
+        zinfo->memInterconnectEventRecorders[i] = new MemInterconnectEventRecorder(zinfo->eventRecorders[i], domain);
     }
 
     //Odds and ends: BuildCacheGroup new'd the cache groups, we need to delete them

@@ -25,9 +25,15 @@ class MemRouter : public GlobAlloc {
             parentStat->append(initBaseStats());
         }
 
+        /* Bound phase. */
+
         virtual uint64_t transfer(uint64_t cycle, uint64_t size, uint32_t portId, bool lastHop, uint32_t srcCoreId) = 0;
 
+        /* Weave phase. */
+
         virtual bool needsCSim() const { return false; }
+
+        virtual uint64_t simulate(uint32_t portId, uint32_t procDelay, uint32_t outDelay, bool lastHop, uint64_t startCycle) { panic("%s: not implemented!", name.c_str()); }
 
     protected:
         AggregateStat* initBaseStats() {
@@ -181,8 +187,6 @@ class TimingMemRouter : public MemRouter {
         const uint64_t latency;
         const uint32_t bytesPerCycle;  // per port
 
-        uint64_t evId;
-
         // Weave phase.
         ProcDispatcher procDisp;
         g_vector<uint64_t> lastOutDoneCycle;
@@ -196,7 +200,7 @@ class TimingMemRouter : public MemRouter {
     public:
         TimingMemRouter(uint32_t numPorts, uint64_t _latency, uint32_t _bytesPerCycle, uint32_t _processWidth, const g_string& name, const int32_t _domain)
             : MemRouter(numPorts, name), latency(_latency), bytesPerCycle(_bytesPerCycle),
-              evId(0), procDisp(_processWidth), lastOutDoneCycle(numPorts, 0), domain(_domain)
+              procDisp(_processWidth), lastOutDoneCycle(numPorts, 0), domain(_domain)
         {}
 
         void initStats(AggregateStat* parentStat);
@@ -205,9 +209,7 @@ class TimingMemRouter : public MemRouter {
 
         bool needsCSim() const { return true; }
 
-        // Weave phase.
-        void simProc(MemRouterProcEvent* ev, uint64_t cycle);
-        void simOutPort(MemRouterOutEvent* ev, uint64_t cycle);
+        uint64_t simulate(uint32_t portId, uint32_t procDelay, uint32_t outDelay, bool lastHop, uint64_t startCycle);
 };
 
 #endif  // MEM_ROUTER_H_

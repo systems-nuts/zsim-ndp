@@ -43,6 +43,7 @@ class ProcStats;
 class EventQueue;
 class ContentionSim;
 class EventRecorder;
+class MemInterconnectEventRecorder;
 class PinCmd;
 class PortVirtualizer;
 class VectorCounter;
@@ -89,6 +90,8 @@ struct GlobSimInfo {
     uint32_t numDomains;
     ContentionSim* contentionSim;
     EventRecorder** eventRecorders; //CID->EventRecorder* array
+
+    MemInterconnectEventRecorder** memInterconnectEventRecorders;  // CID->MemInterconnectEventRecorder* array
 
     PAD();
 
