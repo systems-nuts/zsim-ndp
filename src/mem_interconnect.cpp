@@ -2,6 +2,7 @@
 #include <sstream>
 #include "address_map.h"
 #include "log.h"
+#include "mem_interconnect_event_recorder.h"
 #include "mem_router.h"
 #include "routing_algorithm.h"
 #include "timing_event.h"
@@ -123,67 +124,29 @@ uint64_t MemInterconnect::processAccess(const MemReq& req) {
         default: panic("?!");
     }
 
-    // Create the start event.
-    auto evRec = zinfo->eventRecorders[srcCoreId];
-    if (evRec && needsCSim) {
-        TimingRecord tr;
-        tr.clear();
-        tr.addr = req.lineAddr;
-        tr.type = req.type;
-        auto startEv = new (evRec) DelayEvent(0);
-        startEv->setMinStartCycle(respCycle);
-        tr.startEvent = tr.endEvent = startEv;
-        tr.reqCycle = tr.respCycle = respCycle;
-        evRec->pushRecord(tr);
-    }
+    auto itcnRec = zinfo->memInterconnectEventRecorders[srcCoreId];
 
     // Travel through the interconnect from local to remote.
+    if (needsCSim) itcnRec->startRequest<true>(respCycle, req.lineAddr, accType);
     respCycle = travel(localId, remoteId, sizeTo, respCycle, srcCoreId);
-
-    // access() should be called with empty event recorder, so we pop the record and merge later.
-    TimingRecord toRec;
-    toRec.clear();
-    if (evRec && evRec->hasRecord()) {
-        toRec = evRec->popRecord();
-    }
+    if (needsCSim) itcnRec->endRequest<true>(respCycle);
 
     // Access parent level.
     MemReq memReq = req;
     memReq.cycle = respCycle;
     respCycle = parents[parentId]->access(memReq);
 
-    // Merge access record with to-trip record.
-    if (toRec.isValid()) {
-        assert(evRec);
-        if (evRec->hasRecord()) {
-            auto tr = evRec->popRecord();
-            // Concatenate.
-            assert(toRec.respCycle <= tr.reqCycle);
-            auto dEv = new (evRec) DelayEvent(tr.reqCycle - toRec.respCycle);
-            dEv->setMinStartCycle(toRec.respCycle);
-            toRec.endEvent->addChild(dEv, evRec)->addChild(tr.startEvent, evRec);
-            tr.startEvent = toRec.startEvent;
-            tr.reqCycle = toRec.reqCycle;
-            if (IsPut(tr.type)) {
-                // PUTs are off the critical path. The end event should be the interconnect event.
-                tr.respCycle = toRec.respCycle;
-                tr.endEvent = toRec.endEvent;
-            }
-            tr.type = toRec.type;
-            evRec->pushRecord(tr);
-        } else {
-            evRec->pushRecord(toRec);
-        }
-    }
-
     // Travel through the interconnect from remote to local.
+    if (needsCSim) respCycle = itcnRec->startResponse<true>(respCycle);
     respCycle = travel(remoteId, localId, sizeBack, respCycle, srcCoreId);
+    if (needsCSim) itcnRec->endResponse<true>(respCycle);
 
     return respCycle;
 }
 
 uint64_t MemInterconnect::processInval(const InvReq& req, uint32_t childId) {
     uint64_t respCycle = req.cycle;
+    const auto srcCoreId = req.srcId;
     const auto invType = req.type;
 
     // Child and parent.
@@ -220,11 +183,12 @@ uint64_t MemInterconnect::processInval(const InvReq& req, uint32_t childId) {
         return respCycle;
     }
 
-    // FIXME(mgao): for now, zsim assumes that cache invalidation does not create any event.
-    // So we pass a special -1 for the src core id to avoid creating events in routers.
+    auto itcnRec = zinfo->memInterconnectEventRecorders[srcCoreId];
 
     // Travel through the interconnect from local to remote.
-    respCycle = travel(localId, remoteId, sizeTo, respCycle, -1);
+    if (needsCSim) itcnRec->startRequest<false>(respCycle);
+    respCycle = travel(localId, remoteId, sizeTo, respCycle, srcCoreId);
+    if (needsCSim) itcnRec->endRequest<false>(respCycle);
 
     // Invalidate child.
     InvReq invReq = req;
@@ -232,7 +196,9 @@ uint64_t MemInterconnect::processInval(const InvReq& req, uint32_t childId) {
     respCycle = children[childId]->invalidate(invReq);
 
     // Travel through the interconnect from remote to local.
-    respCycle = travel(remoteId, localId, sizeBack, respCycle, -1);
+    if (needsCSim) respCycle = itcnRec->startResponse<false>(respCycle);
+    respCycle = travel(remoteId, localId, sizeBack, respCycle, srcCoreId);
+    if (needsCSim) itcnRec->endResponse<false>(respCycle);
 
     return respCycle;
 }
