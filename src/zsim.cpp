@@ -1422,7 +1422,13 @@ static EXCEPT_HANDLING_RESULT InternalExceptionHandler(THREADID tid, EXCEPTION_I
 
         std::string s = "Unknown instruction addr: " + libzsimFile + "+" + relInstrAddrStr;
         // Get symbol.
-        std::string cmd = "addr2line -f -C -e " + libzsimFile + " -j .text " + relInstrAddrStr;
+        std::string exe =
+#ifdef ADDR2LINEBIN
+            QUOTED(ADDR2LINEBIN);
+#else
+            "adr2line";
+#endif
+        std::string cmd = exe + " -f -C -e " + libzsimFile + " -j .text " + relInstrAddrStr + " 2>/dev/null";
         FILE* f = popen(cmd.c_str(), "r");
         if (f) {
             char buf[1024];

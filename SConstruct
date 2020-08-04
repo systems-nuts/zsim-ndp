@@ -187,6 +187,13 @@ def buildSim(cppFlags, dir, type, pgo=None):
         env["PINLIBS"] += ["dramsim"]
         env["CPPFLAGS"] += " -D_WITH_DRAMSIM_=1 "
 
+    # addr2line from GNU binutils is used as an independent third-party executable called by zsim when backtracing bugs.
+    # Some versions of addr2line seems not working with Pin and causes segfault (e.g., addr2line 2.26.1 + pin 3.11).
+    # Try build a different version manually and specify the path to the executable here.
+    if "ADDR2LINEBIN" in os.environ:
+        ADDR2LINEBIN = os.environ["ADDR2LINEBIN"]
+        env["CPPFLAGS"] += ' -DADDR2LINEBIN="' + ADDR2LINEBIN + '" '
+
     env["CPPPATH"] += ["."]
 
     # PinCRT libs. These libs are needed by both the shared lib pintool and the utilities.
