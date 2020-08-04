@@ -75,6 +75,8 @@
 #include "weave_md1_mem.h" //validation, could be taken out...
 #include "zsim.h"
 
+using namespace std;
+
 extern void EndOfPhaseActions(); //in zsim.cpp
 
 /* zsim should be initialized in a deterministic and logical order, to avoid re-reading config vars
