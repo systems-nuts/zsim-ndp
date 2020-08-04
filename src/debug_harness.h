@@ -35,4 +35,8 @@
  */
 int launchXtermDebugger(int targetPid, LibInfo* libzsimAddrs);
 
+/* Launch gdb automatically by listening to a designated port.
+ */
+int launchGDBDebugger(int targetPid, LibInfo* libzsimAddrs, int debugPortId);
+
 #endif  // DEBUG_HARNESS_H_

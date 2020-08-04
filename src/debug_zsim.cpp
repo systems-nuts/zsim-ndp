@@ -33,6 +33,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/syscall.h>
 #include "log.h"
 
 /* This file is pretty much self-contained, and has minimal external dependencies.
@@ -111,7 +112,14 @@ void getLibzsimAddrs(LibInfo* libzsimAddrs) {
 }
 
 
-void notifyHarnessForDebugger(int harnessPid) {
-    kill(harnessPid, SIGUSR1);
+void notifyHarnessForDebugger(int harnessPid, int debugPortId) {
+    // send signal to start debugger, with a port_id value
+    siginfo_t uinfo;
+    uinfo.si_code = SI_QUEUE;
+    uinfo.si_pid = getpid();
+    uinfo.si_int = debugPortId;
+    int ret = syscall(SYS_rt_sigqueueinfo, harnessPid, SIGUSR1, &uinfo);
+    assert(ret == 0);
+    // kill(harnessPid, SIGUSR1);
     sleep(1); //this is a bit of a hack, but ensures the debugger catches us
 }

@@ -1551,7 +1551,7 @@ int main(int argc, char *argv[]) {
     //Attach to debugger if needed (master process does so in SimInit, to be able to debug initialization)
     //NOTE: Pin fails to follow exec()'s when gdb is attached. The simplest way to avoid it is to kill the debugger manually before an exec(). If this is common, we could automate it
     if (!masterProcess && zinfo->attachDebugger) {
-        notifyHarnessForDebugger(zinfo->harnessPid);
+        notifyHarnessForDebugger(zinfo->harnessPid, zinfo->debugPortId);
     }
 
     assert((uint32_t)procIdx < zinfo->numProcs);

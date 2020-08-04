@@ -40,6 +40,36 @@
  * seem to be conflicts between those and some system headers.
  */
 
+// Note: the following function is used when sim.debugPortId is not 0. A separate debugger client script should be listening.
+int launchGDBDebugger(int targetPid, LibInfo* libzsimAddrs, int debugPortId) {
+    std::string targetPidStr = Str(targetPid);
+    char symbolCmdStr[2048];
+    snprintf(symbolCmdStr, sizeof(symbolCmdStr), "\'add-symbol-file %s %p -s .data %p -s .bss %p\'", QUOTED(ZSIM_PATH), libzsimAddrs->textAddr, libzsimAddrs->dataAddr, libzsimAddrs->bssAddr);
+
+    const char* const args[] = {"gdb", "-p", targetPidStr.c_str(),
+        "-ex", "\'set confirm off\'", //we know what we're doing in the following 2 commands
+        "-ex", symbolCmdStr,
+        "-ex", "\'handle SIGTRAP nostop noprint\'", // For some reason we receive a lot of spurious sigtraps
+        "-ex", "\'set confirm on\'", //reenable confirmations
+        // "-ex", "c", //trap at start
+        nullptr};
+    int id = 0;
+    std::string complete_args = "";
+    while (args[id]!=nullptr) {
+        complete_args += args[id++];
+        complete_args += " ";
+    }
+    char port_str[8];
+    sprintf(port_str, "%d", debugPortId);
+    complete_args = "echo \"" + complete_args + "\" | nc localhost " + port_str; // pass pid to debug_cli.sh
+    // printf("DEBUG args %s\n", complete_args.c_str());
+    FILE* fp = popen(complete_args.c_str(), "r");
+    if (fp) pclose(fp);
+    // zsim continues to run even no client is established. A friendly prompt can be added here.
+    return 0;
+}
+
+// This is the tradition Xterm debugger. A xterm shell (GUI window) is popped out if you have installed X Window System.
 int launchXtermDebugger(int targetPid, LibInfo* libzsimAddrs) {
     int childPid = fork();
     if (childPid == 0) {

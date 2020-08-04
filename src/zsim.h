@@ -164,6 +164,7 @@ struct GlobSimInfo {
 
     bool attachDebugger;
     int harnessPid; //used for debugging purposes
+    int debugPortId;
 
     struct LibInfo libzsimAddrs;
 

@@ -36,6 +36,6 @@
 void getLibzsimAddrs(LibInfo* libzsimAddrs);
 
 /* Signal the harness process that we're ready to be debugged */
-void notifyHarnessForDebugger(int harnessPid);
+void notifyHarnessForDebugger(int harnessPid, int debugPortId);
 
 #endif  // DEBUG_ZSIM_H_

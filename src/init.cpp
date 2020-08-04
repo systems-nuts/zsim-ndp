@@ -872,11 +872,12 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     //NOTE: This should be as early as possible, so that we can attach to the debugger before initialization.
     zinfo->attachDebugger = config.get<bool>("sim.attachDebugger", false);
     zinfo->harnessPid = getppid();
+    zinfo->debugPortId = config.get<int>("sim.debugPortId", 0);
     getLibzsimAddrs(&zinfo->libzsimAddrs);
 
     if (zinfo->attachDebugger) {
         gm_set_secondary_ptr(&zinfo->libzsimAddrs);
-        notifyHarnessForDebugger(zinfo->harnessPid);
+        notifyHarnessForDebugger(zinfo->harnessPid, zinfo->debugPortId);
     }
 
     PreInitStats();

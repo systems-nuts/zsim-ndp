@@ -212,9 +212,17 @@ void debugSigHandler(int signum, siginfo_t* siginfo, void* dummy) {
     uint32_t callerPid = siginfo->si_pid;
     // Child better have this initialized...
     struct LibInfo* zsimAddrs = (struct LibInfo*) gm_get_secondary_ptr();
-    uint32_t debuggerPid = launchXtermDebugger(callerPid, zsimAddrs);
-    childInfo[debuggerChildIdx].pid = debuggerPid;
-    childInfo[debuggerChildIdx++].status = PS_RUNNING;
+    int debugPortId = siginfo->si_int;
+    assert(debugPortId >= 0);
+    if (debugPortId > 0) {
+        // use separate debugger client
+        launchGDBDebugger(callerPid, zsimAddrs, debugPortId);
+    } else {
+        // use legacy xterm debugger
+        uint32_t debuggerPid = launchXtermDebugger(callerPid, zsimAddrs);
+        childInfo[debuggerChildIdx].pid = debuggerPid;
+        childInfo[debuggerChildIdx++].status = PS_RUNNING;
+    }
 }
 
 /* Heartbeats */
