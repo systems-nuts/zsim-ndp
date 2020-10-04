@@ -8,7 +8,7 @@ def buildSim(cppFlags, dir, type, pgo=None):
     ''' Build the simulator with a specific base buid dir and config type'''
 
     buildDir = joinpath(dir, type)
-    print "Building " + type + " zsim at " + buildDir
+    print("Building " + type + " zsim at " + buildDir)
 
     env = Environment(ENV = os.environ, tools = ['default', 'textfile'])
     env["CPPFLAGS"] = cppFlags
@@ -37,8 +37,8 @@ def buildSim(cppFlags, dir, type, pgo=None):
     if "PINPATH" in os.environ:
         PINPATH = os.environ["PINPATH"]
     else:
-       print "ERROR: You need to define the $PINPATH environment variable with Pin's path"
-       sys.exit(1)
+        print("ERROR: You need to define the $PINPATH environment variable with Pin's path")
+        sys.exit(1)
 
     # Pin 3 introduces PinCRT.
     withPinCrt = os.path.exists(joinpath(PINPATH, "extras/crt"))
@@ -262,11 +262,11 @@ pgoPhase = GetOption('pgoPhase')
 # when you move the files. Check the repo for a version that tries this.
 if GetOption('pgoBuild'):
     for type in buildTypes:
-        print "Building PGO binary"
+        print("Building PGO binary")
         root = Dir('.').abspath
         testsDir = joinpath(root, "tests")
         trainCfgs = [f for f in os.listdir(testsDir) if f.startswith("pgo")]
-        print "Using training configs", trainCfgs
+        print("Using training configs", trainCfgs)
 
         baseDir = joinpath(baseBuildDir, "pgo-" + type)
         genCmd = "scons -j16 --pgoPhase=generate-" + type
