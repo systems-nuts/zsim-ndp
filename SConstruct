@@ -55,9 +55,11 @@ def buildSim(cppFlags, dir, type, pgo=None):
     # NOTE: Original Pin flags included -fno-strict-aliasing, but zsim does not do type punning
     # NOTE (dsm 16 Apr 2015): Update flags code to support Pin 2.14 while retaining backwards compatibility
     # NOTE (gaomy May 2019): Set ABI version
+    # NOTE (gaomy Sept 2020): Add -Wno-unused-function for the template ilog2
     env["CPPFLAGS"] += " -g -std=c++0x -Wall -Wno-unknown-pragmas -fomit-frame-pointer -fno-stack-protector"
     env["CPPFLAGS"] += " -MMD -DBIGARRAY_MULTIPLIER=1 -DUSING_XED -DTARGET_IA32E -DHOST_IA32E -fPIC -DTARGET_LINUX"
     env["CPPFLAGS"] += " -fabi-version=2"
+    env["CPPFLAGS"] += " -Wno-unused-function"
 
     # Add more flags and system paths for pintool if with PinCRT.
     if withPinCrt:
@@ -214,6 +216,8 @@ def buildSim(cppFlags, dir, type, pgo=None):
     env["CPPFLAGS"] += ' -DLDLIB_PATH="' + ":".join(env["LIBPATH"] + env["PINLIBPATH"]) + '" '
     if withPinCrt:
         env["CPPFLAGS"] += ' -DPIN_CRT_TZDATA="' + joinpath(PINPATH, "extras/crt/tzdata") + '" '
+        # PinCRT header <functional> misses NULL declaration
+        env["CPPFLAGS"] += ' -DNULL=0 '
 
     # Do PGO?
     if pgo == "generate":
