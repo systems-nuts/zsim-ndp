@@ -200,6 +200,12 @@ def buildSim(cppFlags, dir, type, pgo=None):
 
     # PinCRT libs. These libs are needed by both the shared lib pintool and the utilities.
     if withPinCrt:
+        # PinCRT has issues, and we allow to apply our patches to it.
+        if "PINCRTPATCHPATH" in os.environ:
+            PINCRTPATCHPATH = os.environ["PINCRTPATCHPATH"]
+            env["LINKFLAGS"] += " -Wl,-R" + PINCRTPATCHPATH + " -Wl,--no-as-needed"
+            env["LIBPATH"] += [PINCRTPATCHPATH]
+            env["LIBS"] += ["pincrtpatch"]
         env["LINKFLAGS"] += " -nostdlib -Wl,-R" + pinCrtLibDir
         env["LIBPATH"] += [pinCrtLibDir]
         env["LIBS"] += ["dl-dynamic", "stlport-dynamic", "m-dynamic", "c-dynamic", "unwind-dynamic"]
