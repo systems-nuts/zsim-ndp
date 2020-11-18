@@ -53,6 +53,7 @@
 #include "mem_ctrls.h"
 #include "mem_interconnect.h"
 #include "mem_interconnect_event_recorder.h"
+#include "mem_interconnect_interface.h"
 #include "mem_router.h"
 #include "network.h"
 #include "null_core.h"
@@ -623,57 +624,10 @@ static void InitSystem(Config& config) {
 
         string prefix = string("sys.interconnects.") + net + ".";
 
-        // Interconnect has a single parent cache group or mem.
-        string parent = config.get<const char*>(prefix + "parent");
-        if (parent != "mem" && cMap.count(parent) == 0)
-            panic("Invalid interconnect parent name %s, must be a parent cache name or \"mem\"!", parent.c_str());
-
-        // Connectivity to the cache hierarchy through interfaces.
-        string tifgrp = string(net) + "-tif";
-        string bifgrp = string(net) + "-bif";
-        cacheGroupNames.push_back(gm_strdup(tifgrp.c_str()));
-        cacheGroupNames.push_back(gm_strdup(bifgrp.c_str()));
-        if (parent == "mem") {
-            // children vs. tif.
-            childMap[tifgrp] = parseChildren(llc);
-            parentMap[llc] = tifgrp;
-            // bif vs. parents.
-            llc = bifgrp;
-        } else {
-            // children vs. tif.
-            childMap[tifgrp] = childMap[parent];
-            for (auto& vec : childMap[parent]) for (auto& c : vec) parentMap[c] = tifgrp;
-            // bif vs. parents.
-            childMap[parent] = parseChildren(bifgrp);
-            parentMap[bifgrp] = parent;
-        }
-        // bif vs. tif, fake relationship so everything is connected.
-        childMap[bifgrp] = parseChildren(tifgrp);
-        parentMap[tifgrp] = bifgrp;
-
         // Build interconnect.
-        vector<MemInterconnect*> interconnectVec;
-        uint32_t numNets = 0;
-        uint32_t numParents = 0;
-        uint32_t numChildren = 0;
-        for (auto& vec : childMap[tifgrp]) for (auto& c : vec) for (auto& cache : *cMap[c]) numChildren += cache.size();
-        if (parent == "mem") {
-            // A single interconnect before memory.
-            numNets = 1;
-            numParents = mems.size();
-        } else {
-            // Each parent cache associates with a separate interconnect.
-            numNets = cMap[parent]->size();
-            numParents = cMap[parent]->at(0).size();
-            for (uint32_t i = 0; i < cMap[parent]->size(); i++) assert(cMap[parent]->at(i).size() == numParents);
-            assert(numChildren % numNets == 0);
-            numChildren /= numNets;
-        }
-        for (uint32_t i = 0; i < numNets; i++) {
-            stringstream ss;
-            ss << net << "-" << i;
-            g_string name(ss.str().c_str());
 
+        MemInterconnect* interconnect = nullptr;
+        {
             // Discover all levels, from the leaf to upper levels.
             vector<string> levelPrefixList;
             levelPrefixList.push_back(prefix);
@@ -700,7 +654,7 @@ static void InitSystem(Config& config) {
             for (uint32_t l = 0; l < numLevels; l++) {
                 uint32_t numRouters = numInstancesByLevel[l] * raVec[l]->getNumRouters();
                 stringstream ss;
-                ss << name << "-l" << l;
+                ss << net << "-l" << l;
                 g_string rgName(ss.str().c_str());
                 auto rg = BuildMemRouterGroup(config, levelPrefixList[l] + "routers.", numRouters, numPorts, rgName);
                 routers.insert(routers.end(), rg.begin(), rg.end());
@@ -708,29 +662,99 @@ static void InitSystem(Config& config) {
                 routerGroupMap[rgName.c_str()] = rg;
             }
 
-            // Parent map.
-            CoherentParentMap* pm = new CoherentParentMap(BuildAddressMap(config, prefix + "addressMap.", numParents));
-
             uint32_t ccHeaderSize = config.get<uint32_t>(prefix + "ccHeaderSize", 0);
-            bool centralizedParents = config.get<bool>(prefix + "centralizedParents", false);
-            bool ignoreInvLatency = config.get<bool>(prefix + "ignoreInvLatency", false);
 
-            auto interconnect = new MemInterconnect(ra, pm, routers, numParents, numChildren, centralizedParents, ccHeaderSize, ignoreInvLatency, name.c_str());
-            interconnectVec.push_back(interconnect);
+            interconnect = new MemInterconnect(ra, routers, ccHeaderSize, net);
         }
 
-        info("MemInterconnect %s: parent cache is %s; %lu instances, %u children each", net, parent.c_str(), interconnectVec.size(), numChildren);
+        // Build all interfaces.
 
-        // Build interfaces.
-        cMap[tifgrp] = new CacheGroup;
-        cMap[bifgrp] = new CacheGroup;
-        for (const auto& interconnect : interconnectVec) {
-            cMap[tifgrp]->emplace_back();
-            auto tif = interconnect->getTopInterface();
-            std::copy(tif.begin(), tif.end(), std::back_inserter(cMap[tifgrp]->back()));
-            cMap[bifgrp]->emplace_back();
-            auto bif = interconnect->getBottomInterface();
-            std::copy(bif.begin(), bif.end(), std::back_inserter(cMap[bifgrp]->back()));
+        uint32_t idx = 0;
+        while (true) {
+            stringstream ss;
+            ss << "interface" << idx;
+            string itfc = ss.str();
+            if (!config.exists(prefix + itfc)) break;
+
+            // Parents.
+            string parent = config.get<const char*>(prefix + itfc + ".parent");
+            uint32_t numParentsPerGroup = 0;
+            if (parent == "mem") numParentsPerGroup = mems.size();
+            else if (cMap.count(parent)) numParentsPerGroup = cMap[parent]->at(0).size();
+            else panic("Interconnect %s interface %u has an invalid parent name %s, must be a parent cache name or \"mem\"", net, idx, parent.c_str());
+
+            // Address map.
+            AddressMap* am = BuildAddressMap(config, prefix + itfc + ".addressMap.", numParentsPerGroup);
+
+            bool centralizedParents = config.get<bool>(prefix + itfc + ".centralizedParents", false);
+            bool ignoreInvLatency = config.get<bool>(prefix + itfc + ".ignoreInvLatency", false);
+
+            auto interface = new MemInterconnectInterface(interconnect, idx, am, centralizedParents, ignoreInvLatency);
+
+            // Connect to children through endpoints.
+
+            auto constructEndpoints = [&interface](string endpoint, CacheGroup& endpointCaches, CacheGroup& childCaches) {
+                for (uint32_t i = 0; i < childCaches.size(); i++) {
+                    endpointCaches.emplace_back();
+                    for (uint32_t j = 0; j < childCaches[i].size(); j++) {
+                        stringstream ss;
+                        ss << endpoint << "-" << i;
+                        if (childCaches[i].size() > 1) ss << "b" << j;
+                        g_string name(ss.str().c_str());
+                        endpointCaches[i].push_back(interface->getEndpoint(childCaches[i][j], name));
+                    }
+                }
+            };
+
+            if (parent == "mem") {
+                string endpoint = string(net) + "-" + llc;
+
+                // Construct endpoints.
+                cMap[endpoint] = new CacheGroup;
+                constructEndpoints(endpoint, *cMap[endpoint], *cMap[llc]);
+
+                // Add to hierarchy.
+                cacheGroupNames.push_back(gm_strdup(endpoint.c_str()));
+
+                // Endpoints <-> children.
+                childMap[endpoint] = parseChildren(llc);
+                parentMap[llc] = endpoint;
+
+                // Parents <-> endpoints.
+                llc = endpoint;
+            } else {
+                assert(cMap.count(parent));
+
+                vector<vector<string>> children;
+                children.swap(childMap[parent]);
+
+                for (auto& childVec : children) {
+                    childMap[parent].emplace_back();
+                    for (auto& child : childVec) {
+                        string endpoint = string(net) + "-" + child;
+
+                        // Construct endpoints.
+                        cMap[endpoint] = new CacheGroup;
+                        constructEndpoints(endpoint, *cMap[endpoint], *cMap[child]);
+
+                        // Add to hierarchy.
+                        cacheGroupNames.push_back(gm_strdup(endpoint.c_str()));
+
+                        // Endpoints <-> children.
+                        childMap[endpoint] = parseChildren(child);
+                        parentMap[child] = endpoint;
+
+                        // Parents <-> endpoints.
+                        childMap[parent].back().push_back(endpoint);
+                        parentMap[endpoint] = parent;
+                    }
+                }
+            }
+
+            idx++;
+        }
+        if (idx == 0) {
+            panic("Interconnect %s: at least one interface is needed!", net);
         }
     }
 
