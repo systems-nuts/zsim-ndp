@@ -51,6 +51,9 @@ PF(SYS_move_pages, PatchMovePages);
 PF(SYS_munmap, PatchMunmap);
 PF(SYS_mremap, PatchMremap);
 
+// Thread control -- control.cpp
+PF(SYS_exit_group, PatchExitGroup);
+
 // Conditional patches, only when not fast-forwarded
 
 // Time virtualization -- time.cpp

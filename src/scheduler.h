@@ -107,6 +107,7 @@ class Scheduler : public GlobAlloc, public Callee {
             g_vector<bool> mask;
 
             FakeLeaveInfo* fakeLeave; // for accurate join-leaves, see below
+            volatile uint32_t flWord; // if non-zero, currently transiting fake leave to true leave
 
             FutexJoinInfo futexJoin;
 
@@ -124,6 +125,7 @@ class Scheduler : public GlobAlloc, public Callee {
                 for (auto b : mask) if (b) count++;
                 if (count == 0) panic("Empty mask on gid %d!", gid);
                 fakeLeave = nullptr;
+                flWord = 0;
                 futexJoin.action = FJA_NONE;
             }
         };
@@ -136,6 +138,8 @@ class Scheduler : public GlobAlloc, public Callee {
 
         g_unordered_map<uint32_t, ThreadInfo*> gidMap;
         g_vector<ContextInfo> contexts;
+
+        g_unordered_map<uint32_t, g_vector<bool>> pendingMaskMap; // for those threads who set masks but still in FF and not start
 
         InList<ContextInfo> freeList;
 
@@ -223,6 +227,10 @@ class Scheduler : public GlobAlloc, public Callee {
             //   getpid() returns the parent's pid (getpid() caches, and I'm
             //   guessing it hasn't flushed its cached pid at this point)
             gidMap[gid] = new ThreadInfo(gid, syscall(SYS_getpid), syscall(SYS_gettid), mask);
+            if (pendingMaskMap.find(gid) != pendingMaskMap.end()) {
+                gidMap[gid]->mask = pendingMaskMap[gid];
+                pendingMaskMap.erase(gid);
+            }
             threadsCreated.inc();
             futex_unlock(&schedLock);
         }
@@ -233,6 +241,7 @@ class Scheduler : public GlobAlloc, public Callee {
             //info("[G %d] Finish", gid);
             assert((gidMap.find(gid) != gidMap.end()));
             ThreadInfo* th = gidMap[gid];
+            pendingMaskMap[gid] = th->mask;
             gidMap.erase(gid);
 
             // Check for suppressed syscall leave(), execute it
@@ -294,6 +303,14 @@ class Scheduler : public GlobAlloc, public Callee {
                 uint32_t cid = th->cid;
                 futex_unlock(&schedLock);
                 return cid;
+            } else if (th->flWord) {
+                // We are just finishing fake leave and transiting into true leave. Wait until done.
+                futex_unlock(&schedLock);
+                while (true) {
+                    int futex_res = syscall(SYS_futex, &th->flWord, FUTEX_WAIT, 1, nullptr, nullptr, 0);
+                    if (futex_res == 0 || th->futexWord != 1) break;
+                }
+                futex_lock(&schedLock);
             }
 
             assert(!th->markedForSleep);
@@ -561,33 +578,36 @@ class Scheduler : public GlobAlloc, public Callee {
             g_vector<bool> mask;
             futex_lock(&schedLock);
             uint32_t gid = getGid(pid, tid);
-            if(gidMap.find(gid) == gidMap.end()) {
-                futex_unlock(&schedLock);
-                warn("Scheduler::getMask(): can't find thread info pid=%d, tid=%d", pid, tid);
-                mask.resize(zinfo->numCores, true);
-                return mask;
+            if (gidMap.find(gid) == gidMap.end()) {
+                // Try get from pending mask map.
+                if (pendingMaskMap.find(gid) == pendingMaskMap.end()) {
+                    warn("Scheduler::getMask(): can't find thread pid=%u, tid=%u; return default mask", pid, tid);
+                    mask.resize(zinfo->numCores, true);
+                } else {
+                    mask = pendingMaskMap[gid];
+                }
+            } else {
+                ThreadInfo* th = gidMap[gid];
+                mask = th->mask;
             }
-            ThreadInfo* th = gidMap[gid];
-            mask = th->mask;
             futex_unlock(&schedLock);
             return mask;
         }
 
         void updateMask(uint32_t pid, uint32_t tid, const g_vector<bool>& mask) {
-            futex_lock(&schedLock);
-            uint32_t gid = getGid(pid, tid);
-            if(gidMap.find(gid) == gidMap.end()) {
-                futex_unlock(&schedLock);
-                warn("Scheduler::updateMask(): can't find thread info pid=%d, tid=%d", pid, tid);
-                return;
-            }
-            ThreadInfo* th = gidMap[gid];
-            //info("Scheduler::updateMask(): update thread mask pid=%d, tid=%d", pid, tid);
             assert(mask.size() == zinfo->numCores);
             uint32_t count = 0;
             for (auto b : mask) if (b) count++;
-            if (count == 0) panic("Empty mask on gid %d!", gid);
-            th->mask = mask;
+            if (count == 0) panic("Scheduler::setMask(): empty mask on pid=%u, tid=%u!", pid, tid);
+            futex_lock(&schedLock);
+            uint32_t gid = getGid(pid, tid);
+            if (gidMap.find(gid) == gidMap.end()) {
+                // Put in pending mask map. Overwrite if any already existing.
+                pendingMaskMap[gid] = mask;
+            } else {
+                ThreadInfo* th = gidMap[gid];
+                th->mask = mask;
+            }
             futex_unlock(&schedLock);
             // Do leave and join outside to clear and set cid in zsim.cpp
         }

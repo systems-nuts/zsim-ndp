@@ -50,6 +50,7 @@ class ProcessTreeNode : public GlobAlloc {
         volatile uint64_t heartbeats;
         bool started;
         volatile bool inFastForward;
+        volatile bool inGroupExit;  // process has called exit_group()
         volatile bool inPause;
         uint32_t restartsLeft;
         const SyncedFastForwardMode syncedFastForward;
@@ -65,7 +66,7 @@ class ProcessTreeNode : public GlobAlloc {
         ProcessTreeNode(uint32_t _procIdx, uint32_t _groupIdx, bool _inFastForward, bool _inPause, const SyncedFastForwardMode& _syncedFastForward,
                         uint32_t _clockDomain, uint32_t _portDomain, uint64_t _dumpHeartbeats, bool _dumpsResetHeartbeats, uint32_t _restarts,
                         const g_vector<bool>& _mask, const g_vector<uint64_t>& _ffiPoints, const g_string& _syscallBlacklistRegex, const char*_patchRoot)
-            : patchRoot(_patchRoot), procIdx(_procIdx), groupIdx(_groupIdx), curChildren(0), heartbeats(0), started(false), inFastForward(_inFastForward),
+            : patchRoot(_patchRoot), procIdx(_procIdx), groupIdx(_groupIdx), curChildren(0), heartbeats(0), started(false), inFastForward(_inFastForward), inGroupExit(false),
               inPause(_inPause), restartsLeft(_restarts), syncedFastForward(_syncedFastForward), clockDomain(_clockDomain), portDomain(_portDomain), dumpHeartbeats(_dumpHeartbeats), dumpsResetHeartbeats(_dumpsResetHeartbeats), mask(_mask), ffiPoints(_ffiPoints), syscallBlacklistRegex(_syscallBlacklistRegex) {}
 
         void addChild(ProcessTreeNode* child) {
@@ -117,6 +118,9 @@ class ProcessTreeNode : public GlobAlloc {
         //In cpp file, they need to access zinfo
         void enterFastForward();
         void exitFastForward();
+
+        bool isInGroupExit() { return inGroupExit; }
+        void exitGroup() { inGroupExit = true; }
 
         inline uint32_t getClockDomain() const {
             return clockDomain;
