@@ -186,7 +186,17 @@ class MESIDirectoryHubCC : public MESICC {
 
     protected:
         // Filters repeated access from children, e.g., a directory CC without forwarding.
-        const bool filterAcc;
+        // - NO: do not filter.
+        // - TERMINATE: terminate repeated accesses here, not send to this level or the parent.
+        // - BYPASS: only bypss this level, and still send to the parent.
+        enum FilterAccType : uint8_t { NO = 0, BYPASS, TERMINATE };
+        static FilterAccType parseFilterAcc(const g_string& str) {
+            if (str == "False") return NO;
+            if (str == "Bypass") return BYPASS;
+            if (str == "True" || str == "Terminate") return TERMINATE;
+            panic("unrecognized filter access type: %s", str.c_str());
+        }
+        const FilterAccType filterAcc;
         // Filters no-op invalidations to non-existing lines from parents, e.g., a broadcast CC.
         const bool filterInv;
 
@@ -215,8 +225,8 @@ class MESIDirectoryHubCC : public MESICC {
         PAD();
 
     public:
-        MESIDirectoryHubCC(uint32_t _numLines, bool _nonInclusiveHack, bool _filterAcc, bool _filterInv, g_string& _name)
-            : MESICC(_numLines, _nonInclusiveHack, _name), filterAcc(_filterAcc), filterInv(_filterInv), selfId(-1u), bottomLock(nullptr)
+        MESIDirectoryHubCC(uint32_t _numLines, bool _nonInclusiveHack, const g_string& filterAccStr, bool _filterInv, g_string& _name)
+            : MESICC(_numLines, _nonInclusiveHack, _name), filterAcc(parseFilterAcc(filterAccStr)), filterInv(_filterInv), selfId(-1u), bottomLock(nullptr)
         {
             futex_init(&nopStatsLock);
         }
@@ -308,11 +318,12 @@ class MESIDirectoryHubCC : public MESICC {
                     // The child requesting GETS is already a sharer.
                     assert_msg(filterAcc, "%s: encounter a repeated GETS access; did you forget to enable filterAcc?", name.c_str());
                     skip = true;
-                    needsParentAccess = false;  // also skip parent access
+                    if (filterAcc == TERMINATE) needsParentAccess = false;  // also skip parent access
                     // If there are other sharers, use forwarding. Otherwise leave for access to parent.
                     if (ChildrenForwarding && tcc->numSharers(lineId) > 1) {
                         fwdId = findForwarder(lineId, req.childId);
                         profGETSFwd.inc();
+                        needsParentAccess = false;  // forward instead of parent access
                     } else {
                         profGETSRep.inc();
                     }
@@ -334,7 +345,7 @@ class MESIDirectoryHubCC : public MESICC {
                     // The child requesting GETX is already the exclusive sharer.
                     assert_msg(filterAcc, "%s: encounter a repeated GETX access; did you forget to enable filterAcc?", name.c_str());
                     skip = true;
-                    needsParentAccess = false;  // also skip parent access
+                    if (filterAcc == TERMINATE) needsParentAccess = false;  // also skip parent access
                     // No other sharers, no forwarding.
                     // Here we do not know what the child state should be, i.e., not distinguish I->M and S->M.
                     profGETXRep.inc();
@@ -405,9 +416,6 @@ class MESIDirectoryHubCC : public MESICC {
 
                 // Make sure the state of this level is restored (may not to the same original state, but a valid hit).
                 assert((req.type == GETS && *state != I) || (req.type == GETX && (*state == M || *state == E)));
-
-                // Do not skip the access to this level.
-                assert(!skip);
             }
 
             if (!skip) respCycle = MESICC::processAccess(req, lineId, respCycle, getDoneCycle);
@@ -529,8 +537,8 @@ class MESIBroadcastHubCC : public MESIDirectoryHubCC<false> {
         const uint32_t banksPerChild;
 
     public:
-        MESIBroadcastHubCC(uint32_t _numLines, uint32_t _banksPerChild, bool _nonInclusiveHack, bool _filterAcc, bool _filterInv, g_string& _name)
-            : BaseCC(_numLines, _nonInclusiveHack, _filterAcc, _filterInv, _name), banksPerChild(_banksPerChild) {}
+        MESIBroadcastHubCC(uint32_t _numLines, uint32_t _banksPerChild, bool _nonInclusiveHack, const g_string& filterAccStr, bool _filterInv, g_string& _name)
+            : BaseCC(_numLines, _nonInclusiveHack, filterAccStr, _filterInv, _name), banksPerChild(_banksPerChild) {}
 
         uint64_t processAccess(const MemReq& req, int32_t lineId, uint64_t startCycle, uint64_t* getDoneCycle = nullptr) {
             // Check whether the requesting child has sufficient permission or we need to broadcast.

@@ -268,15 +268,15 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
     } else if (type == "CCHub") {
         // Build specialized CC according to protocol.
         string protocolType = config.get<const char*>(prefix + "protocol.type", "Directory");
-        bool filterAcc = config.get<bool>(prefix + "protocol.filterAcc", false);
+        const char* filterAccStr = config.get<const char*>(prefix + "protocol.filterAcc", "False");
         bool filterInv = config.get<bool>(prefix + "protocol.filterInv", false);
         if (protocolType == "Directory") {
             bool forwarding = config.get<bool>(prefix + "protocol.forwarding", true);
-            if (forwarding) cc = new MESIDirectoryHubCC<true>(numLines, nonInclusiveHack, filterAcc, filterInv, name);
-            else cc = new MESIDirectoryHubCC<false>(numLines, nonInclusiveHack, filterAcc, filterInv, name);
+            if (forwarding) cc = new MESIDirectoryHubCC<true>(numLines, nonInclusiveHack, filterAccStr, filterInv, name);
+            else cc = new MESIDirectoryHubCC<false>(numLines, nonInclusiveHack, filterAccStr, filterInv, name);
         } else if (protocolType == "Broadcast") {
             uint32_t banksPerChild = config.get<uint32_t>(prefix + "protocol.banksPerChild", 1);
-            cc = new MESIBroadcastHubCC(numLines, banksPerChild, nonInclusiveHack, filterAcc, filterInv, name);
+            cc = new MESIBroadcastHubCC(numLines, banksPerChild, nonInclusiveHack, filterAccStr, filterInv, name);
         } else {
             panic("Invalid coherence protocol %s", protocolType.c_str());
         }
