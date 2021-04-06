@@ -80,15 +80,24 @@ PostPatchFn PatchSchedGetaffinity(PrePatchArgs args) {
             return PPA_NOTHING;
         }
         // On success, the syscall returns the size of cpumask_t in bytes.
-        int maxSize = -err;
-        // When the simulated number of cores is greater, extend cpumask_t.
-        int numCores = 1 << (ilog2(cpuenumNumCpus(procIdx) - 1) + 1);
-        if (numCores > maxSize * 8) {
-            maxSize = MAX(maxSize, numCores / 8 * 2);
+        uint32_t minSize = -err;
+        // Get the required size from the simulated number of cores.
+        uint32_t reqSize = CPU_ALLOC_SIZE(cpuenumNumCpus(procIdx));
+        // Get the allocated size of the argument.
+        uint32_t size = PIN_GetSyscallArgument(args.ctxt, args.std, 1);
+        if (reqSize > minSize) {
+            // Extend cpumask_t size.
+            minSize = reqSize;
             warn("[%u/%u] Increase cpumask_t size to %d to support %u cores. This may break some applications. "
-                    "Try patch root or disable this change.", procIdx, args.tid, maxSize, numCores);
+                    "Try patch root or disable this change.", procIdx, args.tid, minSize, cpuenumNumCpus(procIdx));
+            PIN_SetSyscallNumber(args.ctxt, args.std, minSize);
         }
-        PIN_SetSyscallNumber(args.ctxt, args.std, maxSize);
+        if (size < minSize) {
+            // CPU set size is not large enough. Return EINVAL.
+            PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EINVAL);
+            return PPA_NOTHING;
+        }
+
         uint32_t linuxTid = PIN_GetSyscallArgument(args.ctxt, args.std, 0);
         uint32_t tid = (linuxTid == 0 ? args.tid : zinfo->sched->getTidFromLinuxTid(linuxTid));
         std::vector<bool> cpumask(cpuenumNumCpus(procIdx), true);  // all core eligible
@@ -97,12 +106,6 @@ PostPatchFn PatchSchedGetaffinity(PrePatchArgs args) {
             return PPA_NOTHING;
         } else {
             cpumask = cpuenumMask(procIdx, tid);
-        }
-        uint32_t size = PIN_GetSyscallArgument(args.ctxt, args.std, 1);
-        if (size*8 < cpuenumNumCpus(procIdx)) {
-            // CPU set size is not large enough. Return EINVAL.
-            PIN_SetSyscallNumber(args.ctxt, args.std, (ADDRINT)-EINVAL);
-            return PPA_NOTHING;
         }
         cpu_set_t* set = (cpu_set_t*)PIN_GetSyscallArgument(args.ctxt, args.std, 2);
         if (set) { //TODO: use SafeCopy, this can still segfault
