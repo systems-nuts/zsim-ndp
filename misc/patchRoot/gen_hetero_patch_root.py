@@ -84,7 +84,7 @@ def main(args):
     ncpus = ncpus_b + ncpus_l
     cpu1st_b, cpu1st_l = 0, ncpus_b
 
-    mask_size = 256
+    mask_size = 64
     if ncpus < 1:
         raise ValueError('Need >= 1 cores')
     if ncpus > mask_size:
