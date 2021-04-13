@@ -227,6 +227,8 @@ class MESITopCC : public GlobAlloc {
 
         uint64_t processInval(Address lineAddr, uint32_t lineId, InvType type, bool* reqWriteback, uint64_t cycle, uint32_t srcId);
 
+        uint64_t processNonInclusiveWritebackToMovedLine(Address lineAddr, AccessType type, uint64_t cycle, MESIState* childState, uint32_t flags);
+
         inline void lock() {
             futex_lock(&ccLock);
         }
@@ -359,6 +361,12 @@ class MESICC : public CC {
                 assert(nonInclusiveHack);
                 assert((req.type == PUTS) || (req.type == PUTX));
                 respCycle = bcc->processNonInclusiveWriteback(req.lineAddr, req.type, startCycle, req.state, req.srcId, req.flags);
+            } else if (((req.type == PUTS) || (req.type == PUTX)) && !tcc->isSharer(lineId, req.childId)) {
+                assert(nonInclusiveHack);
+                // NOTE(gaomy): This could happen when the line was evicted from this level, and then refetched back to another place in this level.
+                // In such a case, although we hit in a valid line, but the sharer info we have does not include the previous sharers before the eviction.
+                // We need to skip this level, and also there is no need to access the parent since we already have the line.
+                respCycle = tcc->processNonInclusiveWritebackToMovedLine(req.lineAddr, req.type, startCycle, req.state, req.flags);
             } else {
                 //Prefetches are side requests and get handled a bit differently
                 bool isPrefetch = req.flags & MemReq::PREFETCH;

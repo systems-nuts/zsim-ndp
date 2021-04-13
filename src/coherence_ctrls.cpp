@@ -341,3 +341,22 @@ uint64_t MESITopCC::processInval(Address lineAddr, uint32_t lineId, InvType type
     }
 }
 
+uint64_t MESITopCC::processNonInclusiveWritebackToMovedLine(Address lineAddr, AccessType type, uint64_t cycle, MESIState* childState, uint32_t flags) {
+    if (!nonInclusiveHack) panic("Non-inclusive %s on line 0x%lx, this cache should be inclusive", AccessTypeName(type), lineAddr);
+
+    switch (type) {
+        case PUTX:
+            if (flags & MemReq::PUTX_KEEPEXCL) {
+                assert(*childState == M);
+                *childState = E;
+                break;
+            }
+            // NO break in general
+        case PUTS:
+            *childState = I;
+            break;
+        default: panic("!?");
+    }
+    return cycle;
+}
+
