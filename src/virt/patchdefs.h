@@ -42,6 +42,17 @@ PF(SYS_getcpu, PatchGetcpu);
 PF(SYS_sched_getaffinity, PatchSchedGetaffinity);
 PF(SYS_sched_setaffinity, PatchSchedSetaffinity);
 
+// NUMA virtualization -- numa.cpp
+PF(SYS_get_mempolicy, PatchGetMempolicy);
+PF(SYS_set_mempolicy, PatchSetMempolicy);
+PF(SYS_mbind, PatchMbind);
+PF(SYS_migrate_pages, PatchMigratePages);
+PF(SYS_move_pages, PatchMovePages);
+PF(SYS_munmap, PatchMunmap);
+PF(SYS_mremap, PatchMremap);
+
+// Thread control -- control.cpp
+PF(SYS_exit_group, PatchExitGroup);
 
 // Conditional patches, only when not fast-forwarded
 

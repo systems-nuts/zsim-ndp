@@ -52,6 +52,7 @@
 #include "mem_ctrls.h"
 #include "network.h"
 #include "null_core.h"
+#include "numa_map.h"
 #include "ooo_core.h"
 #include "part_repl_policies.h"
 #include "pin_cmd.h"
@@ -781,6 +782,34 @@ static void InitSystem(Config& config) {
     info("Initialized system");
 }
 
+static void InitNUMA(Config& config) {
+    zinfo->numaMap = nullptr;
+    auto useNUMA = config.get<bool>("sys.numa", false);
+    if (useNUMA) {
+        if (zinfo->traceDriven) {
+            panic("NUMA is not supported for trace-driven simulation yet.")
+        }
+        assert(zinfo->procArray != nullptr && zinfo->numCores != 0);  // must initialize procArray and numCores before this.
+
+        // Walk through all processes to check patch root.
+        auto patchRoot = zinfo->procArray[0]->getPatchRoot();
+        if (!patchRoot) {
+            warn("[NUMA-PatchRoot] No patch root found when using NUMA. Do you really want to use the host system NUMA?");
+        }
+        for (uint32_t i = 1; i < zinfo->numProcs; i++) {
+            auto pr = zinfo->procArray[i]->getPatchRoot();
+            if (!pr) {
+                info("[NUMA-PatchRoot] Other processes patch root but process %u does not, so it cannot use NUMA.", i);
+            } else {
+                if (!patchRoot) panic("[NUMA-PatchRoot] Must patch root for process 0 when using NUMA.");
+                if (strcmp(patchRoot, pr) != 0) panic("[NUMA-PatchRoot] All processes must have the same patch root when using NUMA.");
+            }
+        }
+
+        zinfo->numaMap = new NUMAMap(patchRoot, zinfo->numCores);
+    }
+}
+
 static void PreInitStats() {
     zinfo->rootStat = new AggregateStat();
     zinfo->rootStat->init("root", "Stats");
@@ -970,6 +999,11 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     zinfo->lineSize = config.get<uint32_t>("sys.lineSize", 64);
     assert(zinfo->lineSize > 0);
 
+    zinfo->pageSize = config.get<uint32_t>("sys.pageSize", 4096);
+    assert(zinfo->pageSize > 0);
+    if (zinfo->pageSize < zinfo->lineSize) panic("Page size must be no smaller than line size.");
+    if (!isPow2(zinfo->pageSize)) panic("Page size must be power-of-two.");
+
     //Port virtualization
     for (uint32_t i = 0; i < MAX_PORT_DOMAINS; i++) zinfo->portVirt[i] = new PortVirtualizer();
 
@@ -979,6 +1013,9 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     zinfo->procArray[0]->notifyStart(); //called here so that we can detect end-before-start races
 
     zinfo->pinCmd = new PinCmd(&config, nullptr /*don't pass config file to children --- can go either way, it's optional*/, outputDir, shmid);
+
+    //NUMA map
+    InitNUMA(config);
 
     //Caches, cores, memory controllers
     InitSystem(config);

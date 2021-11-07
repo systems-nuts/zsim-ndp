@@ -29,6 +29,7 @@
 #include "bithacks.h"
 #include "cache.h"
 #include "galloc.h"
+#include "numa_map.h"
 #include "zsim.h"
 
 /* Extends Cache with an L0 direct-mapped cache, optimized to hell for hits
@@ -100,6 +101,7 @@ class FilterCache : public Cache {
         }
 
         inline uint64_t load(Address vAddr, uint64_t curCycle) {
+            if (zinfo->numaMap) zinfo->numaMap->allocateFromCore(vAddr, srcId);  // srcId is coreIdx
             Address vLineAddr = vAddr >> lineBits;
             uint32_t idx = vLineAddr & setMask;
             uint64_t availCycle = filterArray[idx].availCycle; //read before, careful with ordering to avoid timing races
@@ -112,6 +114,7 @@ class FilterCache : public Cache {
         }
 
         inline uint64_t store(Address vAddr, uint64_t curCycle) {
+            if (zinfo->numaMap) zinfo->numaMap->allocateFromCore(vAddr, srcId);  // srcId is coreIdx
             Address vLineAddr = vAddr >> lineBits;
             uint32_t idx = vLineAddr & setMask;
             uint64_t availCycle = filterArray[idx].availCycle; //read before, careful with ordering to avoid timing races

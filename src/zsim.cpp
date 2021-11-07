@@ -102,6 +102,7 @@ GlobSimInfo* zinfo;
 
 uint32_t procIdx;
 uint32_t lineBits; //process-local for performance, but logically global
+uint32_t pageBits; //process-local for performance, but logically global
 Address procMask;
 
 static ProcessTreeNode* procTreeNode;
@@ -513,6 +514,12 @@ uint32_t TakeBarrier(uint32_t tid, uint32_t cid) {
         info("Termination condition met, exiting");
         zinfo->sched->leave(procIdx, tid, newCid);
         SimEnd(); //need to call this on a per-process basis...
+    } else if (procTreeNode->isInGroupExit()) {
+        // Leave and turn to a nop thread to wait to be killed ...
+        clearCid(tid);
+        zinfo->sched->leave(procIdx, tid, newCid);
+        newCid = INVALID_CID;
+        fPtrs[tid] = nopPtrs;
     } else {
         // Set fPtrs to those of the new core after possible context switch
         fPtrs[tid] = cores[tid]->GetFuncPtrs();
@@ -1568,6 +1575,7 @@ int main(int argc, char *argv[]) {
     perProcessEndFlag = 0;
 
     lineBits = ilog2(zinfo->lineSize);
+    pageBits = ilog2(zinfo->pageSize);
     procMask = ((uint64_t)procIdx) << (64-lineBits);
 
     //Initialize process-local per-thread state, even if ThreadStart does so later
