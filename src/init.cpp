@@ -31,6 +31,7 @@
 #include <string>
 #include <sys/time.h>
 #include <vector>
+#include "address_map.h"
 #include "cache.h"
 #include "cache_arrays.h"
 #include "config.h"
@@ -53,6 +54,10 @@
 #include "mem_channel_backend.h"
 #include "mem_channel_backend_ddr.h"
 #include "mem_ctrls.h"
+#include "mem_interconnect.h"
+#include "mem_interconnect_event_recorder.h"
+#include "mem_interconnect_interface.h"
+#include "mem_router.h"
 #include "network.h"
 #include "null_core.h"
 #include "numa_map.h"
@@ -65,6 +70,7 @@
 #include "process_tree.h"
 #include "profile_stats.h"
 #include "repl_policies.h"
+#include "routing_algorithm.h"
 #include "scheduler.h"
 #include "simple_core.h"
 #include "stats.h"
@@ -525,6 +531,94 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
     return cgp;
 }
 
+RoutingAlgorithm* BuildRoutingAlgorithm(Config& config, const string& prefix) {
+    RoutingAlgorithm* ra = nullptr;
+    string type = config.get<const char*>(prefix + "type", "Direct");
+    if (type == "Direct") {
+        uint32_t terminals = config.get<uint32_t>(prefix + "terminals");
+        ra = new DirectRoutingAlgorithm(terminals);
+    } else if (type == "Local") {
+        uint32_t terminals = config.get<uint32_t>(prefix + "terminals");
+        ra = new LocalRoutingAlgorithm(terminals);
+    } else if (type == "Mesh2DDimensionOrder") {
+        uint32_t dimX = config.get<uint32_t>(prefix + "dimX");
+        uint32_t dimY = config.get<uint32_t>(prefix + "dimY");
+        ra = new Mesh2DDimensionOrderRoutingAlgorithm(dimX, dimY);
+    } else if (type == "Star") {
+        uint32_t chains = config.get<uint32_t>(prefix + "chains");
+        uint32_t length = config.get<uint32_t>(prefix + "length");
+        ra = new StarRoutingAlgorithm(chains, length);
+    } else if (type == "Tree") {
+        auto levelSizes = ParseList<uint32_t>(config.get<const char*>(prefix + "levelSizes"));
+        bool onlyLeafTerminals = config.get<bool>(prefix + "onlyLeafTerminals", true);
+        ra = new TreeRoutingAlgorithm(levelSizes, onlyLeafTerminals);
+    } else {
+        panic("Unknown routing algorithm %s", type.c_str());
+    }
+    assert(ra);
+    return ra;
+}
+
+AddressMap* BuildAddressMap(Config& config, const string& prefix, uint32_t numParents) {
+    AddressMap* am = nullptr;
+    string type = config.get<const char*>(prefix + "type", "XOR16b");
+    if (type == "XOR16b") {
+        am = new XOR16bHashAddressMap(numParents);
+    } else if (type == "StaticInterleaving") {
+        uint64_t chunkSize = config.get<uint64_t>(prefix + "chunkSize");
+        if (chunkSize % zinfo->lineSize != 0) {
+            panic("StaticInterleavingAddressMap: chunkSize (%lu) must be a multiple of line size", chunkSize);
+        }
+        am = new StaticInterleavingAddressMap(chunkSize / zinfo->lineSize, numParents);
+    } else {
+        panic("Unknown address map %s", type.c_str());
+    }
+    assert(am);
+    return am;
+}
+
+vector<MemRouter*> BuildMemRouterGroup(Config& config, const string& prefix, uint32_t numRouters, uint32_t numPorts, const g_string& name) {
+    vector<MemRouter*> rg(numRouters, nullptr);
+    string type = config.get<const char*>(prefix + "type", "Simple");
+    if (type == "Simple") {
+        uint32_t latency = config.get<uint32_t>(prefix + "latency", 0);
+        for (uint32_t i = 0; i < numRouters; i++) {
+            stringstream ss;
+            ss << name << "-r" << i;
+            g_string routerName(ss.str().c_str());
+            rg[i] = new SimpleMemRouter(numPorts, latency, routerName);
+        }
+    } else if (type == "MD1") {
+        uint32_t latency = config.get<uint32_t>(prefix + "latency");
+        uint32_t portWidth = config.get<uint32_t>(prefix + "portWidth");
+        if (portWidth % 8) panic("Port width for router %s must be a multiple of 8 bits.", name.c_str());
+        uint32_t bytesPerCycle = portWidth / 8;
+        for (uint32_t i = 0; i < numRouters; i++) {
+            stringstream ss;
+            ss << name << "-r" << i;
+            g_string routerName(ss.str().c_str());
+            rg[i] = new MD1MemRouter(numPorts, latency, bytesPerCycle, routerName);
+        }
+    } else if (type == "Timing") {
+        uint32_t latency = config.get<uint32_t>(prefix + "latency");
+        uint32_t portWidth = config.get<uint32_t>(prefix + "portWidth");
+        uint32_t processWidth = config.get<uint32_t>(prefix + "processWidth", 1);
+        if (portWidth % 8) panic("Port width for router %s must be a multiple of 8 bits.", name.c_str());
+        uint32_t bytesPerCycle = portWidth / 8;
+        for (uint32_t i = 0; i < numRouters; i++) {
+            stringstream ss;
+            ss << name << "-r" << i;
+            g_string routerName(ss.str().c_str());
+            uint32_t domain = i * zinfo->numDomains / numRouters;
+            rg[i] = new TimingMemRouter(numPorts, latency, bytesPerCycle, processWidth, routerName, domain);
+        }
+    } else {
+        panic("Unknown router type %s", type.c_str());
+    }
+    for (const auto& r : rg) assert(r);
+    return rg;
+}
+
 static void InitSystem(Config& config) {
     unordered_map<string, string> parentMap; //child -> parent
     unordered_map<string, vector<vector<string>>> childMap; //parent -> children (a parent may have multiple children)
@@ -621,6 +715,152 @@ static void InitSystem(Config& config) {
             MemObject* splitter = new SplitAddrMemory(mems, "mem-splitter");
             mems.resize(1);
             mems[0] = splitter;
+        }
+    }
+
+    // Build the interconnects.
+    vector<const char*> interconnectNames;
+    config.subgroups("sys.interconnects", interconnectNames);
+    vector<string> routerGroupNames;
+    unordered_map<string, vector<MemRouter*>> routerGroupMap;
+
+    for (const char* net : interconnectNames) {
+        for (auto& grp : cacheGroupNames) if (string(grp).find(net) == 0)
+            panic("Interconnect name %s cannot be prefix of cache name %s", net, grp);
+
+        string prefix = string("sys.interconnects.") + net + ".";
+
+        // Build interconnect.
+
+        MemInterconnect* interconnect = nullptr;
+        {
+            // Discover all levels, from the leaf to upper levels.
+            vector<string> levelPrefixList;
+            levelPrefixList.push_back(prefix);
+            while (config.exists(levelPrefixList.back() + "upperLevel")) {
+                levelPrefixList.push_back(levelPrefixList.back() + "upperLevel.");
+            }
+            uint32_t numLevels = levelPrefixList.size();
+
+            // Routing algorithm.
+            vector<RoutingAlgorithm*> raVec;
+            for (uint32_t l = 0; l < numLevels; l++) {
+                raVec.push_back(BuildRoutingAlgorithm(config, levelPrefixList[l] + "routingAlgorithm."));
+            }
+            RoutingAlgorithm* ra = raVec.size() == 1 ? raVec[0] : new HomoHierRoutingAlgorithm(raVec);
+
+            // Routers.
+            vector<MemRouter*> routers;
+            vector<uint32_t> numInstancesByLevel;  // number of interconnect instances in each level
+            uint32_t numPorts = ra->getNumPorts();
+            for (uint32_t l = 0; l < numLevels; l++) {
+                for (auto& n : numInstancesByLevel) n *= raVec[l]->getNumTerminals();
+                numInstancesByLevel.push_back(1);
+            }
+            for (uint32_t l = 0; l < numLevels; l++) {
+                uint32_t numRouters = numInstancesByLevel[l] * raVec[l]->getNumRouters();
+                stringstream ss;
+                ss << net << "-l" << l;
+                g_string rgName(ss.str().c_str());
+                auto rg = BuildMemRouterGroup(config, levelPrefixList[l] + "routers.", numRouters, numPorts, rgName);
+                routers.insert(routers.end(), rg.begin(), rg.end());
+                routerGroupNames.push_back(rgName.c_str());
+                routerGroupMap[rgName.c_str()] = rg;
+            }
+
+            uint32_t ccHeaderSize = config.get<uint32_t>(prefix + "ccHeaderSize", 0);
+
+            interconnect = new MemInterconnect(ra, routers, ccHeaderSize, net);
+        }
+
+        // Build all interfaces.
+
+        uint32_t idx = 0;
+        while (true) {
+            stringstream ss;
+            ss << "interface" << idx;
+            string itfc = ss.str();
+            if (!config.exists(prefix + itfc)) break;
+
+            // Parents.
+            string parent = config.get<const char*>(prefix + itfc + ".parent");
+            uint32_t numParentsPerGroup = 0;
+            if (parent == "mem") numParentsPerGroup = mems.size();
+            else if (cMap.count(parent)) numParentsPerGroup = cMap[parent]->at(0).size();
+            else panic("Interconnect %s interface %u has an invalid parent name %s, must be a parent cache name or \"mem\"", net, idx, parent.c_str());
+
+            // Address map.
+            AddressMap* am = BuildAddressMap(config, prefix + itfc + ".addressMap.", numParentsPerGroup);
+
+            bool centralizedParents = config.get<bool>(prefix + itfc + ".centralizedParents", false);
+            bool ignoreInvLatency = config.get<bool>(prefix + itfc + ".ignoreInvLatency", false);
+
+            auto interface = new MemInterconnectInterface(interconnect, idx, am, centralizedParents, ignoreInvLatency);
+
+            // Connect to children through endpoints.
+
+            auto constructEndpoints = [&interface](string endpoint, CacheGroup& endpointCaches, CacheGroup& childCaches) {
+                for (uint32_t i = 0; i < childCaches.size(); i++) {
+                    endpointCaches.emplace_back();
+                    for (uint32_t j = 0; j < childCaches[i].size(); j++) {
+                        stringstream ss;
+                        ss << endpoint << "-" << i;
+                        if (childCaches[i].size() > 1) ss << "b" << j;
+                        g_string name(ss.str().c_str());
+                        endpointCaches[i].push_back(interface->getEndpoint(childCaches[i][j], name));
+                    }
+                }
+            };
+
+            if (parent == "mem") {
+                string endpoint = string(net) + "-" + llc;
+
+                // Construct endpoints.
+                cMap[endpoint] = new CacheGroup;
+                constructEndpoints(endpoint, *cMap[endpoint], *cMap[llc]);
+
+                // Add to hierarchy.
+                cacheGroupNames.push_back(gm_strdup(endpoint.c_str()));
+
+                // Endpoints <-> children.
+                childMap[endpoint] = parseChildren(llc);
+                parentMap[llc] = endpoint;
+
+                // Parents <-> endpoints.
+                llc = endpoint;
+            } else {
+                assert(cMap.count(parent));
+
+                vector<vector<string>> children;
+                children.swap(childMap[parent]);
+
+                for (auto& childVec : children) {
+                    childMap[parent].emplace_back();
+                    for (auto& child : childVec) {
+                        string endpoint = string(net) + "-" + child;
+
+                        // Construct endpoints.
+                        cMap[endpoint] = new CacheGroup;
+                        constructEndpoints(endpoint, *cMap[endpoint], *cMap[child]);
+
+                        // Add to hierarchy.
+                        cacheGroupNames.push_back(gm_strdup(endpoint.c_str()));
+
+                        // Endpoints <-> children.
+                        childMap[endpoint] = parseChildren(child);
+                        parentMap[child] = endpoint;
+
+                        // Parents <-> endpoints.
+                        childMap[parent].back().push_back(endpoint);
+                        parentMap[endpoint] = parent;
+                    }
+                }
+            }
+
+            idx++;
+        }
+        if (idx == 0) {
+            panic("Interconnect %s: at least one interface is needed!", net);
         }
     }
 
@@ -876,6 +1116,21 @@ static void InitSystem(Config& config) {
     memStat->init("mem", "Memory controller stats");
     for (auto mem : mems) mem->initStats(memStat);
     zinfo->rootStat->append(memStat);
+
+    // Init stats: interconnects.
+    for (auto group : routerGroupNames) {
+        AggregateStat* groupStat = new AggregateStat(true);
+        groupStat->init(gm_strdup(group.c_str()), "Router stats");
+        for (auto router : routerGroupMap[group]) router->initStats(groupStat);
+        zinfo->rootStat->append(groupStat);
+    }
+
+    // Initialize interconnect event recorders.
+    zinfo->memInterconnectEventRecorders = gm_calloc<MemInterconnectEventRecorder*>(zinfo->numCores);
+    for (uint32_t i = 0; i < zinfo->numCores; i++) {
+        uint32_t domain = i * zinfo->numDomains / zinfo->numCores;
+        zinfo->memInterconnectEventRecorders[i] = new MemInterconnectEventRecorder(zinfo->eventRecorders[i], domain);
+    }
 
     //Odds and ends: BuildCacheGroup new'd the cache groups, we need to delete them
     for (pair<string, CacheGroup*> kv : cMap) delete kv.second;
