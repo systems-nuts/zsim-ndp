@@ -6,6 +6,9 @@
 #include "g_std/g_unordered_map.h"
 #include "locks.h"
 #include "memory_hierarchy.h"
+#include "numa_map.h"
+#include "zsim.h"
+// #include "log.h"
 
 /**
  * Map an address to an integer-map, which can be parent cache bank, NUMA node, etc..
@@ -32,7 +35,6 @@ class AddressMap : public GlobAlloc {
 class CoherentParentMap : public GlobAlloc {
     private:
         AddressMap* am;
-
         // Support dynamic address mapping and line migration between parents.
         lock_t mapLock;
         // Mapping from line to current parent ID and child sharer IDs.
@@ -173,6 +175,46 @@ class StaticInterleavingAddressMap : public AddressMap {
             return (lineAddr / chunkNumLines) % total;
         }
 };
+
+/**
+ * Map address according to NUMA.
+ *
+ * zinfo->numaMap must be valid. Otherwise assume a single node.
+ */
+
+
+class NUMAAddressMap : public AddressMap {
+    private:
+        const uint32_t total;
+        const uint32_t nodes;
+        XOR16bHashAddressMap* nodeMap;
+
+    public:
+        NUMAAddressMap(uint32_t _total)
+            : total(_total), nodes(zinfo->numaMap ? zinfo->numaMap->getMaxNode() + 1 : 1) {
+            if (total % nodes != 0)
+                panic("NUMAAddressMap: total terminals (%u) must be a multiple of NUMA nodes (%u)", total, nodes);
+            nodeMap = new XOR16bHashAddressMap(total / nodes);
+        }
+
+        ~NUMAAddressMap() { 
+            delete nodeMap; 
+        }
+
+        uint32_t getTotal() const { 
+            return total; 
+        }
+
+        uint32_t getMap(Address lineAddr) const {
+            auto n = zinfo->numaMap->getNodeOfLineAddr(lineAddr);
+            return n * total / nodes + nodeMap->getMap(lineAddr);
+        }
+
+        bool isDynamic() const override { return true; }
+};
+
+
+
 
 #endif  // ADDRESS_MAP_H_
 

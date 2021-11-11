@@ -570,6 +570,9 @@ AddressMap* BuildAddressMap(Config& config, const string& prefix, uint32_t numPa
             panic("StaticInterleavingAddressMap: chunkSize (%lu) must be a multiple of line size", chunkSize);
         }
         am = new StaticInterleavingAddressMap(chunkSize / zinfo->lineSize, numParents);
+    } else if (type == "NUMA") { 
+        if (!zinfo->numaMap) panic("NUMA address map requires a NUMA system");
+        am = new NUMAAddressMap(numParents);
     } else {
         panic("Unknown address map %s", type.c_str());
     }
