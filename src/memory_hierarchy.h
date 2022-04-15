@@ -99,6 +99,7 @@ struct MemReq {
         PREFETCH      = (1<<5), //Prefetch GETS access. Only set at level where prefetch is issued; handled early in MESICC
 
         PIGGYBACK     = (1<<16),    // Piggyback messages; will be ignored by interconnects.
+        REMOTE        = (1<<17),    // Remote message from a different node; marked by interconnects.
     };
     uint32_t flags;
 
@@ -119,6 +120,7 @@ struct InvReq {
     // This is fine for the flags below, but may need to be fixed for others defined later.
     enum Flag {
         PIGGYBACK   = (1<<16),      // Piggyback messages; will be ignored by interconnects.
+        REMOTE      = (1<<17),      // Remote message from a different node; marked by interconnects.
     };
     uint32_t flags;
 

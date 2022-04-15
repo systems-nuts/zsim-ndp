@@ -124,6 +124,10 @@ class MemInterconnectInterface : public GlobAlloc {
             return groupId * numTerminals + objectId * numTerminalsPerObject + numTerminalsPerObject / 2;
         }
 
+        inline bool isRemote(uint32_t groupId, uint32_t parentId, uint32_t childId) {
+            return getParentTerminalId(groupId, parentId) != getChildTerminalId(groupId, childId);
+        }
+
     protected:
         MemInterconnect* interconnect;
         const uint32_t index;

@@ -35,6 +35,7 @@ uint64_t MemInterconnectInterface::accessParent(MemReq& req, uint32_t groupId) {
     // Access.
     MemReq req2 = req;
     req2.cycle = respCycle;
+    if (isRemote(groupId, parentId, childId)) req2.set(MemReq::REMOTE);
     respCycle = groups[groupId].parents[parentId]->access(req2);
 
     groups[groupId].map->postAccess(req.lineAddr, childId, req);
@@ -57,6 +58,7 @@ uint64_t MemInterconnectInterface::invalidateChild(const InvReq& req, uint32_t g
     // Invalidate.
     InvReq req2 = req;
     req2.cycle = respCycle;
+    if (isRemote(groupId, parentId, childId)) req2.set(InvReq::REMOTE);
     respCycle = child->invalidate(req2);
 
     groups[groupId].map->postInvalidate(req.lineAddr, childId, req);
