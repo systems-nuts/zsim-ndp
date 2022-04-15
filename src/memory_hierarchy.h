@@ -97,6 +97,8 @@ struct MemReq {
         NONINCLWB     = (1<<3), //This is a non-inclusive writeback. Do not assume that the line was in the lower level. Used on NUCA (BankDir).
         PUTX_KEEPEXCL = (1<<4), //Non-relinquishing PUTX. On a PUTX, maintain the requestor's E state instead of removing the sharer (i.e., this is a pure writeback)
         PREFETCH      = (1<<5), //Prefetch GETS access. Only set at level where prefetch is issued; handled early in MESICC
+
+        PIGGYBACK     = (1<<16),    // Piggyback messages; will be ignored by interconnects.
     };
     uint32_t flags;
 
@@ -112,6 +114,16 @@ struct InvReq {
     bool* writeback;
     uint64_t cycle;
     uint32_t srcId;
+
+    // NOTE(gaomy): currently the flags are only for one level and do not propagate across levels.
+    // This is fine for the flags below, but may need to be fixed for others defined later.
+    enum Flag {
+        PIGGYBACK   = (1<<16),      // Piggyback messages; will be ignored by interconnects.
+    };
+    uint32_t flags;
+
+    inline void set(Flag f) { flags |= f; }
+    inline bool is(Flag f) const { return flags & f; }
 };
 
 /** INTERFACES **/

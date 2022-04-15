@@ -39,16 +39,18 @@ class MemInterconnectEventRecorder : public GlobAlloc {
         struct RoutingEntry : InListNode<RoutingEntry> {
             MemRouter* router;
             uint8_t portId;
+            uint8_t piggyback;
             uint8_t procDelay;
             uint16_t outDelay;
             uint16_t preDelay;
-            RoutingEntry(MemRouter* _router, uint32_t _portId, uint32_t _procDelay, uint32_t _outDelay, uint32_t _preDelay) {
+            RoutingEntry(MemRouter* _router, uint32_t _portId, bool _piggyback, uint32_t _procDelay, uint32_t _outDelay, uint32_t _preDelay) {
                 assert(_portId < (1u << 8));
                 assert(_procDelay < (1u << 8));
                 assert(_outDelay < (1u << 16));
                 assert(_preDelay < (1u << 16));
                 router = _router;
                 portId = static_cast<uint8_t>(_portId);
+                piggyback = _piggyback ? 1 : 0;
                 procDelay = static_cast<uint8_t>(_procDelay);
                 outDelay = static_cast<uint16_t>(_outDelay);
                 preDelay = static_cast<uint16_t>(_preDelay);
@@ -94,7 +96,7 @@ class MemInterconnectEventRecorder : public GlobAlloc {
                 uint64_t doneCycle = startCycle;
                 if (e) {
                     doneCycle += e->preDelay;
-                    doneCycle = e->router->simulate(e->portId, e->procDelay, e->outDelay, lastHop, doneCycle);
+                    doneCycle = e->router->simulate(e->portId, e->procDelay, e->outDelay, lastHop, e->piggyback == 1, doneCycle);
                     // info("[MemInterconnectEvent %lu] Hop at %s port %u, starts at %lu, finishes at %lu", id, e->router->getName(), e->portId, startCycle, doneCycle);
                     slab::freeElem(e, sizeof(RoutingEntry));
                 }
@@ -236,8 +238,8 @@ class MemInterconnectEventRecorder : public GlobAlloc {
             : reAlloc(), event(nullptr), eventId(0), evRec(_evRec), invStashRecs(),
               stack(16), sp(0), domain(_domain) {}
 
-        void addHop(MemRouter* router, uint32_t portId, uint32_t procDelay, uint32_t outDelay, uint64_t startCycle, uint64_t doneCycle) {
-            auto e = new (reAlloc) RoutingEntry(router, portId, procDelay, outDelay, startCycle - event->getDoneCycle());
+        void addHop(MemRouter* router, uint32_t portId, bool piggyback, uint32_t procDelay, uint32_t outDelay, uint64_t startCycle, uint64_t doneCycle) {
+            auto e = new (reAlloc) RoutingEntry(router, portId, piggyback, procDelay, outDelay, startCycle - event->getDoneCycle());
             event->addHop(e, doneCycle);
         }
 

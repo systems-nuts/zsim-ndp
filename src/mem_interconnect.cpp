@@ -24,7 +24,7 @@ uint64_t MemInterconnect::accessRequest(const MemReq& req, uint64_t cycle, uint3
     auto itcnRec = zinfo->memInterconnectEventRecorders[req.srcId];
 
     if (needsCSim) itcnRec->startRequest<true>(cycle, req.lineAddr, req.type);
-    cycle = travel(srcId, dstId, size, cycle, req.srcId);
+    cycle = travel(srcId, dstId, size, cycle, req.is(MemReq::PIGGYBACK), req.srcId);
     if (needsCSim) itcnRec->endRequest<true>(cycle);
 
     return cycle;
@@ -37,7 +37,7 @@ uint64_t MemInterconnect::accessResponse(const MemReq& req, uint64_t cycle, uint
     auto itcnRec = zinfo->memInterconnectEventRecorders[req.srcId];
 
     if (needsCSim) cycle = itcnRec->startResponse<true>(cycle);
-    cycle = travel(srcId, dstId, size, cycle, req.srcId);
+    cycle = travel(srcId, dstId, size, cycle, req.is(MemReq::PIGGYBACK), req.srcId);
     if (needsCSim) itcnRec->endResponse<true>(cycle);
 
     return cycle;
@@ -50,7 +50,7 @@ uint64_t MemInterconnect::invalidateRequest(const InvReq& req, uint64_t cycle, u
     auto itcnRec = zinfo->memInterconnectEventRecorders[req.srcId];
 
     if (needsCSim) itcnRec->startRequest<false>(cycle);
-    cycle = travel(srcId, dstId, size, cycle, req.srcId);
+    cycle = travel(srcId, dstId, size, cycle, req.is(InvReq::PIGGYBACK), req.srcId);
     if (needsCSim) itcnRec->endRequest<false>(cycle);
 
     return cycle;
@@ -64,13 +64,13 @@ uint64_t MemInterconnect::invalidateResponse(const InvReq& req, uint64_t cycle, 
     auto itcnRec = zinfo->memInterconnectEventRecorders[req.srcId];
 
     if (needsCSim) cycle = itcnRec->startResponse<false>(cycle);
-    cycle = travel(srcId, dstId, size, cycle, req.srcId);
+    cycle = travel(srcId, dstId, size, cycle, req.is(InvReq::PIGGYBACK), req.srcId);
     if (needsCSim) itcnRec->endResponse<false>(cycle);
 
     return cycle;
 }
 
-uint64_t MemInterconnect::travel(uint32_t srcId, uint32_t dstId, size_t size, uint64_t cycle, uint32_t srcCoreId) {
+uint64_t MemInterconnect::travel(uint32_t srcId, uint32_t dstId, size_t size, uint64_t cycle, bool piggyback, uint32_t srcCoreId) {
     assert(srcId < numTerminals);
     assert(dstId < numTerminals);
 
@@ -83,7 +83,7 @@ uint64_t MemInterconnect::travel(uint32_t srcId, uint32_t dstId, size_t size, ui
         ra->nextHop(curId, dstId, &nextId, &portId);
         assert(nextId < ra->getNumRouters());
         assert(portId < ra->getNumPorts());
-        respCycle = routers[curId]->transfer(respCycle, size, portId, nextId == dstId, srcCoreId);
+        respCycle = routers[curId]->transfer(respCycle, size, portId, nextId == dstId, piggyback, srcCoreId);
         curId = nextId;
         nhops++;
     }
