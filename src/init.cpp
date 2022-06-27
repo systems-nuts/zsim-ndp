@@ -669,7 +669,7 @@ static void InitSystem(Config& config) {
                     if (assignedCaches[icache] >= igroup.size()) {
                         panic("%s: icache group %s (%ld caches) is fully used, can't connect more cores to it", name.c_str(), icache.c_str(), igroup.size());
                     }
-                    FilterCache* ic = static_cast<FilterCache*>(igroup[assignedCaches[icache]][0]);  // should be dynamic_cast
+                    FilterCache* ic = dynamic_cast<FilterCache*>(igroup[assignedCaches[icache]][0]);
                     assert(ic);
                     ic->setSourceId(coreIdx);
                     ic->setFlags(MemReq::IFETCH | MemReq::NOEXCL);
@@ -678,7 +678,7 @@ static void InitSystem(Config& config) {
                     if (assignedCaches[dcache] >= dgroup.size()) {
                         panic("%s: dcache group %s (%ld caches) is fully used, can't connect more cores to it", name.c_str(), dcache.c_str(), dgroup.size());
                     }
-                    FilterCache* dc = static_cast<FilterCache*>(dgroup[assignedCaches[dcache]][0]);  // should be dynamic_cast
+                    FilterCache* dc = dynamic_cast<FilterCache*>(dgroup[assignedCaches[dcache]][0]);
                     assert(dc);
                     dc->setSourceId(coreIdx);
                     assignedCaches[dcache]++;
@@ -741,7 +741,7 @@ static void InitSystem(Config& config) {
             if (isTerminal(grp)) {
                 for (vector<BaseCache*> cv : *cMap[grp]) {
                     assert(cv.size() == 1);
-                    TraceDriverProxyCache* proxy = static_cast<TraceDriverProxyCache*>(cv[0]);  // should be dynamic_cast
+                    TraceDriverProxyCache* proxy = dynamic_cast<TraceDriverProxyCache*>(cv[0]);
                     assert(proxy);
                     proxies.push_back(proxy);
                 }

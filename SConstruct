@@ -65,6 +65,7 @@ def buildSim(cppFlags, dir, type, pgo=None):
     if withPinCrt:
         env["CPPFLAGS"] += " -D__PIN__=1 -DPIN_CRT=1"
         env["CPPFLAGS"] += " -fno-exceptions -fno-rtti -funwind-tables -fasynchronous-unwind-tables"
+        env["CPPFLAGS"] += " -Ddynamic_cast=static_cast"
         env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/stlport/include")
         env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/libstdc++/include")
         env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/libunwind/include")
