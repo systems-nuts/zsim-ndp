@@ -53,7 +53,7 @@ class CC : public GlobAlloc {
         virtual void endAccess(const MemReq& req) = 0;
 
         //Inv methods
-        virtual void startInv() = 0;
+        virtual bool startInv(const InvReq& req) = 0;  // returns true if invalidation should be skipped.
         virtual uint64_t processInv(const InvReq& req, int32_t lineId, uint64_t startCycle) = 0;
 
         //Repl policy interface
@@ -227,6 +227,8 @@ class MESITopCC : public GlobAlloc {
 
         uint64_t processInval(Address lineAddr, uint32_t lineId, InvType type, bool* reqWriteback, uint64_t cycle, uint32_t srcId);
 
+        uint64_t processNonInclusiveWritebackToMovedLine(Address lineAddr, AccessType type, uint64_t cycle, MESIState* childState, uint32_t flags);
+
         inline void lock() {
             futex_lock(&ccLock);
         }
@@ -239,6 +241,10 @@ class MESITopCC : public GlobAlloc {
         inline uint32_t numSharers(uint32_t lineId) {
             return array[lineId].numSharers;
         }
+
+        /* Additional sharer info probe. */
+        inline bool hasExclusiveSharer(uint32_t lineId) const { return array[lineId].isExclusive(); }
+        inline bool isSharer(uint32_t lineId, uint32_t childId) const { return array[lineId].sharers[childId]; }
 
     private:
         uint64_t sendInvalidates(Address lineAddr, uint32_t lineId, InvType type, bool* reqWriteback, uint64_t cycle, uint32_t srcId);
@@ -275,7 +281,7 @@ static inline bool CheckForMESIRace(AccessType& type, MESIState* state, MESIStat
 
 // Non-terminal CC; accepts GETS/X and PUTS/X accesses
 class MESICC : public CC {
-    private:
+    protected:
         MESITopCC* tcc;
         MESIBottomCC* bcc;
         uint32_t numLines;
@@ -355,6 +361,12 @@ class MESICC : public CC {
                 assert(nonInclusiveHack);
                 assert((req.type == PUTS) || (req.type == PUTX));
                 respCycle = bcc->processNonInclusiveWriteback(req.lineAddr, req.type, startCycle, req.state, req.srcId, req.flags);
+            } else if (((req.type == PUTS) || (req.type == PUTX)) && !tcc->isSharer(lineId, req.childId)) {
+                assert(nonInclusiveHack);
+                // NOTE(gaomy): This could happen when the line was evicted from this level, and then refetched back to another place in this level.
+                // In such a case, although we hit in a valid line, but the sharer info we have does not include the previous sharers before the eviction.
+                // We need to skip this level, and also there is no need to access the parent since we already have the line.
+                respCycle = tcc->processNonInclusiveWritebackToMovedLine(req.lineAddr, req.type, startCycle, req.state, req.flags);
             } else {
                 //Prefetches are side requests and get handled a bit differently
                 bool isPrefetch = req.flags & MemReq::PREFETCH;
@@ -390,8 +402,9 @@ class MESICC : public CC {
         }
 
         //Inv methods
-        void startInv() {
+        bool startInv(const InvReq& req) {
             bcc->lock(); //note we don't grab tcc; tcc serializes multiple up accesses, down accesses don't see it
+            return false;
         }
 
         uint64_t processInv(const InvReq& req, int32_t lineId, uint64_t startCycle) {
@@ -409,7 +422,7 @@ class MESICC : public CC {
 
 // Terminal CC, i.e., without children --- accepts GETS/X, but not PUTS/X
 class MESITerminalCC : public CC {
-    private:
+    protected:
         MESIBottomCC* bcc;
         uint32_t numLines;
         g_string name;
@@ -480,8 +493,9 @@ class MESITerminalCC : public CC {
         }
 
         //Inv methods
-        void startInv() {
+        bool startInv(const InvReq& req) {
             bcc->lock();
+            return false;
         }
 
         uint64_t processInv(const InvReq& req, int32_t lineId, uint64_t startCycle) {

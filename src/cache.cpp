@@ -125,8 +125,8 @@ uint64_t Cache::access(MemReq& req) {
     return respCycle;
 }
 
-void Cache::startInvalidate() {
-    cc->startInv(); //note we don't grab tcc; tcc serializes multiple up accesses, down accesses don't see it
+bool Cache::startInvalidate(const InvReq& req) {
+    return cc->startInv(req); //note we don't grab tcc; tcc serializes multiple up accesses, down accesses don't see it
 }
 
 uint64_t Cache::finishInvalidate(const InvReq& req) {
