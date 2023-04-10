@@ -17,26 +17,29 @@ void TimingMemRouter::initStats(AggregateStat* parentStat) {
     parentStat->append(routerStat);
 }
 
-uint64_t TimingMemRouter::transfer(uint64_t cycle, uint64_t size, uint32_t portId, bool lastHop, uint32_t srcCoreId) {
+uint64_t TimingMemRouter::transfer(uint64_t cycle, uint64_t size, uint32_t portId, bool lastHop, bool piggyback, uint32_t srcCoreId) {
     // Bound phase delays.
     uint32_t procDelay = latency;
     uint32_t outDelay = lastHop ? (size + bytesPerCycle - 1) / bytesPerCycle : 0;
-    profTrans.atomicInc();
+    if (!piggyback) profTrans.atomicInc();
     profSize.atomicInc(size);
     uint64_t respCycle = cycle + procDelay + outDelay;
 
     // Create events.
     auto itcnRec = zinfo->memInterconnectEventRecorders[srcCoreId];
     assert(itcnRec);
-    itcnRec->addHop(this, portId, procDelay, outDelay, cycle, respCycle);
+    itcnRec->addHop(this, portId, piggyback, procDelay, outDelay, cycle, respCycle);
 
     return respCycle;
 }
 
-uint64_t TimingMemRouter::simulate(uint32_t portId, uint32_t procDelay, uint32_t outDelay, bool lastHop, uint64_t startCycle) {
+uint64_t TimingMemRouter::simulate(uint32_t portId, uint32_t procDelay, uint32_t outDelay, bool lastHop, bool piggyback, uint64_t startCycle) {
     // Process.
-    uint64_t procStartCycle = procDisp.dispatch(startCycle);
-    profQueuingProcCycles.inc(procStartCycle - startCycle);
+    uint64_t procStartCycle = startCycle;
+    if (!piggyback) {
+        procStartCycle = procDisp.dispatch(startCycle);
+        profQueuingProcCycles.inc(procStartCycle - startCycle);
+    }
     uint64_t procDoneCycle = procStartCycle + procDelay;
     DEBUG("%s TimingMemRouter: simProc: %lu -> %lu", name.c_str(), startCycle, procDoneCycle);
 

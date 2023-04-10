@@ -35,12 +35,12 @@ class AddressMap : public GlobAlloc {
 class CoherentParentMap : public GlobAlloc {
     private:
         AddressMap* am;
-        // Support dynamic address mapping and line migration between parents.
+
         lock_t mapLock;
-        // Mapping from line to current parent ID and child sharer IDs.
-        g_unordered_map<Address, std::pair<uint32_t, std::bitset<MAX_CACHE_CHILDREN>>> lineParentChildren;
-        // Mapping from migrated line to original parent ID and its remaining child sharer IDs.
-        g_unordered_map<Address, std::pair<uint32_t, std::bitset<MAX_CACHE_CHILDREN>>> migratedLineParentChildren;
+
+        // For each child, mapping from its current line to the original parent ID. The parent ID may be different from
+        // the current address mapping.
+        g_unordered_map<Address, uint32_t> childLineParentMap[MAX_CACHE_CHILDREN];
 
     public:
         explicit CoherentParentMap(AddressMap* _am) : am(_am) {
@@ -49,86 +49,65 @@ class CoherentParentMap : public GlobAlloc {
 
         uint32_t getTotal() const { return am->getTotal(); }
 
-        inline uint32_t getParentIdInAccess(Address lineAddr, uint32_t childId, const MemReq& req) {
-            return getParentId(lineAddr, childId,
-                    req.type == GETS || req.type == GETX,
-                    req.type == PUTS || (req.type == PUTX && !req.is(MemReq::PUTX_KEEPEXCL)));
+        /* We need to separate the pre and post actions to manage the mapping; specifically, the removal must be
+         * postponed until we finish the access/invalidate.
+         *
+         * This is to avoid races between PUTS/X and INV (see CheckForMESIRace() in coherence_ctrls.h). In such a case,
+         * we need to ensure both see the same parent ID. If we were to remove the mapping immediately after the lookup
+         * of the first removal, the other removal would not locate the current parent ID.
+         */
+
+        inline uint32_t preAccess(Address lineAddr, uint32_t childId, const MemReq& req) {
+            return getParentId(lineAddr, childId, req.type == GETS || req.type == GETX);
         }
 
-        inline uint32_t getParentIdInInvalidate(Address lineAddr, uint32_t childId, const InvReq& req) {
-            return getParentId(lineAddr, childId, false, req.type == INV);
+        inline uint32_t preInvalidate(Address lineAddr, uint32_t childId, const InvReq& req) {
+            return getParentId(lineAddr, childId, false);
         }
 
-        uint32_t getParentId(Address lineAddr, uint32_t childId, bool shouldAdd, bool shouldRemove) {
-            uint32_t parentId = am->getMap(lineAddr);
-            if (!am->isDynamic()) return parentId;
+        inline void postAccess(Address lineAddr, uint32_t childId, const MemReq& req) {
+            if ((req.type == PUTS || req.type == PUTX) && *req.state == I) removeParentId(lineAddr, childId);
+        }
 
-            assert(!shouldAdd || !shouldRemove);
+        inline void postInvalidate(Address lineAddr, uint32_t childId, const InvReq& req) {
+            if (req.type == INV) removeParentId(lineAddr, childId);
+        }
+
+        uint32_t getParentId(Address lineAddr, uint32_t childId, bool shouldAdd) {
+            if (!am->isDynamic()) return am->getMap(lineAddr);
+
+            auto& lineParentMap = childLineParentMap[childId];
+            uint32_t parentId = -1u;
 
             futex_lock(&mapLock);
 
-            // Look up in the migrated lines.
-            bool isMigratedLine = false;
-            auto migIt = migratedLineParentChildren.find(lineAddr);
-            if (migIt != migratedLineParentChildren.end()) {
-                auto& sharers = migIt->second.second;
-                if (sharers[childId]) {
-                    // Use the original parent.
-                    parentId = migIt->second.first;
-                    isMigratedLine = true;
-
-                    // Do not add; keep using the original parent until removed.
-                    shouldAdd = false;
-                    if (shouldRemove) {
-                        // The line has been handled for this child; remove.
-                        sharers.set(childId, false);
-                        if (sharers.none()) {
-                            // The line has been handled for all children; forget it as migrated.
-                            migratedLineParentChildren.erase(migIt);
-                        }
-                    }
-                }
-            }
-            if (!isMigratedLine) {
-                // Check if migrated.
-                auto lineIt = lineParentChildren.find(lineAddr);
-                if (lineIt != lineParentChildren.end() && lineIt->second.first != parentId) {
-                    // Parent has changed. Add to migrated lines.
-                    auto& sharers = lineIt->second.second;
-                    if (sharers[childId]) {
-                        if (shouldRemove) {
-                            // Leave the requesting child to the actual access to handle.
-                            sharers.set(childId, false);
-                        }
-                        parentId = lineIt->second.first;
-                        // This sharer will keep using the original parent.
-                        // If the child is not a sharer, then it will be added and use the new parent.
-                        shouldAdd = false;
-                    }
-                    migratedLineParentChildren[lineAddr] = lineIt->second;
-                    // Remove from current lines.
-                    lineParentChildren.erase(lineIt);
-                    shouldRemove = false;
-                }
-
-                // Update current lines.
+            // Look up in the current lines.
+            auto lIt = lineParentMap.find(lineAddr);
+            if (lIt != lineParentMap.end()) {
+                // Use the original parent.
+                parentId = lIt->second;
+            } else {
+                // Must look up after holding the lock, to avoid race.
+                parentId = am->getMap(lineAddr);
                 if (shouldAdd) {
-                    lineParentChildren[lineAddr].first = parentId;
-                    lineParentChildren[lineAddr].second.set(childId, true);
-                }
-                if (shouldRemove) {
-                    if (lineIt != lineParentChildren.end()) {
-                        auto& sharers = lineIt->second.second;
-                        sharers.set(childId, false);
-                        if (sharers.count() == 0) {
-                            lineParentChildren.erase(lineIt);
-                        }
-                    }
+                    lineParentMap[lineAddr] = parentId;
                 }
             }
 
             futex_unlock(&mapLock);
             return parentId;
+        }
+
+        void removeParentId(Address lineAddr, uint32_t childId) {
+            if (!am->isDynamic()) return;
+
+            auto& lineParentMap = childLineParentMap[childId];
+
+            futex_lock(&mapLock);
+
+            lineParentMap.erase(lineAddr);
+
+            futex_unlock(&mapLock);
         }
 };
 

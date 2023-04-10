@@ -27,13 +27,15 @@ class MemRouter : public GlobAlloc {
 
         /* Bound phase. */
 
-        virtual uint64_t transfer(uint64_t cycle, uint64_t size, uint32_t portId, bool lastHop, uint32_t srcCoreId) = 0;
+        virtual uint64_t transfer(uint64_t cycle, uint64_t size, uint32_t portId, bool lastHop, bool piggyback, uint32_t srcCoreId) = 0;
+
+        /* Weave phase. */
 
         /* Weave phase. */
 
         virtual bool needsCSim() const { return false; }
 
-        virtual uint64_t simulate(uint32_t portId, uint32_t procDelay, uint32_t outDelay, bool lastHop, uint64_t startCycle) { panic("%s: not implemented!", name.c_str()); }
+        virtual uint64_t simulate(uint32_t portId, uint32_t procDelay, uint32_t outDelay, bool lastHop, bool piggyback, uint64_t startCycle) { panic("%s: not implemented!", name.c_str()); }
 
     protected:
         AggregateStat* initBaseStats() {
@@ -60,8 +62,8 @@ class SimpleMemRouter : public MemRouter {
         SimpleMemRouter(uint32_t numPorts, uint64_t _latency, const g_string& name)
             : MemRouter(numPorts, name), latency(_latency) {}
 
-        uint64_t transfer(uint64_t cycle, uint64_t size, uint32_t portId, bool lastHop, uint32_t srcCoreId) {
-            profTrans.atomicInc();
+        uint64_t transfer(uint64_t cycle, uint64_t size, uint32_t portId, bool lastHop, bool piggyback, uint32_t srcCoreId) {
+            if (!piggyback) profTrans.atomicInc();
             profSize.atomicInc(size);
             return cycle + latency;
         }
@@ -105,7 +107,7 @@ class MD1MemRouter : public MemRouter {
             parentStat->append(routerStat);
         }
 
-        uint64_t transfer(uint64_t cycle, uint64_t size, uint32_t portId, bool lastHop, uint32_t srcCoreId) {
+        uint64_t transfer(uint64_t cycle, uint64_t size, uint32_t portId, bool lastHop, bool piggyback, uint32_t srcCoreId) {
             assert(portId < numPorts);
 
             // Update queuing factors.
@@ -122,7 +124,7 @@ class MD1MemRouter : public MemRouter {
             }
 
             __sync_fetch_and_add(&curTransData[portId], size);
-            profTrans.atomicInc();
+            if (!piggyback) profTrans.atomicInc();
             profSize.atomicInc(size);
 
             uint32_t serializeDelay = (size + bytesPerCycle - 1) / bytesPerCycle;
@@ -205,11 +207,11 @@ class TimingMemRouter : public MemRouter {
 
         void initStats(AggregateStat* parentStat);
 
-        uint64_t transfer(uint64_t cycle, uint64_t size, uint32_t portId, bool lastHop, uint32_t srcCoreId);
+        uint64_t transfer(uint64_t cycle, uint64_t size, uint32_t portId, bool lastHop, bool piggyback, uint32_t srcCoreId);
 
         bool needsCSim() const { return true; }
 
-        uint64_t simulate(uint32_t portId, uint32_t procDelay, uint32_t outDelay, bool lastHop, uint64_t startCycle);
+        uint64_t simulate(uint32_t portId, uint32_t procDelay, uint32_t outDelay, bool lastHop, bool piggyback, uint64_t startCycle);
 };
 
 #endif  // MEM_ROUTER_H_

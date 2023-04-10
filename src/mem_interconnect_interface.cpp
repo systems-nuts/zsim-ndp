@@ -27,7 +27,7 @@ uint64_t MemInterconnectInterface::accessParent(MemReq& req, uint32_t groupId) {
 
     // Determine child and parent.
     const uint32_t childId = req.childId;
-    const uint32_t parentId = groups[groupId].map->getParentIdInAccess(req.lineAddr, childId, req);
+    const uint32_t parentId = groups[groupId].map->preAccess(req.lineAddr, childId, req);
 
     // Travel through the interconnect.
     respCycle = accReqTravel(req, respCycle, groupId, parentId, childId);
@@ -35,7 +35,10 @@ uint64_t MemInterconnectInterface::accessParent(MemReq& req, uint32_t groupId) {
     // Access.
     MemReq req2 = req;
     req2.cycle = respCycle;
+    if (isRemote(groupId, parentId, childId)) req2.set(MemReq::REMOTE);
     respCycle = groups[groupId].parents[parentId]->access(req2);
+
+    groups[groupId].map->postAccess(req.lineAddr, childId, req);
 
     // Travel through the interconnect.
     respCycle = accRespTravel(req, respCycle, groupId, parentId, childId);
@@ -47,7 +50,7 @@ uint64_t MemInterconnectInterface::invalidateChild(const InvReq& req, uint32_t g
     uint64_t respCycle = req.cycle;
 
     // Determine child and parent.
-    const uint32_t parentId = groups[groupId].map->getParentIdInInvalidate(req.lineAddr, childId, req);
+    const uint32_t parentId = groups[groupId].map->preInvalidate(req.lineAddr, childId, req);
 
     // Travel through the interconnect.
     respCycle = invReqTravel(req, respCycle, groupId, parentId, childId);
@@ -55,7 +58,10 @@ uint64_t MemInterconnectInterface::invalidateChild(const InvReq& req, uint32_t g
     // Invalidate.
     InvReq req2 = req;
     req2.cycle = respCycle;
+    if (isRemote(groupId, parentId, childId)) req2.set(InvReq::REMOTE);
     respCycle = child->invalidate(req2);
+
+    groups[groupId].map->postInvalidate(req.lineAddr, childId, req);
 
     // Travel through the interconnect.
     respCycle = invRespTravel(req, respCycle, groupId, parentId, childId);

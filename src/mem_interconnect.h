@@ -42,7 +42,7 @@ class MemInterconnect : public GlobAlloc {
 
     private:
         // Travel a packet through the routers in the interconnect.
-        uint64_t travel(uint32_t srcId, uint32_t dstId, size_t size, uint64_t cycle, uint32_t srcCoreId);
+        uint64_t travel(uint32_t srcId, uint32_t dstId, size_t size, uint64_t cycle, bool piggyback, uint32_t srcCoreId);
 
     public:
         using GlobAlloc::operator new;
