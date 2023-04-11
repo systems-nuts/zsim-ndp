@@ -1,0 +1,3 @@
+Pin: pin-3.11-97998-7ecce2dac
+Copyright 2002-2019 Intel Corporation.
+E:  Unable to load /scorpio/home/tianby/PIMBridge/zsim/build/opt/libzsim.so: dlopen failed: cannot locate symbol "_ZN12task_support14TaskTimingCoreC1EP11FilterCacheS2_jRSbIcSt11char_traitsIcE12StlGlobAllocIcEEPNS_8TaskUnitE" referenced by "/scorpio/home/tianby/PIMBridge/zsim/build/opt/libzsim.so"...

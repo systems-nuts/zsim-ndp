@@ -61,7 +61,11 @@
 #include "trace_driver.h"
 #include "virt/virt.h"
 
+#include "task_support/task.h"
+#include "task_support/task_unit.h"
+
 using namespace std;
+using namespace task_support;
 
 //#include <signal.h> //can't include this, conflicts with PIN's
 
@@ -104,6 +108,8 @@ uint32_t procIdx;
 uint32_t lineBits; //process-local for performance, but logically global
 uint32_t pageBits; //process-local for performance, but logically global
 Address procMask;
+uint64_t allFinishTask;
+uint64_t allEnqueueTask;
 
 static ProcessTreeNode* procTreeNode;
 
@@ -147,6 +153,10 @@ VOID SimThreadFini(THREADID tid);
 VOID SimEnd();
 
 VOID HandleMagicOp(THREADID tid, ADDRINT op);
+VOID HandleMagicOpConstContext(THREADID tid, ADDRINT op, CONTEXT* ctxt);
+VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt);
+VOID HandleTaskDequeueSetupMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt);
+VOID HandleTaskEnqueueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt);
 
 VOID FakeCPUIDPre(THREADID tid, REG eax, REG ecx);
 VOID FakeCPUIDPost(THREADID tid, ADDRINT* eax, ADDRINT* ebx, ADDRINT* ecx, ADDRINT* edx); //REG* eax, REG* ebx, REG* ecx, REG* edx);
@@ -495,6 +505,19 @@ VOID EndOfPhaseActions() {
     zinfo->contentionSim->simulatePhase(zinfo->globPhaseCycles + zinfo->phaseLength);
     zinfo->eventQueue->tick();
     zinfo->profSimTime->transition(PROF_BOUND);
+
+    if (zinfo->TASK_BASED && !zinfo->ALL_THREAD_READY) {
+        if (zinfo->sched->getThreadsCount() == zinfo->numCores) {
+            zinfo->ALL_THREAD_READY = true;
+            zinfo->BEGIN_TASK_EXECUTION = true;
+            info("BEGIN TASK EXECUTION");
+            zinfo->rootStat->reset();
+            for (uint32_t i = 0; i < zinfo->numCores; ++i) {
+                zinfo->cores[i]->setBeginCycle();
+            }
+        } 
+        return;
+    }
 }
 
 
@@ -590,6 +613,14 @@ VOID Instruction(INS ins) {
     if (INS_IsXchg(ins) && INS_OperandReg(ins, 0) == REG_RCX && INS_OperandReg(ins, 1) == REG_RCX) {
         //info("Instrumenting magic op");
         INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) HandleMagicOp, IARG_THREAD_ID, IARG_REG_VALUE, REG_ECX, IARG_END);
+    }
+    if (INS_IsXchg(ins) && INS_OperandReg(ins, 0) == REG_RDX && INS_OperandReg(ins, 1) == REG_RDX) {
+        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) HandleMagicOpConstContext, IARG_THREAD_ID, IARG_REG_VALUE, 
+            REG_ECX, IARG_CONST_CONTEXT, IARG_END);
+    }
+    if (INS_IsXchg(ins) && INS_OperandReg(ins, 0) == REG_RDI && INS_OperandReg(ins, 1) == REG_RDI) {
+        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) HandleTaskDequeueMagicOp, IARG_THREAD_ID, IARG_REG_VALUE, 
+            REG_ECX, IARG_CONTEXT, IARG_END);
     }
 
     if (INS_Opcode(ins) == XED_ICLASS_CPUID) {
@@ -1145,6 +1176,159 @@ VOID SimEnd() {
 #define ZSIM_MAGIC_OP_ROI_END           (1026)
 #define ZSIM_MAGIC_OP_REGISTER_THREAD   (1027)
 #define ZSIM_MAGIC_OP_HEARTBEAT         (1028)
+#define ZSIM_MAGIC_OP_TASK_ENQUEUE_BEGIN    (1500)
+#define ZSIM_MAGIC_OP_TASK_ENQUEUE_END      (1600)
+#define ZSIM_MAGIC_OP_TASK_DEQUEUE          (1601)
+#define ZSIM_MAGIC_OP_TASK_DEQUEUE_SETUP    (1602)
+#define ZSIM_MAGIC_OP_BEGIN_TASK_RUN        (1701)
+#define ZSIM_MAGIC_OP_WAIT_TASK             (10000)
+
+static uint64_t getRegVal(CONTEXT* ctxt, REG reg) {
+    uint64_t ret = 0;
+    PIN_GetContextRegval(ctxt, reg, (uint8_t*)&ret);
+    return ret;
+}
+
+
+VOID HandleMagicOpConstContext(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
+    // IARG_CONST_CONTEXT
+    // outputRip(ctxt);
+    if (op >= ZSIM_MAGIC_OP_TASK_ENQUEUE_BEGIN && op <= ZSIM_MAGIC_OP_TASK_ENQUEUE_END) {
+        HandleTaskEnqueueMagicOp(tid, op, ctxt);
+    } else {
+        switch (op)
+        {
+        case ZSIM_MAGIC_OP_TASK_DEQUEUE_SETUP:
+            HandleTaskDequeueSetupMagicOp(tid, op, ctxt);
+            break;
+        default:
+            assert_msg(0, "invalid magic op for HandleMagicOpConstContext"); // This should never be accessed
+            break;
+        }
+    }
+}
+
+static void endTaskExecution(THREADID tid, CONTEXT* ctxt, Scheduler::ThreadInfo* curThread) {
+    zinfo->END_TASK_EXECUTION = true;
+    PIN_SetContextRegval(ctxt, REG::REG_RSP, (uint8_t*)&curThread->rspCheckpoint);
+    curThread->rspCheckpoint = 0l;
+    PIN_SetContextRegval(ctxt, REG::REG_RIP, (uint8_t*)&curThread->donePc);
+    PIN_ExecuteAt(ctxt);
+    info("All finish! tid: %d", tid);
+}
+
+VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
+    // info("------------------Handle Dequeue------------------op: %d", op);
+    Scheduler::ThreadInfo* curThread = zinfo->sched->getThreadInfo(procIdx, tid);
+    TaskUnit* curTaskUnit = zinfo->taskUnits[getCid(tid)];
+    if (curThread->curTask != nullptr && !curThread->curTask->isEndTask) {
+        // info("++ FINISH: tid: %d    uid: %d    taskPtrId: %lu   timestamp: %d", 
+        //     tid, getCid(tid), curThread->curTask->taskId, curThread->curTask->timeStamp);
+        curThread->curTask->state = Task::TaskState::COMPLETED;
+        allFinishTask++;
+        curTaskUnit->taskFinish(curThread->curTask);
+        if (allFinishTask % 1000 == 0) {
+            info("FinishTaskNumber: %lu", allFinishTask);
+        }
+    } else if (!curThread->rspCheckpoint) {
+        curThread->rspCheckpoint = getRegVal(ctxt, REG::REG_RSP);
+    }
+
+    TaskPtr taskPtr = nullptr;
+    if (!zinfo->ALL_THREAD_READY) {
+        taskPtr = curTaskUnit->getEndTask();
+    } else {
+        // try dequeue another task
+        taskPtr = curTaskUnit->taskDequeue();
+        assert (taskPtr != nullptr);
+        curThread->curTask = taskPtr;
+    }
+    
+    if (taskPtr->isEndTask) {
+        if (zinfo->taskUnitManager->allFinish()) {
+            endTaskExecution(tid, ctxt, curThread);
+            return;
+        } else {
+            // begin wait. Jump function pointer to the wait-loop
+            // info("tid: %u, cid: %u begin forward", tid, getCid(tid));
+            zinfo->cores[getCid(tid)]->forwardToNextPhase(tid);
+            PIN_SetContextRegval(ctxt, REG::REG_RSP, (uint8_t*)&curThread->rspCheckpoint);
+            PIN_SetContextRegval(ctxt, REG::REG_RIP, (uint8_t*)&curThread->finishPc);
+            PIN_ExecuteAt(ctxt);
+            return;
+        }
+    }
+    // info("-- DEQUEUE: tid: %d    uid: %d    taskPtrId: %lu    timestamp: %lu", 
+    //         tid, getCid(tid), taskPtr->taskId, taskPtr->timeStamp);
+
+    PIN_SetContextRegval(ctxt, REG::REG_RDI, (uint8_t*)&taskPtr->timeStamp);
+    const uint32_t numArgs = taskPtr->args.size();
+    constexpr REG regs[] = {REG::REG_RSI, REG::REG_RDX, REG::REG_RCX,
+                            REG::REG_R8, REG::REG_R9};
+    constexpr uint32_t MAX_REGS = 5;
+    assert(numArgs <= MAX_REGS);
+    for (uint32_t i = 0; i < numArgs; ++i) {
+        PIN_SetContextRegval(ctxt, regs[i], (uint8_t*)&taskPtr->args[i]);
+    }
+    uint64_t originRsp = curThread->rspCheckpoint;
+    uint64_t rsp = originRsp - 512;
+    rsp = (rsp >> lineBits) << lineBits;
+    rsp -= sizeof(uint64_t);
+    uint64_t retAddr = curThread->finishPc;
+    PIN_SafeCopy(reinterpret_cast<void*>(rsp), &retAddr, sizeof(uint64_t));
+
+    PIN_SetContextRegval(ctxt, REG_RSP, (uint8_t*)&rsp);
+    PIN_SetContextRegval(ctxt, REG_RIP, (uint8_t*)&taskPtr->taskFn);
+    PIN_ExecuteAt(ctxt);
+}
+
+VOID HandleTaskDequeueSetupMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
+    // info("------------------Handle Dequeue Setup------------------op: %d", op);
+    zinfo->sched->setThreadFinishPc(procIdx, tid, getRegVal(ctxt, REG_RDI));
+    zinfo->sched->setThreadDonePc(procIdx, tid, getRegVal(ctxt, REG_RDX));
+    // uint32_t uid = getCid(tid);
+    // zinfo->taskUnits[uid]->setThreadId(tid);
+}
+
+VOID HandleTaskEnqueueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
+    // info("------------------Handle Enqueue------------------op: %d", op);
+    const uint32_t numArgs = op - ZSIM_MAGIC_OP_TASK_ENQUEUE_BEGIN;
+    constexpr REG regs[] = {REG::REG_RDI, REG::REG_RSI, REG::REG_RDX,
+                            REG::REG_R8,  REG::REG_R9,  REG::REG_R10,
+                            REG::REG_R11, REG::REG_R12};
+    uint32_t curReg = 0;
+    const uint64_t taskFn = getRegVal(ctxt, regs[curReg++]);
+    uint64_t ts = getRegVal(ctxt, regs[curReg++]);
+    Hint* hintPtr = (Hint*)getRegVal(ctxt, regs[curReg++]);
+    TaskPtr t;
+    std::vector<uint64_t> args;
+    int location = hintPtr->location;
+    if (op == ZSIM_MAGIC_OP_TASK_ENQUEUE_END) {
+        // initialization, is last task
+        assert(location >= 0);
+        t = new Task(allEnqueueTask++, taskFn, ts, args, true, hintPtr); 
+        zinfo->taskUnits[location]->setEndTask(t);
+    } else {
+        for (uint32_t i = 0; i < numArgs; ++i) {
+            uint64_t regVal = getRegVal(ctxt, regs[curReg++]);
+            args.push_back(regVal);
+        }
+        t = new Task(allEnqueueTask++, taskFn, ts, args, false, hintPtr); 
+        uint32_t uid = getCid(tid);
+        if (location >= 0) {
+            uid = location;
+        } else if (location == -1) {
+            TaskUnit* tu = zinfo->taskUnits[uid];
+            uid = tu->chooseEnqueueLocation(t);
+        } else {
+            assert_msg(0, "invalid enqueue location");
+        }
+        // info("-- ENQUEUE: tid: %d    uid: %d    taskPtrId: %lu    timestamp: %lu", 
+        //     tid, uid, t->taskId, t->timeStamp);
+        zinfo->taskUnits[uid]->taskEnqueue(t);
+    }
+}
+
 
 VOID HandleMagicOp(THREADID tid, ADDRINT op) {
     switch (op) {
@@ -1209,6 +1393,8 @@ VOID HandleMagicOp(THREADID tid, ADDRINT op) {
         case 1031:
         case 1032:
         case 1033:
+            return;
+        case ZSIM_MAGIC_OP_BEGIN_TASK_RUN:
             return;
         default:
             panic("Thread %d issued unknown magic op %ld!", tid, op);
@@ -1577,6 +1763,12 @@ int main(int argc, char *argv[]) {
     lineBits = ilog2(zinfo->lineSize);
     pageBits = ilog2(zinfo->pageSize);
     procMask = ((uint64_t)procIdx) << (64-lineBits);
+
+    allFinishTask = 0;
+    allEnqueueTask = 0;
+    zinfo->ALL_THREAD_READY = false;
+    zinfo->BEGIN_TASK_EXECUTION = false;
+    zinfo->END_TASK_EXECUTION = false;
 
     //Initialize process-local per-thread state, even if ThreadStart does so later
     for (uint32_t i = 0; i < MAX_THREADS; i++) {

@@ -55,7 +55,7 @@ def buildSim(cppFlags, dir, type, pgo=None):
     # NOTE: Original Pin flags included -fno-strict-aliasing, but zsim does not do type punning
     # NOTE (dsm 16 Apr 2015): Update flags code to support Pin 2.14 while retaining backwards compatibility
     # NOTE (gaomy May 2019): Set ABI version
-    env["CPPFLAGS"] += " -g -std=c++0x -Wall -Wno-unknown-pragmas -fomit-frame-pointer -fno-stack-protector"
+    env["CPPFLAGS"] += " -g -std=c++0x -Wall -Wno-unknown-pragmas -Wno-unused-function -fomit-frame-pointer -fno-stack-protector"
     env["CPPFLAGS"] += " -MMD -DBIGARRAY_MULTIPLIER=1 -DUSING_XED -DTARGET_IA32E -DHOST_IA32E -fPIC -DTARGET_LINUX"
     env["CPPFLAGS"] += " -fabi-version=2"
 

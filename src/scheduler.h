@@ -44,6 +44,8 @@
 #include "stats.h"
 #include "zsim.h"
 
+#include "task_support/task.h"
+
 /**
  * TODO (dsm): This class is due for a heavy pass or rewrite. Some things are more complex than they should:
  * - The OUT state is unnecessary. It is done as a weak link between a thread that left and its context to preserve affinity, but
@@ -89,10 +91,15 @@ class Scheduler : public GlobAlloc, public Callee {
             uint32_t wokenUp;
         };
 
+    public:
         struct ThreadInfo : GlobAlloc, InListNode<ThreadInfo> {
             const uint32_t gid;
             const uint32_t linuxPid;
             const uint32_t linuxTid;
+            uintptr_t finishPc, donePc;
+            uintptr_t rspCheckpoint;
+            uint64_t startIdleCycle;
+            task_support::TaskPtr curTask;
 
             ThreadState state;
             uint32_t cid; //only current if RUNNING; otherwise, it's the last one used.
@@ -127,9 +134,32 @@ class Scheduler : public GlobAlloc, public Callee {
                 fakeLeave = nullptr;
                 flWord = 0;
                 futexJoin.action = FJA_NONE;
+
+                finishPc = 0;
+                donePc = 0;
+                rspCheckpoint = 0;
+                startIdleCycle = 0;
+                curTask = nullptr;
             }
         };
 
+        ThreadInfo* getThreadInfo (uint32_t pid, uint32_t tid) {
+            uint64_t gid = this->getGid(pid, tid);
+            return this->gidMap[gid];
+        }
+
+        void setThreadFinishPc(uint32_t pid, uint32_t tid, uint64_t finishPc) {
+            this->getThreadInfo(pid, tid)->finishPc = finishPc;
+        } 
+
+        void setThreadDonePc(uint32_t pid, uint32_t tid, uint64_t donePc) {
+            this->getThreadInfo(pid, tid)->donePc = donePc;
+        } 
+
+        uint32_t getThreadsCount() {
+            return this->scheduledThreads;
+        }
+    private:
         struct ContextInfo : InListNode<ContextInfo> {
             uint32_t cid;
             ContextState state;

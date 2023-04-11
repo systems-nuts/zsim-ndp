@@ -30,12 +30,13 @@
 #include "core_recorder.h"
 #include "event_recorder.h"
 #include "memory_hierarchy.h"
+#include "filter_cache.h"
 #include "pad.h"
 
 class FilterCache;
 
 class TimingCore : public Core {
-    private:
+    protected:
         FilterCache* l1i;
         FilterCache* l1d;
 

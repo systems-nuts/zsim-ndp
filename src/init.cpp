@@ -86,7 +86,12 @@
 #include "weave_md1_mem.h" //validation, could be taken out...
 #include "zsim.h"
 
+#include "task_support/task.h"
+#include "task_support/task_unit.h"
+#include "task_support/task_timing_core.h"
+
 using namespace std;
+using namespace task_support;
 
 extern void EndOfPhaseActions(); //in zsim.cpp
 
@@ -1031,6 +1036,7 @@ static void InitSystem(Config& config) {
                 TimingCore* timingCores;
                 OOOCore* oooCores;
                 NullCore* nullCores;
+                TaskTimingCore* taskTimingCores;
             };
             if (type == "Simple") {
                 simpleCores = gm_memalign<SimpleCore>(CACHE_LINE_BYTES, cores);
@@ -1041,6 +1047,8 @@ static void InitSystem(Config& config) {
                 zinfo->oooDecode = true; //enable uop decoding, this is false by default, must be true if even one OOO cpu is in the system
             } else if (type == "Null") {
                 nullCores = gm_memalign<NullCore>(CACHE_LINE_BYTES, cores);
+            } else if (type == "TaskTiming") {
+                taskTimingCores = gm_memalign<TaskTimingCore>(CACHE_LINE_BYTES, cores);
             } else {
                 panic("%s: Invalid core type %s", group, type.c_str());
             }
@@ -1088,13 +1096,20 @@ static void InitSystem(Config& config) {
                         zinfo->eventRecorders[coreIdx] = tcore->getEventRecorder();
                         zinfo->eventRecorders[coreIdx]->setSourceId(coreIdx);
                         core = tcore;
+                    } else if (type == "TaskTiming") {
+                        uint32_t domain = j*zinfo->numDomains/cores;
+                        TaskTimingCore* tcore = new (&taskTimingCores[j]) TaskTimingCore(ic, dc, domain, 
+                            name, zinfo->taskUnits[j]);
+                        zinfo->eventRecorders[coreIdx] = tcore->getEventRecorder();
+                        zinfo->eventRecorders[coreIdx]->setSourceId(coreIdx);
+                        core = tcore;
                     } else {
                         assert(type == "OOO");
                         OOOCore* ocore = new (&oooCores[j]) OOOCore(ic, dc, name);
                         zinfo->eventRecorders[coreIdx] = ocore->getEventRecorder();
                         zinfo->eventRecorders[coreIdx]->setSourceId(coreIdx);
                         core = ocore;
-                    }
+                    } 
                     coreMap[group].push_back(core);
                     coreIdx++;
                 }
@@ -1299,6 +1314,32 @@ static void InitGlobalStats() {
     zinfo->rootStat->append(phaseStat);
 }
 
+static TaskUnit* buildTaskUnit(Config& config, const std::string& type, 
+                               uint32_t id) {
+    if (type == "Simple") {
+        return new SimpleTaskUnit(id, zinfo->taskUnitManager);
+    } else {
+        panic("unsupported task unit type: %s", type.c_str());
+    }
+}
+
+static void InitTaskSupport(Config& config) {
+    zinfo->taskUnitManager = nullptr;
+    zinfo->taskUnits = nullptr;
+    zinfo->TASK_BASED = config.get<bool>("sys.taskSupport.enable", false);
+    if (!zinfo->TASK_BASED) { return; }
+    zinfo->taskUnitManager = new TaskUnitManager();
+    zinfo->taskUnits = new TaskUnit*[zinfo->numCores];
+    std::string taskUnitType = 
+        config.get<const char*>("sys.taskSupport.taskUnitType", "Simple");
+
+    for (uint32_t i = 0; i < zinfo->numCores; ++i) {
+        zinfo->taskUnits[i] = buildTaskUnit(config, taskUnitType, i);
+        zinfo->taskUnitManager->addTaskUnit(zinfo->taskUnits[i]);
+    }
+
+}
+
 
 void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     zinfo = gm_calloc<GlobSimInfo>();
@@ -1426,6 +1467,8 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
 
     //NUMA map
     InitNUMA(config);
+
+    InitTaskSupport(config);
 
     //Caches, cores, memory controllers
     InitSystem(config);

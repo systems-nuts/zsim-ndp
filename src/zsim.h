@@ -32,6 +32,10 @@
 #include "debug.h"
 #include "locks.h"
 #include "pad.h"
+#include "task_support/task_unit.h"
+
+using task_support::TaskUnitManager;
+using task_support::TaskUnit;
 
 class Core;
 class NUMAMap;
@@ -50,6 +54,8 @@ class PortVirtualizer;
 class VectorCounter;
 class AccessTraceWriter;
 class TraceDriver;
+class TaskUnitManager;
+class TaskUnit;
 template <typename T> class g_vector;
 
 struct ClockDomainInfo {
@@ -188,6 +194,14 @@ struct GlobSimInfo {
     // Trace-driven simulation (no cores)
     bool traceDriven;
     TraceDriver* traceDriver;
+
+    // Task support
+    bool TASK_BASED;
+    TaskUnitManager* taskUnitManager;
+    TaskUnit** taskUnits;
+    bool ALL_THREAD_READY;
+    bool BEGIN_TASK_EXECUTION;
+    bool END_TASK_EXECUTION;
 };
 
 

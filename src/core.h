@@ -67,6 +67,7 @@ class Core : public GlobAlloc {
         uint64_t lastUpdateCycles;
         uint64_t lastUpdateInstrs;
 
+
     protected:
         g_string name;
 
@@ -90,6 +91,19 @@ class Core : public GlobAlloc {
         virtual void cSimEnd() {}
 
         virtual InstrFuncPtrs GetFuncPtrs() = 0;
+
+        //Task-based execution
+        virtual bool supportTaskExecution() {
+            return false;
+        }
+        virtual void setBeginCycle() {
+            if (!this->supportTaskExecution()) {
+                panic("Call setBeginCycle without task support!");
+            }
+        }
+        virtual void forwardToNextPhase(THREADID tid) {
+            panic("Call setBeginCycle without task support!");
+        }
 };
 
 #endif  // CORE_H_

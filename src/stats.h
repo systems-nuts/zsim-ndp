@@ -108,6 +108,10 @@ class Stat : public GlobAlloc {
             return _desc;
         }
 
+        virtual void reset() {
+            return;
+        }
+
     protected:
         virtual void initStat(const char* name, const char* desc) {
             assert(name);
@@ -182,6 +186,14 @@ class AggregateStat : public Stat {
         // Access-while-mutable interface
         uint32_t curSize() const {
             return _children.size();
+        }
+
+        virtual void reset() override {
+            g_vector<Stat*>::iterator it;
+            for (it = _children.begin(); it != _children.end(); it++) {
+                Stat* s = *it;
+                s->reset();
+            }
         }
 
 };
@@ -264,6 +276,10 @@ class Counter : public ScalarStat {
         inline void set(uint64_t data) {
             _count = data;
         }
+
+         void reset() override {
+            _count = 0;
+        }
 };
 
 class VectorCounter : public VectorStat {
@@ -313,6 +329,13 @@ class VectorCounter : public VectorStat {
 
         inline uint32_t size() const {
             return _counters.size();
+        }
+
+        void reset() {
+            // std::cout << name() << std::endl;
+            for (uint32_t i = 0; i < _counters.size(); i++) {
+                _counters[i] = 0;
+            }
         }
 };
 
