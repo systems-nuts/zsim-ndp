@@ -6,5 +6,6 @@ zsim.h5
 zsim-ev.h5
 zsim-cmp.h5
 out.cfg
+pin.log
 heartbeat
 myPatchRoot*
