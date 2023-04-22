@@ -24,6 +24,7 @@ public:
         this->beginCycle = cRec.getUnhaltedCycles(curCycle);
     }
     void forwardToNextPhase(THREADID tid) override;
+    bool bypassCache() { return true; }
  private:
     inline void loadAndRecord(Address addr);
     inline void storeAndRecord(Address addr);

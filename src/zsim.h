@@ -32,10 +32,14 @@
 #include "debug.h"
 #include "locks.h"
 #include "pad.h"
+#include "task_support/comm_module.h"
 #include "task_support/task_unit.h"
+#include "process_local_val.h"
 
 using task_support::TaskUnitManager;
 using task_support::TaskUnit;
+using task_support::PimBridgeTaskUnit;
+using task_support::CommModuleBase;
 
 class Core;
 class NUMAMap;
@@ -56,6 +60,9 @@ class AccessTraceWriter;
 class TraceDriver;
 class TaskUnitManager;
 class TaskUnit;
+class CommModuleBase;
+// class CommModule;
+// class BottomCommModule;
 template <typename T> class g_vector;
 
 struct ClockDomainInfo {
@@ -197,20 +204,25 @@ struct GlobSimInfo {
 
     // Task support
     bool TASK_BASED;
-    TaskUnitManager* taskUnitManager;
-    TaskUnit** taskUnits;
-    bool ALL_THREAD_READY;
     bool BEGIN_TASK_EXECUTION;
     bool END_TASK_EXECUTION;
+    TaskUnitManager* taskUnitManager;
+    g_vector<PimBridgeTaskUnit*> taskUnits;
+    g_vector<g_vector<CommModuleBase*>> commModules;
+    uint32_t numBanks;
+    uint32_t numRanks;
+    uint32_t numDimms;
 };
 
 
 //Process-wide global variables, defined in zsim.cpp
 extern Core* cores[MAX_THREADS]; //tid->core array
-extern uint32_t procIdx;
-extern uint32_t lineBits; //process-local for performance, but logically global
-extern uint32_t pageBits; //process-local for performance, but logically global
-extern uint64_t procMask;
+
+// tby: I move these four to process_local_val.h
+// extern uint32_t procIdx;
+// extern uint32_t lineBits; //process-local for performance, but logically global
+// extern uint32_t pageBits; //process-local for performance, but logically global
+// extern uint64_t procMask;
 
 extern GlobSimInfo* zinfo;
 

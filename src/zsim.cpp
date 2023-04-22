@@ -63,6 +63,7 @@
 
 #include "task_support/task.h"
 #include "task_support/task_unit.h"
+#include "task_support/gather_scheme.h"
 
 using namespace std;
 using namespace task_support;
@@ -506,9 +507,8 @@ VOID EndOfPhaseActions() {
     zinfo->eventQueue->tick();
     zinfo->profSimTime->transition(PROF_BOUND);
 
-    if (zinfo->TASK_BASED && !zinfo->ALL_THREAD_READY) {
+    if (zinfo->TASK_BASED && !zinfo->BEGIN_TASK_EXECUTION) {
         if (zinfo->sched->getThreadsCount() == zinfo->numCores) {
-            zinfo->ALL_THREAD_READY = true;
             zinfo->BEGIN_TASK_EXECUTION = true;
             info("BEGIN TASK EXECUTION");
             zinfo->rootStat->reset();
@@ -518,6 +518,15 @@ VOID EndOfPhaseActions() {
         } 
         return;
     }
+
+    if (!zinfo->BEGIN_TASK_EXECUTION) { return; }
+
+    for (auto l : zinfo->commModules) {
+        for (auto c : l) {
+            c->communicate();
+        }
+    }
+
 }
 
 
@@ -1217,6 +1226,17 @@ static void endTaskExecution(THREADID tid, CONTEXT* ctxt, Scheduler::ThreadInfo*
     info("All finish! tid: %d", tid);
 }
 
+static bool allCommModuleEmpty() {
+    for (auto l : zinfo->commModules) {
+        for (auto c : l) {
+            if (!c->isEmpty()) { 
+                return false; 
+            }
+        }
+    }
+    return true;
+}
+
 VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
     // info("------------------Handle Dequeue------------------op: %d", op);
     Scheduler::ThreadInfo* curThread = zinfo->sched->getThreadInfo(procIdx, tid);
@@ -1235,7 +1255,7 @@ VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
     }
 
     TaskPtr taskPtr = nullptr;
-    if (!zinfo->ALL_THREAD_READY) {
+    if (!zinfo->BEGIN_TASK_EXECUTION) {
         taskPtr = curTaskUnit->getEndTask();
     } else {
         // try dequeue another task
@@ -1245,7 +1265,7 @@ VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
     }
     
     if (taskPtr->isEndTask) {
-        if (zinfo->taskUnitManager->allFinish()) {
+        if (zinfo->taskUnitManager->allFinish() && allCommModuleEmpty()) {
             endTaskExecution(tid, ctxt, curThread);
             return;
         } else {
@@ -1302,9 +1322,9 @@ VOID HandleTaskEnqueueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
     Hint* hintPtr = (Hint*)getRegVal(ctxt, regs[curReg++]);
     TaskPtr t;
     std::vector<uint64_t> args;
-    int location = hintPtr->location;
     if (op == ZSIM_MAGIC_OP_TASK_ENQUEUE_END) {
-        // initialization, is last task
+        // initialization, is end task
+        int location = hintPtr->location;
         assert(location >= 0);
         t = new Task(allEnqueueTask++, taskFn, ts, args, true, hintPtr); 
         zinfo->taskUnits[location]->setEndTask(t);
@@ -1315,17 +1335,8 @@ VOID HandleTaskEnqueueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
         }
         t = new Task(allEnqueueTask++, taskFn, ts, args, false, hintPtr); 
         uint32_t uid = getCid(tid);
-        if (location >= 0) {
-            uid = location;
-        } else if (location == -1) {
-            TaskUnit* tu = zinfo->taskUnits[uid];
-            uid = tu->chooseEnqueueLocation(t);
-        } else {
-            assert_msg(0, "invalid enqueue location");
-        }
-        // info("-- ENQUEUE: tid: %d    uid: %d    taskPtrId: %lu    timestamp: %lu", 
-        //     tid, uid, t->taskId, t->timeStamp);
-        zinfo->taskUnits[uid]->taskEnqueue(t);
+        TaskUnit* tu = zinfo->taskUnits[uid];
+        tu->assignNewTask(t, hintPtr);
     }
 }
 
@@ -1766,7 +1777,6 @@ int main(int argc, char *argv[]) {
 
     allFinishTask = 0;
     allEnqueueTask = 0;
-    zinfo->ALL_THREAD_READY = false;
     zinfo->BEGIN_TASK_EXECUTION = false;
     zinfo->END_TASK_EXECUTION = false;
 

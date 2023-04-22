@@ -213,9 +213,9 @@ DDRMemory::DDRMemory(uint32_t _lineSize, uint32_t _colSize, uint32_t _ranksPerCh
     }
     rowShift = startBit;  // row has no mask
 
-    info("%s: Address mapping %s row %d:%ld col %d:%d rank %d:%d bank %d:%d",
-            name.c_str(), addrMapping, 63, rowShift, ilog2(colMask << colShift), colShift,
-            ilog2(rankMask << rankShift), rankShift, ilog2(bankMask << bankShift), bankShift);
+    // info("%s: Address mapping %s row %d:%ld col %d:%d rank %d:%d bank %d:%d",
+    //         name.c_str(), addrMapping, 63, rowShift, ilog2(colMask << colShift), colShift,
+    //         ilog2(rankMask << rankShift), rankShift, ilog2(bankMask << bankShift), bankShift);
 
     // Weave phase events
     new RefreshEvent(this, memToSysCycle(tREFI), domain);

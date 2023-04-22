@@ -89,6 +89,9 @@
 #include "task_support/task.h"
 #include "task_support/task_unit.h"
 #include "task_support/task_timing_core.h"
+#include "task_support/comm_module.h"
+#include "task_support/gather_scheme.h"
+#include "task_support/scatter_scheme.h"
 
 using namespace std;
 using namespace task_support;
@@ -1314,22 +1317,65 @@ static void InitGlobalStats() {
     zinfo->rootStat->append(phaseStat);
 }
 
-static TaskUnit* buildTaskUnit(Config& config, const std::string& type, 
-                               uint32_t id) {
-    if (type == "Simple") {
-        return new SimpleTaskUnit(id, zinfo->taskUnitManager);
+static PimBridgeTaskUnit* buildTaskUnit(Config& config, 
+                                        const std::string& type, 
+                                        uint32_t id) {
+    assert(type == "PimBridge");
+    std::stringstream ss; 
+    ss << "unit-" << id;
+    return new PimBridgeTaskUnit(ss.str(), id, zinfo->taskUnitManager);
+    // if (type == "OneQueue") {
+    //     return new OneQueueTaskUnit(id, zinfo->taskUnitManager);
+    // } else if (type == "PimBridge") {
+    //     return new PimBridgeTaskUnit(id, zinfo->taskUnitManager);
+    // } else {
+    //     panic("unsupported task unit type: %s", type.c_str());
+    // }
+}
+
+static GatherScheme* buildGatherScheme(Config& config, const std::string& prefix) {
+    std::string gatherTrigger = config.get<const char*>(prefix + "trigger", "Whenever");
+    uint32_t packetSize = config.get<uint32_t>(prefix + "packetSize", 8);
+    GatherScheme* gatherScheme;
+    if (gatherTrigger == "Whenever") {
+        gatherScheme = new WheneverGather(packetSize);
+    } else if (gatherTrigger == "Interval") {
+        uint32_t interval = config.get<uint32_t>(prefix + "interval", 0);
+        gatherScheme = new IntervalGather(packetSize, interval);
+    } else if (gatherTrigger == "OnDemand") {
+        uint32_t threshold = config.get<uint32_t>(prefix + "threshold", 0);
+        gatherScheme = new OnDemandGather(packetSize, threshold);
     } else {
-        panic("unsupported task unit type: %s", type.c_str());
+        panic("unsupported gather scheme: %s", gatherTrigger.c_str());
     }
+    return gatherScheme;
+}
+
+static ScatterScheme* buildScatterScheme(Config& config, const std::string& prefix) {
+    std::string scatterTrigger = config.get<const char*>(prefix + "trigger", "AfterGather");
+    uint32_t packetSize = config.get<uint32_t>(prefix + "packetSize", 8);
+    ScatterScheme* scatterScheme;
+    if (scatterTrigger == "AfterGather") {
+        scatterScheme = new AfterGatherScatter(packetSize);
+    } else if (scatterTrigger == "Interval") {
+        uint32_t interval = config.get<uint32_t>(prefix + "interval", 0);
+        scatterScheme = new IntervalScatter(packetSize, interval);
+    } else if (scatterTrigger == "OnDemand") {
+        uint32_t threshold = config.get<uint32_t>(prefix + "threshold", 0);
+        scatterScheme = new OnDemandScatter(packetSize, threshold);
+    } else {
+        panic("unsupported gather scheme: %s", scatterTrigger.c_str());
+    }
+    return scatterScheme;
 }
 
 static void InitTaskSupport(Config& config) {
     zinfo->taskUnitManager = nullptr;
-    zinfo->taskUnits = nullptr;
+
     zinfo->TASK_BASED = config.get<bool>("sys.taskSupport.enable", false);
     if (!zinfo->TASK_BASED) { return; }
     zinfo->taskUnitManager = new TaskUnitManager();
-    zinfo->taskUnits = new TaskUnit*[zinfo->numCores];
+    zinfo->taskUnits.resize(zinfo->numCores);
     std::string taskUnitType = 
         config.get<const char*>("sys.taskSupport.taskUnitType", "Simple");
 
@@ -1337,6 +1383,75 @@ static void InitTaskSupport(Config& config) {
         zinfo->taskUnits[i] = buildTaskUnit(config, taskUnitType, i);
         zinfo->taskUnitManager->addTaskUnit(zinfo->taskUnits[i]);
     }
+
+    AggregateStat* tuStat = new AggregateStat(true);
+    tuStat->init("taskUnit", "Task unit stats");
+    for (auto tu : zinfo->taskUnits) {
+        tu->initStats(tuStat);
+    }
+    zinfo->rootStat->append(tuStat);
+}
+
+static void buildCommModules(Config& config) {
+    std::vector<const char*> commModuleNames;
+    config.subgroups("sys.pimBridge.commModules", commModuleNames);
+
+    uint32_t curLevel = 0;
+    uint32_t lastNumModules = 0;
+    zinfo->commModules.resize(commModuleNames.size());
+
+    AggregateStat* commStat = new AggregateStat(true);
+    commStat->init("commModule", "Communication module stats");
+
+    for (const char* mdl : commModuleNames) {
+        info("Building commModule for %s", mdl);
+
+        std::string moduleName(mdl);
+        std::string prefix = "sys.pimBridge.commModules." + moduleName + ".";
+
+        uint32_t numModules = config.get<uint32_t>(prefix + "numModules");
+        info("Number of modules: %u", numModules);
+        bool enableInterflow = config.get<bool>(prefix + "enableInterflow") ;
+
+        zinfo->commModules[curLevel].resize(numModules);
+
+        if (curLevel == 0) {
+            AggregateStat* bottomCommStat = new AggregateStat(true);
+            bottomCommStat->init("bottomCommModule", "Bottom communication module stats");
+
+            assert(numModules == zinfo->numCores);
+            assert(numModules == zinfo->numBanks);
+            for (uint32_t i = 0; i < numModules; ++i) {
+                zinfo->commModules[curLevel][i] = new BottomCommModule(0, i, 
+                    enableInterflow, zinfo->taskUnits[i]);
+                zinfo->commModules[curLevel][i]->initStats(bottomCommStat);
+            }
+            zinfo->rootStat->append(bottomCommStat);
+        } else {
+            GatherScheme* gatherScheme = buildGatherScheme(config, prefix + "gatherScheme.");
+            ScatterScheme* scatterScheme = buildScatterScheme(config, prefix + "scatterScheme.");
+            info("finish build gather scatter");
+            for (uint32_t i = 0; i < numModules; ++i) {
+                uint32_t childNum = lastNumModules / numModules;
+                info("child num: %u", childNum);
+                zinfo->commModules[curLevel][i] = 
+                    new CommModule(curLevel, i, enableInterflow, 
+                                   i * childNum, (i+1)*childNum, 
+                                   gatherScheme, scatterScheme);
+                zinfo->commModules[curLevel][i]->initStats(commStat);
+            }
+        }
+        curLevel += 1;
+        lastNumModules = numModules;
+    }
+    zinfo->rootStat->append(commStat);
+}
+
+static void InitPimBridge(Config& config) {
+    zinfo->numBanks = config.get<uint32_t>("sys.pimBridge.numBanks", 0);
+    zinfo->numRanks = config.get<uint32_t>("sys.pimBridge.numRanks", 0);
+    zinfo->numDimms = config.get<uint32_t>("sys.pimBridge.numDimms", 0);
+    buildCommModules(config);
 
 }
 
@@ -1469,6 +1584,9 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     InitNUMA(config);
 
     InitTaskSupport(config);
+    InitPimBridge(config);
+
+    info("finish building");
 
     //Caches, cores, memory controllers
     InitSystem(config);

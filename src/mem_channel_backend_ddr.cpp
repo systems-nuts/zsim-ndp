@@ -24,17 +24,17 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
       powerDownCycles(_powerDownCycles), queueDepth(_queueDepth), deferWrites(_deferWrites),
       maxRowHits(_maxRowHits) {
 
-    info("%s: %u ranks x %u banks (%u bank groups).", name.c_str(), rankCount, bankCount, bgrpCount);
-    info("%s: page size %u bytes, %u devices per rank, burst %u bits from each device.",
-            name.c_str(), pageSize, devicesPerRank, burstSize);
-    info("%s: tBL = %u, tCAS = %u, tCCD/_S = %u/%u, tCWL = %u, tRAS = %u, tRCD = %u",
-            name.c_str(), t.BL, t.CAS, t.CCD, t.CCD_S, t.CWL, t.RAS, t.RCD);
-    info("%s: tRP = %u, tRRD/_S = %u/%u, tRTP = %u, tWR = %u, tWTR/_S = %u/%u",
-            name.c_str(), t.RP, t.RRD, t.RRD_S, t.RTP, t.WR, t.WTR, t.WTR_S);
-    info("%s: tRFC = %u, tREFI = %u, tRPab = %u, tFAW = %u, tRTRS = %u, tCMD = %u, tXP = %u",
-            name.c_str(), t.RFC, t.REFI, t.RPab, t.FAW, t.RTRS, t.CMD, t.XP);
-    info("%s: VDD = %u, IDD0 = %u, IDD2N = %u, IDD2P = %u, IDD3N = %u, IDD3P = %u, IDD4R = %u, IDD4W = %u, IDD5 = %u",
-            name.c_str(), p.VDD, p.IDD0, p.IDD2N, p.IDD2P, p.IDD3N, p.IDD3P, p.IDD4R, p.IDD4W, p.IDD5);
+    // info("%s: %u ranks x %u banks (%u bank groups).", name.c_str(), rankCount, bankCount, bgrpCount);
+    // info("%s: page size %u bytes, %u devices per rank, burst %u bits from each device.",
+    //         name.c_str(), pageSize, devicesPerRank, burstSize);
+    // info("%s: tBL = %u, tCAS = %u, tCCD/_S = %u/%u, tCWL = %u, tRAS = %u, tRCD = %u",
+    //         name.c_str(), t.BL, t.CAS, t.CCD, t.CCD_S, t.CWL, t.RAS, t.RCD);
+    // info("%s: tRP = %u, tRRD/_S = %u/%u, tRTP = %u, tWR = %u, tWTR/_S = %u/%u",
+    //         name.c_str(), t.RP, t.RRD, t.RRD_S, t.RTP, t.WR, t.WTR, t.WTR_S);
+    // info("%s: tRFC = %u, tREFI = %u, tRPab = %u, tFAW = %u, tRTRS = %u, tCMD = %u, tXP = %u",
+    //         name.c_str(), t.RFC, t.REFI, t.RPab, t.FAW, t.RTRS, t.CMD, t.XP);
+    // info("%s: VDD = %u, IDD0 = %u, IDD2N = %u, IDD2P = %u, IDD3N = %u, IDD3P = %u, IDD4R = %u, IDD4W = %u, IDD5 = %u",
+    //         name.c_str(), p.VDD, p.IDD0, p.IDD2N, p.IDD2P, p.IDD3N, p.IDD3P, p.IDD4R, p.IDD4W, p.IDD5);
 
     assert_msg(channelWidthBits % deviceIOBits == 0,
             "Channel width (%u given) must be multiple of device IO width (%u given).",

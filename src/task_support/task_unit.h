@@ -3,8 +3,11 @@
 #include "galloc.h"
 #include "g_std/g_vector.h"
 #include "locks.h"
+#include "stats.h"
+#include "task_support/hint.h"
 #include "task_support/task.h"
-
+#include "task_support/comm_packet.h"
+#include "task_support/comm_module.h"
 
 namespace task_support
 {
@@ -13,34 +16,34 @@ class TaskUnitManager;
 
 class TaskUnit : public GlobAlloc {
 protected:
+    std::string name;
+    const uint32_t taskUnitId; 
     TaskUnitManager* tum;
     lock_t tuLock;
     TaskPtr endTask; // when calling taskDequeue when the unit is empty, endTask will be returned
     bool isFinished;
 
 public:
-    const uint32_t taskUnitId; 
-    TaskPtr curTask;
 
-    TaskUnit(uint32_t _tuId, TaskUnitManager* _tum)
-        : tum(_tum), endTask(nullptr), isFinished(false), taskUnitId(_tuId), 
-          curTask(nullptr) {
+    TaskUnit(const std::string& _name, uint32_t _tuId, TaskUnitManager* _tum)
+        : name(_name), taskUnitId(_tuId), tum(_tum), endTask(nullptr), isFinished(false) {
         futex_init(&tuLock);
     };
 
-    ~TaskUnit() {}
+    virtual ~TaskUnit() {}
 
+    virtual void assignNewTask(TaskPtr t, Hint* hint) = 0;
     virtual void taskEnqueue(TaskPtr t) = 0;
     virtual TaskPtr taskDequeue() = 0;
     virtual void taskFinish(TaskPtr t) = 0;
-    virtual uint32_t chooseEnqueueLocation(TaskPtr t) = 0;
 
-    void setEndTask(TaskPtr t) {
-        this->endTask = t;
-    }
-    TaskPtr getEndTask() {
-        return this->endTask;
-    }
+    // Getters and setters
+    void setEndTask(TaskPtr t) { this->endTask = t; }
+    TaskPtr getEndTask() { return this->endTask; }
+    const char* getName() { return name.c_str(); }
+    uint32_t getTaskUnitId() { return this->taskUnitId; }
+
+    virtual void initStats(AggregateStat* parentStat) {}
 };
 
 class TaskUnitManager : public GlobAlloc {
@@ -76,24 +79,30 @@ public:
     }
 };
 
-
-class SimpleTaskUnit : public TaskUnit {
+class PimBridgeTaskUnit : public TaskUnit {
 private:
     std::deque<TaskPtr>* taskQueue;
+    BottomCommModule* commModule;
 public:
-    SimpleTaskUnit(uint32_t _tuId, TaskUnitManager* _tum)
-        : TaskUnit(_tuId, _tum), taskQueue(new std::deque<TaskPtr>()) {}
+    PimBridgeTaskUnit(const std::string& _name, uint32_t _tuId, TaskUnitManager* _tum)
+        : TaskUnit(_name, _tuId, _tum), taskQueue(new std::deque<TaskPtr>()) {}
 
-    ~SimpleTaskUnit() {
+    virtual ~PimBridgeTaskUnit() {
         delete taskQueue;
     }
 
+    void assignNewTask(TaskPtr t, Hint* hint) override;
     void taskEnqueue(TaskPtr t) override;
     TaskPtr taskDequeue() override;
     void taskFinish(TaskPtr t) override;
-    uint32_t chooseEnqueueLocation(TaskPtr t) override {
-        return this->taskUnitId;
+
+    void setCommModule(BottomCommModule* _commModule) {
+        this->commModule = _commModule;
     }
+
+    void initStats(AggregateStat* parentStat) override;
+private:
+    Counter s_EnqueueTasks, s_DequeueTasks, s_FinishTasks, s_GenPackets;
 };
 
     

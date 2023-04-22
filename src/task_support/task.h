@@ -24,6 +24,7 @@ public:
     bool isEndTask;
 
     Hint* hint;
+    uint32_t taskSize = 8;
 
     Task(uint64_t _taskId, uintptr_t _func, uint64_t _ts, 
          const std::vector<uint64_t>& _args, bool _isEnd, Hint* _hint) 
