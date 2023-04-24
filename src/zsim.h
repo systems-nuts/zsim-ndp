@@ -32,14 +32,15 @@
 #include "debug.h"
 #include "locks.h"
 #include "pad.h"
-#include "task_support/comm_module.h"
+#include "comm_support/comm_module.h"
 #include "task_support/task_unit.h"
 #include "process_local_val.h"
+#include "mem_interconnect_interface.h"
 
 using task_support::TaskUnitManager;
 using task_support::TaskUnit;
-using task_support::PimBridgeTaskUnit;
-using task_support::CommModuleBase;
+using pimbridge::PimBridgeTaskUnit;
+using pimbridge::CommModuleBase;
 
 class Core;
 class NUMAMap;
@@ -204,6 +205,7 @@ struct GlobSimInfo {
 
     // Task support
     bool TASK_BASED;
+    bool IS_PIMBRIDGE;
     bool BEGIN_TASK_EXECUTION;
     bool END_TASK_EXECUTION;
     TaskUnitManager* taskUnitManager;
@@ -212,6 +214,7 @@ struct GlobSimInfo {
     uint32_t numBanks;
     uint32_t numRanks;
     uint32_t numDimms;
+    g_vector<MemInterconnectInterface::Endpoint*> toMemEndpoints;
 };
 
 

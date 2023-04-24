@@ -30,6 +30,7 @@
 #include "decoder.h"
 #include "g_std/g_string.h"
 #include "stats.h"
+#include "task_support/task.h"
 
 struct BblInfo {
     uint32_t instrs;
@@ -97,12 +98,16 @@ class Core : public GlobAlloc {
             return false;
         }
         virtual void setBeginCycle() {
-            if (!this->supportTaskExecution()) {
-                panic("Call setBeginCycle without task support!");
-            }
+            panic("Call setBeginCycle without task support!");
         }
         virtual void forwardToNextPhase(THREADID tid) {
             panic("Call setBeginCycle without task support!");
+        }
+        virtual void readTask(task_support::TaskPtr t, uint32_t memId) {
+            panic("Call readTask without task support!");
+        }
+        virtual void storeTask(task_support::TaskPtr t, uint32_t memId) {
+            panic("Call storeTask without task support!");
         }
 };
 

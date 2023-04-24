@@ -52,6 +52,7 @@
 #include "galloc.h"
 #include "init.h"
 #include "log.h"
+#include "numa_map.h"
 #include "pin.H"
 #include "pin_cmd.h"
 #include "process_tree.h"
@@ -63,10 +64,11 @@
 
 #include "task_support/task.h"
 #include "task_support/task_unit.h"
-#include "task_support/gather_scheme.h"
+#include "comm_support/gather_scheme.h"
 
 using namespace std;
 using namespace task_support;
+using namespace pimbridge;
 
 //#include <signal.h> //can't include this, conflicts with PIN's
 
@@ -521,12 +523,16 @@ VOID EndOfPhaseActions() {
 
     if (!zinfo->BEGIN_TASK_EXECUTION) { return; }
 
+    uint64_t curCycle = zinfo->globPhaseCycles + zinfo->phaseLength;
+    uint64_t levelFinishCycle = curCycle;
     for (auto l : zinfo->commModules) {
         for (auto c : l) {
-            c->communicate();
+            uint64_t curFinishCycle = c->communicate(curCycle);
+            levelFinishCycle = curFinishCycle > levelFinishCycle ? 
+                curFinishCycle : levelFinishCycle;
         }
+        curCycle = levelFinishCycle;
     }
-
 }
 
 
@@ -1240,10 +1246,11 @@ static bool allCommModuleEmpty() {
 VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
     // info("------------------Handle Dequeue------------------op: %d", op);
     Scheduler::ThreadInfo* curThread = zinfo->sched->getThreadInfo(procIdx, tid);
-    TaskUnit* curTaskUnit = zinfo->taskUnits[getCid(tid)];
+    uint32_t coreId = getCid(tid);
+    TaskUnit* curTaskUnit = zinfo->taskUnits[coreId];
     if (curThread->curTask != nullptr && !curThread->curTask->isEndTask) {
         // info("++ FINISH: tid: %d    uid: %d    taskPtrId: %lu   timestamp: %d", 
-        //     tid, getCid(tid), curThread->curTask->taskId, curThread->curTask->timeStamp);
+        //     tid, coreId, curThread->curTask->taskId, curThread->curTask->timeStamp);
         curThread->curTask->state = Task::TaskState::COMPLETED;
         allFinishTask++;
         curTaskUnit->taskFinish(curThread->curTask);
@@ -1270,8 +1277,8 @@ VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
             return;
         } else {
             // begin wait. Jump function pointer to the wait-loop
-            // info("tid: %u, cid: %u begin forward", tid, getCid(tid));
-            zinfo->cores[getCid(tid)]->forwardToNextPhase(tid);
+            // info("tid: %u, cid: %u begin forward", tid, coreId);
+            zinfo->cores[coreId]->forwardToNextPhase(tid);
             PIN_SetContextRegval(ctxt, REG::REG_RSP, (uint8_t*)&curThread->rspCheckpoint);
             PIN_SetContextRegval(ctxt, REG::REG_RIP, (uint8_t*)&curThread->finishPc);
             PIN_ExecuteAt(ctxt);
@@ -1279,7 +1286,9 @@ VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
         }
     }
     // info("-- DEQUEUE: tid: %d    uid: %d    taskPtrId: %lu    timestamp: %lu", 
-    //         tid, getCid(tid), taskPtr->taskId, taskPtr->timeStamp);
+    //         tid, coreId, taskPtr->taskId, taskPtr->timeStamp);
+
+    zinfo->cores[coreId]->readTask(taskPtr, zinfo->numaMap->getNodeOfCore(coreId));
 
     PIN_SetContextRegval(ctxt, REG::REG_RDI, (uint8_t*)&taskPtr->timeStamp);
     const uint32_t numArgs = taskPtr->args.size();

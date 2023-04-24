@@ -24,12 +24,16 @@ public:
     bool isEndTask;
 
     Hint* hint;
-    uint32_t taskSize = 8;
+    uint32_t taskSize;
+    uint64_t readyCycle;
 
     Task(uint64_t _taskId, uintptr_t _func, uint64_t _ts, 
          const std::vector<uint64_t>& _args, bool _isEnd, Hint* _hint) 
         : taskId(_taskId), taskFn(_func), timeStamp(_ts), 
-          args(_args), isEndTask(_isEnd), hint(_hint) {}
+          args(_args), isEndTask(_isEnd), hint(_hint) {
+        taskSize = 8;
+        readyCycle = 0;
+    }
         
     ~Task() {}
 

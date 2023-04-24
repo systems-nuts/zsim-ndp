@@ -5,7 +5,7 @@
 #include "task_support/hint.h"
 #include "task_support/task_unit.h"
 
-namespace task_support {
+using namespace task_support;
 
 void PimBridgeTaskUnit::taskEnqueue(TaskPtr t) {
     futex_lock(&tuLock);
@@ -13,7 +13,8 @@ void PimBridgeTaskUnit::taskEnqueue(TaskPtr t) {
         this->isFinished = false;
         tum->reportRestart();
     }
-    this->taskQueue->push_back(t);
+    // this->taskQueue.push_back(t);
+    this->taskQueue.push(t);
     this->s_EnqueueTasks.inc(1);
     futex_unlock(&tuLock);
 }
@@ -23,14 +24,16 @@ TaskPtr PimBridgeTaskUnit::taskDequeue() {
         return this->endTask;
     }
     futex_lock(&tuLock);
-    if (this->taskQueue->empty()) {
+    if (this->taskQueue.empty()) {
         this->isFinished = true;
         this->tum->reportFinish(this->taskUnitId);
         futex_unlock(&tuLock);
         return this->endTask;
     } else {
-        TaskPtr ret = this->taskQueue->front();
-        this->taskQueue->pop_front();
+        // TaskPtr ret = this->taskQueue.front();
+        // this->taskQueue.pop_front();
+        TaskPtr ret = this->taskQueue.top();
+        this->taskQueue.pop();
         this->s_DequeueTasks.inc(1);
         futex_unlock(&tuLock);
         return ret;
@@ -81,8 +84,4 @@ void PimBridgeTaskUnit::initStats(AggregateStat* parentStat) {
     tuStat->append(&s_GenPackets);
 
     parentStat->append(tuStat);
-}
-
-
-
 }

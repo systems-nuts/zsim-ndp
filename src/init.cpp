@@ -89,12 +89,13 @@
 #include "task_support/task.h"
 #include "task_support/task_unit.h"
 #include "task_support/task_timing_core.h"
-#include "task_support/comm_module.h"
-#include "task_support/gather_scheme.h"
-#include "task_support/scatter_scheme.h"
+#include "comm_support/comm_module.h"
+#include "comm_support/gather_scheme.h"
+#include "comm_support/scatter_scheme.h"
 
 using namespace std;
 using namespace task_support;
+using namespace pimbridge;
 
 extern void EndOfPhaseActions(); //in zsim.cpp
 
@@ -880,6 +881,15 @@ static void InitSystem(Config& config) {
                 cMap[endpoint] = new CacheGroup;
                 constructEndpoints(endpoint, *cMap[endpoint], *cMap[llc]);
 
+                if (zinfo->IS_PIMBRIDGE) {
+                    for (size_t epId = 0; epId < cMap[endpoint]->at(0).size(); ++epId) {
+                        MemInterconnectInterface::Endpoint* ep = 
+                            static_cast<MemInterconnectInterface::Endpoint*>
+                            (cMap[endpoint]->at(0).at(epId));
+                        zinfo->toMemEndpoints.push_back(ep);
+                    }
+                }
+
                 // Add to hierarchy.
                 cacheGroupNames.push_back(gm_strdup(endpoint.c_str()));
 
@@ -1448,6 +1458,7 @@ static void buildCommModules(Config& config) {
 }
 
 static void InitPimBridge(Config& config) {
+    zinfo->IS_PIMBRIDGE = true;
     zinfo->numBanks = config.get<uint32_t>("sys.pimBridge.numBanks", 0);
     zinfo->numRanks = config.get<uint32_t>("sys.pimBridge.numRanks", 0);
     zinfo->numDimms = config.get<uint32_t>("sys.pimBridge.numDimms", 0);

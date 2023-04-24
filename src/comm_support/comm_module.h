@@ -6,11 +6,13 @@
 #include "galloc.h"
 #include "stats.h"
 #include "task_support/task.h"
-#include "task_support/comm_packet.h"
-#include "task_support/gather_scheme.h"
-#include "task_support/scatter_scheme.h"
+#include "comm_support/comm_packet.h"
+#include "comm_support/gather_scheme.h"
+#include "comm_support/scatter_scheme.h"
 
-namespace task_support {
+using namespace task_support;
+
+namespace pimbridge {
 
 class CommModuleBase {
 protected:
@@ -31,10 +33,10 @@ public:
     CommModuleBase(uint32_t _level, uint32_t _commId, bool _enableInterflow);
     void initSiblings(uint32_t sibBegin, uint32_t sibEnd);
 
-    virtual void communicate() = 0; 
+    virtual uint64_t communicate(uint64_t curCycle) = 0; 
     virtual bool isEmpty();
     uint32_t receiveMessage(std::deque<CommPacket*>* srcBuffer, 
-                            uint32_t messageSize);  // return number of actually received packets.
+                            uint32_t messageSize, uint64_t readyCycle);  // return number of actually received packets.
 
     std::deque<CommPacket*>* getParentPackets() {
         return &(this->parentPackets);
@@ -68,7 +70,7 @@ private:
 public:
     BottomCommModule(uint32_t _level, uint32_t _commId, 
                      bool _enableInterflow, PimBridgeTaskUnit* _taskUnit);
-    void communicate() override { return; }
+    uint64_t communicate(uint64_t curCycle) override { return curCycle; }
     void receivePacket(CommPacket* packet) override;
     void generatePacket(uint32_t dst, TaskPtr t);
 
@@ -96,7 +98,7 @@ public:
                GatherScheme* _gatherScheme, ScatterScheme* _scatterScheme);
     void receivePacket(CommPacket* packet) override;
     
-    void communicate() override;
+    uint64_t communicate(uint64_t curCycle) override;
     bool isEmpty() override;
 
     void initStats(AggregateStat* parentStat) override;
@@ -107,8 +109,8 @@ private:
     }
     bool shouldGather();
     bool shouldScatter();
-    void gather();
-    void scatter();
+    uint64_t gather(uint64_t curCycle);
+    uint64_t scatter(uint64_t curCycle);
 
     Counter s_RecvPackets, s_GatherTimes, s_ScatterTimes;
     VectorCounter sv_GatherPackets, sv_ScatterPackets;

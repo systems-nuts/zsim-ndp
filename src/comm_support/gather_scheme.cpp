@@ -1,8 +1,8 @@
 #include <cstdint>
 #include "zsim.h"
-#include "task_support/gather_scheme.h"
+#include "comm_support/gather_scheme.h"
 
-namespace task_support {
+using namespace pimbridge;
 
 bool IntervalGather::shouldTrigger(CommModule* commModule) {
     return (zinfo->numPhases % this->interval == 0);
@@ -15,6 +15,4 @@ bool OnDemandGather::shouldTrigger(CommModule* commModule) {
         }
     }
     return false;
-}
-
 }

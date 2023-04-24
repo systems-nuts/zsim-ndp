@@ -1,9 +1,9 @@
 #include "filter_cache.h"
 #include "zsim.h"
 
+#include "task_support/task.h"
 #include "task_support/task_timing_core.h"
 
-namespace task_support {
 
 TaskTimingCore::TaskTimingCore(FilterCache* _l1i, FilterCache* _l1d, uint32_t domain, 
                g_string& _name, TaskUnit* tu) 
@@ -39,6 +39,13 @@ void TaskTimingCore::forwardToNextPhase(THREADID tid) {
         TakeBarrier(tid, cid);
     }
 }
+
+void TaskTimingCore::readTask(task_support::TaskPtr t, uint32_t memId) {
+    uint64_t startCycle = t->readyCycle >= curCycle ? t->readyCycle : curCycle;
+    curCycle = l1d->forgeAccess(t->taskId, true, startCycle, memId);   
+    cRec.record(startCycle);
+}
+
 
 void TaskTimingCore::loadAndRecord(Address addr) {
     uint64_t startCycle = curCycle;
@@ -99,6 +106,4 @@ void TaskTimingCore::PredLoadAndRecordFunc(THREADID tid, ADDRINT addr,
 void TaskTimingCore::PredStoreAndRecordFunc(THREADID tid, ADDRINT addr, 
                                              BOOL pred) {
     if (pred) static_cast<TaskTimingCore*>(cores[tid])->loadAndRecord(addr);
-}
-
 }

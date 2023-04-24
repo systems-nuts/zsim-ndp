@@ -1,13 +1,14 @@
 #pragma once
 #include <deque>
+#include <queue>
 #include "galloc.h"
 #include "g_std/g_vector.h"
 #include "locks.h"
 #include "stats.h"
 #include "task_support/hint.h"
 #include "task_support/task.h"
-#include "task_support/comm_packet.h"
-#include "task_support/comm_module.h"
+#include "comm_support/comm_packet.h"
+#include "comm_support/comm_module.h"
 
 namespace task_support
 {
@@ -79,16 +80,29 @@ public:
     }
 };
 
+
+}
+
+namespace pimbridge{
+
+using namespace task_support;
+
+struct cmp {
+    bool operator()(const TaskPtr& t1, const TaskPtr& t2) const {
+        return t1->readyCycle > t2->readyCycle;
+    }
+};
+
 class PimBridgeTaskUnit : public TaskUnit {
 private:
-    std::deque<TaskPtr>* taskQueue;
+    // std::deque<TaskPtr> taskQueue;
+    std::priority_queue<TaskPtr, std::deque<TaskPtr>, cmp> taskQueue;
     BottomCommModule* commModule;
 public:
     PimBridgeTaskUnit(const std::string& _name, uint32_t _tuId, TaskUnitManager* _tum)
-        : TaskUnit(_name, _tuId, _tum), taskQueue(new std::deque<TaskPtr>()) {}
+        : TaskUnit(_name, _tuId, _tum) {}
 
     virtual ~PimBridgeTaskUnit() {
-        delete taskQueue;
     }
 
     void assignNewTask(TaskPtr t, Hint* hint) override;

@@ -1,8 +1,8 @@
 #include <cstdint>
 #include "zsim.h"
-#include "task_support/scatter_scheme.h"
+#include "comm_support/scatter_scheme.h"
 
-namespace task_support {
+using namespace pimbridge;
 
 bool AfterGatherScatter::shouldTrigger(CommModule* commModule) {
     return commModule->gatherJustNow;
@@ -19,6 +19,4 @@ bool OnDemandScatter::shouldTrigger(CommModule* commModule) {
         }
     }
     return false;
-}
-
 }

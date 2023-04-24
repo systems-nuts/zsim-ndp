@@ -22,8 +22,6 @@ class MemInterconnectInterface : public GlobAlloc {
         // Construct and return the endpoint associated with the given child cache.
         BaseCache* getEndpoint(BaseCache* child, const g_string& name);
 
-    protected:
-
         /**
          * The interconnect interface has a set of endpoints, which are cache-like objects, and are inserted into the
          * memory hierarchy, acting as the parents of the child caches of the interconnect and the children of the
@@ -67,12 +65,16 @@ class MemInterconnectInterface : public GlobAlloc {
                 void setChildren(const g_vector<BaseCache*>& children, Network* network);
 
                 void setParents(uint32_t _childId, const g_vector<MemObject*>& parents, Network* network);
-
+                
+                uint64_t forgeAccess(MemReq& req, uint32_t parentId) {
+                    return this->interface->forgeAccessParent(req, groupId, parentId);
+                }
                 uint64_t access(MemReq& req);
 
                 uint64_t invalidate(const InvReq& req);
         };
-
+    protected: 
+        uint64_t forgeAccessParent(MemReq& req, uint32_t groupId, uint32_t parentId);
         uint64_t accessParent(MemReq& req, uint32_t groupId);
 
         uint64_t invalidateChild(const InvReq& req, uint32_t groupId, BaseCache* child, uint32_t childId);

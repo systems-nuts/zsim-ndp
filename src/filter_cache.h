@@ -128,6 +128,19 @@ class FilterCache : public Cache {
             }
         }
 
+        uint64_t forgeAccess(uint64_t addressKey, bool isLoad, uint64_t curCycle, uint32_t memId) {
+            MESIState dummyState = MESIState::I;
+            futex_lock(&filterLock);
+            uint32_t numaNodeId = zinfo->numaMap->getNodeOfCore(srcId);
+            // TBY TODO: check is numaNodeId == memId should always hold? 
+            MemReq req = {addressKey, isLoad? GETS : GETX, numaNodeId, 
+                          &dummyState, curCycle, &filterLock, dummyState, 
+                          srcId, reqFlags};
+            uint64_t respCycle = zinfo->toMemEndpoints[numaNodeId]->forgeAccess(req, memId);
+            futex_unlock(&filterLock);
+            return respCycle;
+        }
+
         uint64_t replace(Address vLineAddr, uint32_t idx, bool isLoad, uint64_t curCycle) {
             Address pLineAddr = procMask | vLineAddr;
             MESIState dummyState = MESIState::I;

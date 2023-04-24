@@ -1,9 +1,11 @@
 #include <deque>
 #include "stats.h"
+#include "core.h"
 #include "zsim.h"
-#include "task_support/comm_module.h"
+#include "comm_support/comm_module.h"
 
-namespace task_support {
+using namespace pimbridge;
+using namespace task_support;
 
 CommModuleBase::CommModuleBase(uint32_t _level, uint32_t _commId, 
                                bool _enableInterflow)
@@ -23,16 +25,17 @@ void CommModuleBase::initSiblings(uint32_t sibBegin, uint32_t sibEnd) {
 
 void CommModuleBase::interflow(uint32_t sibId, uint32_t messageSize) {
     zinfo->commModules[this->level][sibId]->receiveMessage(
-        this->getSiblingPackets(sibId), messageSize);
+        this->getSiblingPackets(sibId), messageSize, 0/*TBY TODO: readyCycle*/);
 }
 
 uint32_t CommModuleBase::receiveMessage(std::deque<CommPacket*>* parentBuffer, 
-                                    uint32_t messageSize) {
+                                    uint32_t messageSize, uint64_t readyCycle) {
     uint32_t totalSize = 0;
     uint32_t numPackets = 0;
     while(!parentBuffer->empty()) {
         CommPacket* p = parentBuffer->front();
         parentBuffer->pop_front();
+        p->readyCycle = readyCycle;
         this->receivePacket(p);
         numPackets += 1;
         totalSize += p->getSize();
@@ -40,8 +43,7 @@ uint32_t CommModuleBase::receiveMessage(std::deque<CommPacket*>* parentBuffer,
             break;
         }
     }
-    return numPackets;
-    // TBY TODO: simulate receive scatter events                                    
+    return numPackets;                                   
 }
 
 bool CommModuleBase::isEmpty() {
@@ -72,13 +74,13 @@ BottomCommModule::BottomCommModule(uint32_t _level, uint32_t _commId,
 }
 
 void BottomCommModule::receivePacket(CommPacket* packet) {
+    packet->task->readyCycle = packet->readyCycle;
     this->taskUnit->taskEnqueue(packet->task);
     delete packet;
     s_RecvPackets.atomicInc(1);
 }
 
 void BottomCommModule::generatePacket(uint32_t dst, TaskPtr t) {
-    // info("generate packet: from: %u", this->commId);
     CommPacket* p = new CommPacket(0, this->commId, dst, t);
     this->handleOutPacket(p);
     s_GenPackets.atomicInc(1);
@@ -123,22 +125,37 @@ bool CommModule::isEmpty() {
     return true;
 }
 
-void CommModule::communicate() {
+uint64_t CommModule::communicate(uint64_t curCycle) {
+    uint64_t respCycle = curCycle;
     if (this->shouldGather()) {
-        gather();
+        respCycle = gather(respCycle);
     }
     if (this->shouldScatter()) {
-        scatter();
+        respCycle = scatter(respCycle);
     }
+    return respCycle;
 }
 
-void CommModule::gather() {
+uint64_t CommModule::gather(uint64_t curCycle) {
+    uint64_t readyCycle = curCycle;
+    if (this->level == 1) {
+        MESIState dummyState = MESIState::I;
+        for (uint32_t i = childBeginId; i < childEndId; ++i) {
+            // TBY TODO: srcId should be set to host core. Currently, we set srcId = i, which is very fragile!
+            MemReq req = {0, GETS, i, &dummyState, curCycle, nullptr, dummyState, i, 0}; 
+            uint64_t respCycle = zinfo->toMemEndpoints[i]->forgeAccess(req, i);
+            readyCycle = respCycle > readyCycle ? respCycle : readyCycle;
+        }
+    }
+
     for (size_t i = childBeginId; i < childEndId; ++i) {
         std::deque<CommPacket*>* buffer = 
             zinfo->commModules[this->level-1][i]->getParentPackets();
         uint32_t totalSize = 0;
         while(!buffer->empty()) {
             CommPacket* p = buffer->front();
+            assert(p->readyCycle <= curCycle);
+            p->readyCycle = readyCycle;
             buffer->pop_front();
             // info("gather packet: from: %u, to: %u, taskId: %u", p->from, p->to, p->task->taskId);
             assert(inLocalModule(p->from));
@@ -154,20 +171,32 @@ void CommModule::gather() {
             }
         }
     }
-    // TBY TODO: simulate gather events
     this->gatherJustNow = true;
     this->s_GatherTimes.atomicInc(1);
+    return readyCycle;
 }
 
-void CommModule::scatter() {
+uint64_t CommModule::scatter(uint64_t curCycle) {
+    // TBY TODO: simulate gather events
+    uint64_t readyCycle = curCycle;
+    if (this->level == 1) {
+        MESIState dummyState = MESIState::I;
+        for (uint32_t i = childBeginId; i < childEndId; ++i) {
+            // TBY TODO: srcId should be set to host core. Currently, we set srcId = i, which is very fragile!
+            MemReq req = {0, GETX, i, &dummyState, curCycle, nullptr, dummyState, i, 0}; 
+            uint64_t respCycle = zinfo->toMemEndpoints[i]->forgeAccess(req, i);
+            readyCycle = respCycle > readyCycle ? respCycle : readyCycle;
+        }
+    }
+
     for (size_t i = childBeginId; i < childEndId; ++i) {
         uint32_t numPackets = zinfo->commModules[level-1][i]->
             receiveMessage(&(this->scatterBuffer[i-childBeginId]), 
-                           this->scatterScheme->packetSize);
-        this->sv_GatherPackets.atomicInc(i-childBeginId, numPackets);
+                           this->scatterScheme->packetSize, readyCycle);
+        this->sv_ScatterPackets.atomicInc(i-childBeginId, numPackets);
     }
     this->s_ScatterTimes.atomicInc(1);
-    // TBY TODO: simulate scatter events
+    return readyCycle;
 }
 
 bool CommModule::shouldGather() { 
@@ -198,8 +227,5 @@ void CommModule::initStats(AggregateStat* parentStat) {
     commStat->append(&sv_ScatterPackets);
 
     parentStat->append(commStat);
-
-}
-
 
 }
