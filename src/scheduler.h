@@ -311,6 +311,7 @@ class Scheduler : public GlobAlloc, public Callee {
         }
 
         uint32_t join(uint32_t pid, uint32_t tid) {
+            // info("core join pid: %u, tid: %u", pid, tid);
             futex_lock(&schedLock);
             //If leave was in this phase, call bar.join()
             //Otherwise, try to grab a free context; if all are taken, queue up
@@ -434,6 +435,7 @@ class Scheduler : public GlobAlloc, public Callee {
         }
 
         uint32_t sync(uint32_t pid, uint32_t tid, uint32_t cid) {
+            // info("core sync pid: %u, tid: %u, cid: %u", pid, tid, cid);
             futex_lock(&schedLock);
             ThreadInfo* th = contexts[cid].curThread;
             assert(!th->markedForSleep);

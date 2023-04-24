@@ -74,8 +74,8 @@ class CoreRecorder {
         void notifyLeave(uint64_t curCycle);
 
         //This better be inlined 100% of the time, it's called on EVERY access
-        inline void record(uint64_t startCycle) {
-            if (unlikely(eventRecorder.hasRecord())) recordAccess(startCycle);
+        inline void record(uint64_t startCycle, bool isCritical = true) {
+            if (unlikely(eventRecorder.hasRecord())) recordAccess(startCycle, isCritical);
         }
 
         //Methods called between the bound and weave phases
@@ -93,7 +93,7 @@ class CoreRecorder {
         uint64_t getContentionCycles() const;
 
     private:
-        void recordAccess(uint64_t startCycle);
+        void recordAccess(uint64_t startCycle, bool isCritical);
 };
 
 #endif  // CORE_RECORDER_H_

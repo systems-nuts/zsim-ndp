@@ -115,7 +115,7 @@ void CoreRecorder::notifyLeave(uint64_t curCycle) {
     DEBUG_MSG("[%s] Left, curCycle %ld", name.c_str(), curCycle);
 }
 
-void CoreRecorder::recordAccess(uint64_t startCycle) {
+void CoreRecorder::recordAccess(uint64_t startCycle, bool isCritical) {
     assert(eventRecorder.hasRecord());
     TimingRecord tr = eventRecorder.popRecord();
     TimingEvent* origPrevResp = prevRespEvent;
@@ -123,7 +123,7 @@ void CoreRecorder::recordAccess(uint64_t startCycle) {
     assert(startCycle >= prevRespCycle);
     assert(tr.reqCycle >= startCycle);
 
-    if (IsGet(tr.type)) {
+    if (IsGet(tr.type) && isCritical) {
         uint64_t delay = tr.reqCycle - prevRespCycle;
         TimingEvent* ev = new (eventRecorder) TimingCoreEvent(delay, prevRespCycle - gapCycles, this);
         ev->setMinStartCycle(prevRespCycle);
@@ -132,10 +132,11 @@ void CoreRecorder::recordAccess(uint64_t startCycle) {
         prevRespCycle = tr.respCycle;
         assert(prevRespEvent);
     } else {
-        assert(IsPut(tr.type));
+        assert(IsPut(tr.type) || !isCritical);
         // Link previous response and this req directly (don't even create a new event)
         DelayEvent* dr = new (eventRecorder) DelayEvent(tr.reqCycle - prevRespCycle);
         dr->setMinStartCycle(prevRespCycle);
+        assert_msg(prevRespEvent, "Invalid prevRespEvent");
         prevRespEvent->addChild(dr, eventRecorder)->addChild(tr.startEvent, eventRecorder);
         //tr.endEvent not linked to anything, it's a PUT
     }

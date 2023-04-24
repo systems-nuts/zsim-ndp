@@ -24,8 +24,9 @@ public:
         this->beginCycle = cRec.getUnhaltedCycles(curCycle);
     }
     void forwardToNextPhase(THREADID tid) override;
-    void readTask(task_support::TaskPtr t, uint32_t memId) override;
-    bool bypassCache() { return true; }
+    void fetchTask(task_support::TaskPtr t, uint32_t memId) override;
+    uint64_t recvCommReq(bool isRead, uint64_t startCycle, uint32_t memId) override;
+
  private:
     inline void loadAndRecord(Address addr);
     inline void storeAndRecord(Address addr);

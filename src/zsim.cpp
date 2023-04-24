@@ -504,6 +504,19 @@ VOID EndOfPhaseActions() {
         info("Synced fast-forwarding done, resuming simulation");
     }
 
+    if (zinfo->BEGIN_TASK_EXECUTION && !zinfo->END_TASK_EXECUTION) {
+        uint64_t curCycle = zinfo->globPhaseCycles + zinfo->phaseLength;
+        uint64_t levelFinishCycle = curCycle;
+        for (auto l : zinfo->commModules) {
+            for (auto c : l) {
+                uint64_t curFinishCycle = c->communicate(curCycle);
+                levelFinishCycle = curFinishCycle > levelFinishCycle ? 
+                    curFinishCycle : levelFinishCycle;
+            }
+            curCycle = levelFinishCycle;
+        }
+    }
+
     CheckForTermination();
     zinfo->contentionSim->simulatePhase(zinfo->globPhaseCycles + zinfo->phaseLength);
     zinfo->eventQueue->tick();
@@ -519,19 +532,6 @@ VOID EndOfPhaseActions() {
             }
         } 
         return;
-    }
-
-    if (!zinfo->BEGIN_TASK_EXECUTION) { return; }
-
-    uint64_t curCycle = zinfo->globPhaseCycles + zinfo->phaseLength;
-    uint64_t levelFinishCycle = curCycle;
-    for (auto l : zinfo->commModules) {
-        for (auto c : l) {
-            uint64_t curFinishCycle = c->communicate(curCycle);
-            levelFinishCycle = curFinishCycle > levelFinishCycle ? 
-                curFinishCycle : levelFinishCycle;
-        }
-        curCycle = levelFinishCycle;
     }
 }
 
@@ -1233,6 +1233,7 @@ static void endTaskExecution(THREADID tid, CONTEXT* ctxt, Scheduler::ThreadInfo*
 }
 
 static bool allCommModuleEmpty() {
+    return true;
     for (auto l : zinfo->commModules) {
         for (auto c : l) {
             if (!c->isEmpty()) { 
@@ -1288,7 +1289,7 @@ VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
     // info("-- DEQUEUE: tid: %d    uid: %d    taskPtrId: %lu    timestamp: %lu", 
     //         tid, coreId, taskPtr->taskId, taskPtr->timeStamp);
 
-    zinfo->cores[coreId]->readTask(taskPtr, zinfo->numaMap->getNodeOfCore(coreId));
+    zinfo->cores[coreId]->fetchTask(taskPtr, zinfo->numaMap->getNodeOfCore(coreId));
 
     PIN_SetContextRegval(ctxt, REG::REG_RDI, (uint8_t*)&taskPtr->timeStamp);
     const uint32_t numArgs = taskPtr->args.size();

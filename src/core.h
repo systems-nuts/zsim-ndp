@@ -103,11 +103,14 @@ class Core : public GlobAlloc {
         virtual void forwardToNextPhase(THREADID tid) {
             panic("Call setBeginCycle without task support!");
         }
-        virtual void readTask(task_support::TaskPtr t, uint32_t memId) {
-            panic("Call readTask without task support!");
+        virtual void fetchTask(task_support::TaskPtr t, uint32_t memId) {
+            panic("Call fetchTask without task support!");
         }
         virtual void storeTask(task_support::TaskPtr t, uint32_t memId) {
             panic("Call storeTask without task support!");
+        }
+        virtual uint64_t recvCommReq(bool isRead, uint64_t startCycle, uint32_t memId) {
+            panic("Call recvCommReq without task support!");
         }
 };
 

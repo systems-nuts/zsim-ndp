@@ -137,13 +137,11 @@ uint64_t CommModule::communicate(uint64_t curCycle) {
 }
 
 uint64_t CommModule::gather(uint64_t curCycle) {
+    // info("gather: %u-%u", level, commId);
     uint64_t readyCycle = curCycle;
     if (this->level == 1) {
-        MESIState dummyState = MESIState::I;
         for (uint32_t i = childBeginId; i < childEndId; ++i) {
-            // TBY TODO: srcId should be set to host core. Currently, we set srcId = i, which is very fragile!
-            MemReq req = {0, GETS, i, &dummyState, curCycle, nullptr, dummyState, i, 0}; 
-            uint64_t respCycle = zinfo->toMemEndpoints[i]->forgeAccess(req, i);
+            uint64_t respCycle = zinfo->cores[i]->recvCommReq(true, curCycle, i);
             readyCycle = respCycle > readyCycle ? respCycle : readyCycle;
         }
     }
@@ -177,14 +175,11 @@ uint64_t CommModule::gather(uint64_t curCycle) {
 }
 
 uint64_t CommModule::scatter(uint64_t curCycle) {
-    // TBY TODO: simulate gather events
+    // info("scatter: %u-%u", level, commId);
     uint64_t readyCycle = curCycle;
     if (this->level == 1) {
-        MESIState dummyState = MESIState::I;
         for (uint32_t i = childBeginId; i < childEndId; ++i) {
-            // TBY TODO: srcId should be set to host core. Currently, we set srcId = i, which is very fragile!
-            MemReq req = {0, GETX, i, &dummyState, curCycle, nullptr, dummyState, i, 0}; 
-            uint64_t respCycle = zinfo->toMemEndpoints[i]->forgeAccess(req, i);
+            uint64_t respCycle = zinfo->cores[i]->recvCommReq(true, curCycle, i);
             readyCycle = respCycle > readyCycle ? respCycle : readyCycle;
         }
     }
