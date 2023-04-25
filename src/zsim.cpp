@@ -1233,7 +1233,6 @@ static void endTaskExecution(THREADID tid, CONTEXT* ctxt, Scheduler::ThreadInfo*
 }
 
 static bool allCommModuleEmpty() {
-    return true;
     for (auto l : zinfo->commModules) {
         for (auto c : l) {
             if (!c->isEmpty()) { 
