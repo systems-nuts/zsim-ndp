@@ -90,8 +90,11 @@
 #include "task_support/task_unit.h"
 #include "task_support/task_timing_core.h"
 #include "comm_support/comm_module.h"
+#include "comm_support/comm_mapping.h"
 #include "comm_support/gather_scheme.h"
 #include "comm_support/scatter_scheme.h"
+#include "load_balancing/load_balancer.h"
+#include "load_balancing/reserve_lb_task_unit.h"
 
 using namespace std;
 using namespace task_support;
@@ -1330,31 +1333,46 @@ static void InitGlobalStats() {
 static PimBridgeTaskUnit* buildTaskUnit(Config& config, 
                                         const std::string& type, 
                                         uint32_t id) {
-    assert(type == "PimBridge");
     std::stringstream ss; 
     ss << "unit-" << id;
-    return new PimBridgeTaskUnit(ss.str(), id, zinfo->taskUnitManager);
-    // if (type == "OneQueue") {
-    //     return new OneQueueTaskUnit(id, zinfo->taskUnitManager);
-    // } else if (type == "PimBridge") {
-    //     return new PimBridgeTaskUnit(id, zinfo->taskUnitManager);
-    // } else {
-    //     panic("unsupported task unit type: %s", type.c_str());
-    // }
+    // return new PimBridgeTaskUnit(ss.str(), id, zinfo->taskUnitManager);
+    if (type == "PimBridge") {
+        return new PimBridgeTaskUnit(ss.str(), id, zinfo->taskUnitManager);
+    } else if (type == "ReserveLbPimBridge") {
+        uint32_t numBucket = config.get<uint32_t>("sys.taskSupport.sketchBucketNum");
+        uint32_t bucketSize = config.get<uint32_t>("sys.taskSupport.sketchBucketSize");
+        return new ReserveLbPimBridgeTaskUnit(ss.str(), id, 
+            zinfo->taskUnitManager, numBucket, bucketSize);
+    } else {
+        panic("unsupported task unit type: %s", type.c_str());
+    }
 }
 
 static GatherScheme* buildGatherScheme(Config& config, const std::string& prefix) {
     std::string gatherTrigger = config.get<const char*>(prefix + "trigger", "Whenever");
-    uint32_t packetSize = config.get<uint32_t>(prefix + "packetSize", 8);
+    uint32_t packetSize = config.get<uint32_t>(prefix + "packetSize");
     GatherScheme* gatherScheme;
     if (gatherTrigger == "Whenever") {
         gatherScheme = new WheneverGather(packetSize);
     } else if (gatherTrigger == "Interval") {
-        uint32_t interval = config.get<uint32_t>(prefix + "interval", 0);
+        uint32_t interval = config.get<uint32_t>(prefix + "interval");
         gatherScheme = new IntervalGather(packetSize, interval);
+    } else if (gatherTrigger == "DynamicInterval") {
+        uint32_t interval = config.get<uint32_t>(prefix + "interval");
+        gatherScheme = new DynamicIntervalGather(packetSize, interval);
     } else if (gatherTrigger == "OnDemand") {
-        uint32_t threshold = config.get<uint32_t>(prefix + "threshold", 0);
-        gatherScheme = new OnDemandGather(packetSize, threshold);
+        uint32_t threshold = config.get<uint32_t>(prefix + "threshold");
+        uint32_t maxInterval = config.get<uint32_t>(prefix + "maxInterval");
+        gatherScheme = new OnDemandGather(packetSize, threshold, maxInterval);
+    } else if (gatherTrigger == "OnDemandOfAll") {
+        uint32_t threshold = config.get<uint32_t>(prefix + "threshold");
+        uint32_t maxInterval = config.get<uint32_t>(prefix + "maxInterval");
+        gatherScheme = new OnDemandOfAllGather(packetSize, threshold, maxInterval);
+    }  else if (gatherTrigger == "DynamicOnDemand") {
+        uint32_t highThreshold = config.get<uint32_t>(prefix + "highThreshold");
+        uint32_t lowThreshold = config.get<uint32_t>(prefix + "lowThreshold");
+        uint32_t maxInterval = config.get<uint32_t>(prefix + "maxInterval");
+        gatherScheme = new DynamicOnDemandGather(packetSize, highThreshold, lowThreshold, maxInterval);
     } else {
         panic("unsupported gather scheme: %s", gatherTrigger.c_str());
     }
@@ -1362,17 +1380,18 @@ static GatherScheme* buildGatherScheme(Config& config, const std::string& prefix
 }
 
 static ScatterScheme* buildScatterScheme(Config& config, const std::string& prefix) {
-    std::string scatterTrigger = config.get<const char*>(prefix + "trigger", "AfterGather");
-    uint32_t packetSize = config.get<uint32_t>(prefix + "packetSize", 8);
+    std::string scatterTrigger = config.get<const char*>(prefix + "trigger");
+    uint32_t packetSize = config.get<uint32_t>(prefix + "packetSize");
     ScatterScheme* scatterScheme;
     if (scatterTrigger == "AfterGather") {
         scatterScheme = new AfterGatherScatter(packetSize);
     } else if (scatterTrigger == "Interval") {
-        uint32_t interval = config.get<uint32_t>(prefix + "interval", 0);
+        uint32_t interval = config.get<uint32_t>(prefix + "interval");
         scatterScheme = new IntervalScatter(packetSize, interval);
     } else if (scatterTrigger == "OnDemand") {
-        uint32_t threshold = config.get<uint32_t>(prefix + "threshold", 0);
-        scatterScheme = new OnDemandScatter(packetSize, threshold);
+        uint32_t threshold = config.get<uint32_t>(prefix + "threshold");
+        uint32_t maxInterval = config.get<uint32_t>(prefix + "maxInterval");
+        scatterScheme = new OnDemandScatter(packetSize, threshold, maxInterval);
     } else {
         panic("unsupported gather scheme: %s", scatterTrigger.c_str());
     }
@@ -1382,12 +1401,12 @@ static ScatterScheme* buildScatterScheme(Config& config, const std::string& pref
 static void InitTaskSupport(Config& config) {
     zinfo->taskUnitManager = nullptr;
 
-    zinfo->TASK_BASED = config.get<bool>("sys.taskSupport.enable", false);
+    zinfo->TASK_BASED = config.get<bool>("sys.taskSupport.enable");
     if (!zinfo->TASK_BASED) { return; }
     zinfo->taskUnitManager = new TaskUnitManager();
     zinfo->taskUnits.resize(zinfo->numCores);
     std::string taskUnitType = 
-        config.get<const char*>("sys.taskSupport.taskUnitType", "Simple");
+        config.get<const char*>("sys.taskSupport.taskUnitType");
 
     for (uint32_t i = 0; i < zinfo->numCores; ++i) {
         zinfo->taskUnits[i] = buildTaskUnit(config, taskUnitType, i);
@@ -1409,9 +1428,10 @@ static void buildCommModules(Config& config) {
     uint32_t curLevel = 0;
     uint32_t lastNumModules = 0;
     zinfo->commModules.resize(commModuleNames.size());
+    zinfo->commMapping = new CommMapping(commModuleNames.size(), zinfo->numBanks);
 
-    AggregateStat* commStat = new AggregateStat(true);
-    commStat->init("commModule", "Communication module stats");
+    // AggregateStat* commStat = new AggregateStat(true);
+    // commStat->init("commModule", "Communication module stats");
 
     for (const char* mdl : commModuleNames) {
         info("Building commModule for %s", mdl);
@@ -1438,23 +1458,80 @@ static void buildCommModules(Config& config) {
             }
             zinfo->rootStat->append(bottomCommStat);
         } else {
-            GatherScheme* gatherScheme = buildGatherScheme(config, prefix + "gatherScheme.");
-            ScatterScheme* scatterScheme = buildScatterScheme(config, prefix + "scatterScheme.");
-            info("finish build gather scatter");
+            AggregateStat* commStat = new AggregateStat(true);
+            commStat->init(gm_strdup(mdl), "This level of communication module stats");
             for (uint32_t i = 0; i < numModules; ++i) {
                 uint32_t childNum = lastNumModules / numModules;
                 info("child num: %u", childNum);
+                GatherScheme* gatherScheme = buildGatherScheme(config, prefix + "gatherScheme.");
+                ScatterScheme* scatterScheme = buildScatterScheme(config, prefix + "scatterScheme.");
                 zinfo->commModules[curLevel][i] = 
                     new CommModule(curLevel, i, enableInterflow, 
                                    i * childNum, (i+1)*childNum, 
                                    gatherScheme, scatterScheme);
                 zinfo->commModules[curLevel][i]->initStats(commStat);
+                if (curLevel != commModuleNames.size() - 1) {
+                    for (uint32_t j = i * childNum; j < (i+1)*childNum; ++j) {
+                        zinfo->commModules[curLevel-1][i]->setParentId(i);
+                    }
+                }
             }
+            zinfo->rootStat->append(commStat);
         }
         curLevel += 1;
         lastNumModules = numModules;
     }
-    zinfo->rootStat->append(commStat);
+}
+
+static void buildProfilers(Config& config) {
+    zinfo->gatherProfiler = nullptr;
+    zinfo->scatterProfiler = nullptr;
+    std::vector<const char*> profilerNames;
+    config.subgroups("sys.pimBridge.profilers", profilerNames);
+    for (const char* pfl : profilerNames) {
+        std::string pflName(pfl);
+        std::string prefix = "sys.pimBridge.profilers." + pflName + ".";
+        std::string type = config.get<const char*>(prefix + "type", "NotDefine");
+        info("pfl: %s, prefix: %s, type: %s", pflName.c_str(), prefix.c_str(), type.c_str());
+        if (type == "Gather") {
+            zinfo->gatherProfiler = new GatherScatterProfiler(config, prefix);
+        } else if (type == "Scatter") {
+            zinfo->scatterProfiler = new GatherScatterProfiler(config, prefix); 
+        } else {
+            panic("Unsupported profiler: %s", type.c_str());
+        }
+    }
+    if (zinfo->gatherProfiler == nullptr) {
+        zinfo->gatherProfiler = new GatherScatterProfiler();
+    }
+    if (zinfo->scatterProfiler == nullptr) {
+        zinfo->scatterProfiler = new GatherScatterProfiler();
+    }
+}
+
+static void buildLoadBalancer(Config& config) {
+    zinfo->ENABLE_LOAD_BALANCE = config.get<bool>("sys.pimBridge.loadBalancer.enable");
+    zinfo->lbPageSize = config.get<uint32_t>("sys.pimBridge.loadBalancer.lbPageSize");
+    std::string lbType = config.get<const char*>("sys.pimBridge.loadBalancer.type");
+    LoadBalancer::IDLE_THRESHOLD = config.get<uint32_t>("sys.pimBridge.loadBalancer.idleThreshold");
+    for (uint32_t level = 1; level < zinfo->commModules.size(); ++level) {
+        for (auto c : zinfo->commModules[level]) {
+            uint32_t commId = c->getCommId();
+            LoadBalancer* lb = nullptr;
+            if (lbType == "Stealing") {    
+                lb = new StealingLoadBalancer(level, commId, config);
+            } else if (lbType == "Average") {
+                lb = new AverageLoadBalancer(level, commId);
+            } else if (lbType == "Reserve") {
+                std::string taskUnitType = config.get<const char*>("sys.taskSupport.taskUnitType");
+                assert(taskUnitType == "ReserveLbPimBridge");
+                lb = new ReserveLoadBalancer(level, commId, config);
+            } else {
+                panic("Invalid loadBalancer type: %s", lbType.c_str());
+            }
+            c->setLoadBalancer(lb);
+        }
+    }
 }
 
 static void InitPimBridge(Config& config) {
@@ -1462,8 +1539,10 @@ static void InitPimBridge(Config& config) {
     zinfo->numBanks = config.get<uint32_t>("sys.pimBridge.numBanks", 0);
     zinfo->numRanks = config.get<uint32_t>("sys.pimBridge.numRanks", 0);
     zinfo->numDimms = config.get<uint32_t>("sys.pimBridge.numDimms", 0);
+    zinfo->SIM_COMM_EVENT = config.get<bool>("sys.pimBridge.simCommEvent", true);
     buildCommModules(config);
-
+    buildProfilers(config);
+    buildLoadBalancer(config);
 }
 
 

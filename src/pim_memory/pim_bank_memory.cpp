@@ -70,7 +70,7 @@ uint64_t PimBankMemory::bypassRequest(MemReq& req) {
     return hiddenMem->memObj->access(req);
 }
 
-// TBY TODO: check the correctness transfer region implementation
+// TBY TODO: check the correctness of transfer region implementation
 
 bool PimBankMemory::inTransferRegion(Address lineAddr) {
     return (lineAddr >= this->transferLineIdStart && lineAddr < memoryLineIdStart);

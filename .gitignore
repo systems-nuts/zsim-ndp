@@ -9,3 +9,6 @@ out.cfg
 pin.log
 heartbeat
 myPatchRoot*
+*.log
+zsim_results/
+*.csv

@@ -14,7 +14,7 @@ void TaskTimingCore::initStats(AggregateStat* parentStat) {
     coreStat->init(name.c_str(), "Core stats");
 
     auto x = [this]() { return cRec.getUnhaltedCycles(curCycle) - 
-                            this->beginCycle - this->waitCycles.get(); };
+                            this->beginCycle; };
     LambdaStat<decltype(x)>* cyclesStat = new LambdaStat<decltype(x)>(x);
     cyclesStat->init("cycles", "Simulated unhalted cycles");
     coreStat->append(cyclesStat);
@@ -26,6 +26,12 @@ void TaskTimingCore::initStats(AggregateStat* parentStat) {
 
     waitCycles.init("waitCycles", "Wait cycles");
     coreStat->append(&waitCycles);
+
+    auto z = [this]() { return cRec.getUnhaltedCycles(curCycle) - 
+                            this->beginCycle - this->waitCycles.get(); };
+    LambdaStat<decltype(z)>* workCyclesStat = new LambdaStat<decltype(z)>(z);
+    workCyclesStat->init("workCycles", "Cycles that the core is actually executing tasks");
+    coreStat->append(workCyclesStat);
 
     parentStat->append(coreStat);
 }
@@ -103,12 +109,18 @@ void TaskTimingCore::PredStoreAndRecordFunc(THREADID tid, ADDRINT addr,
 
 
 void TaskTimingCore::fetchTask(task_support::TaskPtr t, uint32_t memId) {
+    if (!zinfo->SIM_COMM_EVENT) {
+        return;
+    }
     uint64_t startCycle = t->readyCycle >= curCycle ? t->readyCycle : curCycle;
     curCycle = l1d->forgeAccess(t->taskId, true, startCycle, memId);   
     cRec.record(startCycle);
 }
 
 uint64_t TaskTimingCore::recvCommReq(bool isRead, uint64_t startCycle, uint32_t memId) {
+    if (!zinfo->SIM_COMM_EVENT) {
+        return startCycle;
+    }
     startCycle = startCycle >= curCycle ? startCycle : curCycle;
     uint64_t finishCycle = l1d->forgeAccess(0, isRead, startCycle, memId);
     cRec.record(startCycle, false);

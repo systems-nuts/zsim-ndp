@@ -110,6 +110,7 @@ GlobSimInfo* zinfo;
 uint32_t procIdx;
 uint32_t lineBits; //process-local for performance, but logically global
 uint32_t pageBits; //process-local for performance, but logically global
+uint32_t lbPageBits;
 Address procMask;
 uint64_t allFinishTask;
 uint64_t allEnqueueTask;
@@ -509,9 +510,21 @@ VOID EndOfPhaseActions() {
         uint64_t levelFinishCycle = curCycle;
         for (auto l : zinfo->commModules) {
             for (auto c : l) {
+                c->gatherState();
+            }
+        }
+        if (zinfo->ENABLE_LOAD_BALANCE) {
+            for (auto c : zinfo->commModules[1]) {
+                c->commandLoadBalance(curCycle);
+            }
+        }
+        for (auto l : zinfo->commModules) {
+            for (auto c : l) {
+                // info("module %s communicate", c->getName());
                 uint64_t curFinishCycle = c->communicate(curCycle);
                 levelFinishCycle = curFinishCycle > levelFinishCycle ? 
                     curFinishCycle : levelFinishCycle;
+                // info("module %s finish communicate", c->getName());
             }
             curCycle = levelFinishCycle;
         }
@@ -525,6 +538,7 @@ VOID EndOfPhaseActions() {
     if (zinfo->TASK_BASED && !zinfo->BEGIN_TASK_EXECUTION) {
         if (zinfo->sched->getThreadsCount() == zinfo->numCores) {
             zinfo->BEGIN_TASK_EXECUTION = true;
+            zinfo->beginPhase = zinfo->numPhases;
             info("BEGIN TASK EXECUTION");
             zinfo->rootStat->reset();
             for (uint32_t i = 0; i < zinfo->numCores; ++i) {
@@ -1225,6 +1239,10 @@ VOID HandleMagicOpConstContext(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
 
 static void endTaskExecution(THREADID tid, CONTEXT* ctxt, Scheduler::ThreadInfo* curThread) {
     zinfo->END_TASK_EXECUTION = true;
+    if (tid == 0) {
+        zinfo->gatherProfiler->toFile();
+        zinfo->scatterProfiler->toFile();
+    }
     PIN_SetContextRegval(ctxt, REG::REG_RSP, (uint8_t*)&curThread->rspCheckpoint);
     curThread->rspCheckpoint = 0l;
     PIN_SetContextRegval(ctxt, REG::REG_RIP, (uint8_t*)&curThread->donePc);
@@ -1272,7 +1290,7 @@ VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
     }
     
     if (taskPtr->isEndTask) {
-        if (zinfo->taskUnitManager->allFinish() && allCommModuleEmpty()) {
+        if (zinfo->taskUnitManager->allFinish() && allCommModuleEmpty()) { 
             endTaskExecution(tid, ctxt, curThread);
             return;
         } else {
@@ -1782,12 +1800,14 @@ int main(int argc, char *argv[]) {
 
     lineBits = ilog2(zinfo->lineSize);
     pageBits = ilog2(zinfo->pageSize);
+    lbPageBits = ilog2(zinfo->lbPageSize);
     procMask = ((uint64_t)procIdx) << (64-lineBits);
 
     allFinishTask = 0;
     allEnqueueTask = 0;
     zinfo->BEGIN_TASK_EXECUTION = false;
     zinfo->END_TASK_EXECUTION = false;
+    zinfo->beginPhase = 0;
 
     //Initialize process-local per-thread state, even if ThreadStart does so later
     for (uint32_t i = 0; i < MAX_THREADS; i++) {

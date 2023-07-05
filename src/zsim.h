@@ -33,14 +33,18 @@
 #include "locks.h"
 #include "pad.h"
 #include "comm_support/comm_module.h"
+#include "comm_support/comm_mapping.h"
 #include "task_support/task_unit.h"
 #include "process_local_val.h"
 #include "mem_interconnect_interface.h"
+#include "comm_support/profiling/gather_scatter_profiler.h"
 
 using task_support::TaskUnitManager;
 using task_support::TaskUnit;
 using pimbridge::PimBridgeTaskUnit;
 using pimbridge::CommModuleBase;
+using pimbridge::CommMapping;
+using pimbridge::GatherScatterProfiler;
 
 class Core;
 class NUMAMap;
@@ -61,9 +65,9 @@ class AccessTraceWriter;
 class TraceDriver;
 class TaskUnitManager;
 class TaskUnit;
+class CommMapping;
 class CommModuleBase;
-// class CommModule;
-// class BottomCommModule;
+class GatherScatterProfiler;
 template <typename T> class g_vector;
 
 struct ClockDomainInfo {
@@ -203,18 +207,30 @@ struct GlobSimInfo {
     bool traceDriven;
     TraceDriver* traceDriver;
 
-    // Task support
+    // Task support & PimBridge
     bool TASK_BASED;
     bool IS_PIMBRIDGE;
     bool BEGIN_TASK_EXECUTION;
     bool END_TASK_EXECUTION;
+    bool SIM_COMM_EVENT;
+    uint64_t beginPhase;
     TaskUnitManager* taskUnitManager;
     g_vector<PimBridgeTaskUnit*> taskUnits;
     g_vector<g_vector<CommModuleBase*>> commModules;
+    CommMapping* commMapping;
     uint32_t numBanks;
     uint32_t numRanks;
     uint32_t numDimms;
     g_vector<MemInterconnectInterface::Endpoint*> toMemEndpoints;
+
+    // Load Balance;
+    bool ENABLE_LOAD_BALANCE;
+    uint32_t lbPageSize;
+
+    // Profiling
+    GatherScatterProfiler* gatherProfiler;
+    GatherScatterProfiler* scatterProfiler;
+
 };
 
 

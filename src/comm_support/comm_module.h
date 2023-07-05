@@ -5,10 +5,14 @@
 #include <unordered_map>
 #include "galloc.h"
 #include "stats.h"
+#include "locks.h"
 #include "task_support/task.h"
 #include "comm_support/comm_packet.h"
+#include "comm_support/comm_packet_queue.h"
 #include "comm_support/gather_scheme.h"
 #include "comm_support/scatter_scheme.h"
+#include "load_balancing/load_balancer.h"
+#include "load_balancing/address_remap.h"
 
 using namespace task_support;
 
@@ -19,64 +23,106 @@ protected:
     std::string name;
     uint32_t level;
     uint32_t commId;
-    bool enableInterflow;
 
-    std::deque<CommPacket*> parentPackets;
+    uint32_t bankBeginId; 
+    uint32_t bankEndId;
+    uint32_t parentId;
+    CommPacketQueue parentPackets;
+    CommPacketQueue lbParentPackets;
+
     // same-level direct communication 
+    bool enableInterflow;
     uint32_t siblingBeginId;
     uint32_t siblingEndId;
-    std::vector<std::deque<CommPacket*>> siblingPackets;
+    std::vector<CommPacketQueue> siblingPackets; 
 
     lock_t commLock;
 
+    AddressRemapTable* addrRemapTable;
+    LoadBalancer* loadBalancer;
+    uint64_t toStealSize;
+
+    // data collected from task unit during execution
+    Counter s_GenTasks, s_FinishTasks;
+    Counter s_GenPackets, s_RecvPackets;
+
 public:
+    // initialization
     CommModuleBase(uint32_t _level, uint32_t _commId, bool _enableInterflow);
     void initSiblings(uint32_t sibBegin, uint32_t sibEnd);
 
     virtual uint64_t communicate(uint64_t curCycle) = 0; 
+    virtual void gatherState() {}
     virtual bool isEmpty();
-    uint32_t receiveMessage(std::deque<CommPacket*>* srcBuffer, 
-                            uint32_t messageSize, uint64_t readyCycle);  // return number of actually received packets.
+    void receivePackets(CommModuleBase* srcModule, 
+                        uint32_t messageSize, uint64_t readyCycle, 
+                        uint32_t& numPackets, uint32_t& totalSize);
+    virtual CommPacket* nextPacket(uint32_t fromLevel, uint32_t fromCommId, 
+                                   uint32_t sizeLimit) = 0;
+    void handleOutPacket(CommPacket* packet);  
 
-    std::deque<CommPacket*>* getParentPackets() {
-        return &(this->parentPackets);
-    }
-    std::deque<CommPacket*>* getSiblingPackets(uint32_t sibId) {
-        return &(this->siblingPackets[sibId]);
-    }
-    const char* getName() {
-        return this->name.c_str();
-    }
+    // load balance
+    virtual void commandLoadBalance(uint64_t curCycle) = 0; 
+    virtual void executeLoadBalance(uint32_t command, 
+        std::vector<DataHotness>& outInfo) = 0;
+    void addToSteal(uint32_t num);
 
-    virtual void initStats(AggregateStat* parentStat) {};
+    // update through the hierarchy
+    // void finishTask();
+    // void generateTask();
+
+    // state that accessed by filtered command
+    virtual uint64_t stateLocalTaskQueueSize() = 0;
+    uint64_t stateTransferRegionSize();
+    uint64_t stateToStealSize() { return this->toStealSize; }
+    
+    // getters and setters
+    void setParentId(uint32_t _parentId) { this->parentId = _parentId; }
+    const char* getName() { return this->name.c_str(); }
+    uint32_t getBankBeginId() { return bankBeginId; }
+    uint32_t getBankEndId() { return bankEndId; }
+    uint32_t getLevel() { return this->level; }
+    uint32_t getCommId() { return this->commId; }
+    AddressRemapTable* getAddressRemapTable() { return addrRemapTable; }
+    void setLoadBalancer(LoadBalancer* lb) { this->loadBalancer = lb; }
 
 protected:
-    bool shouldInterflow();
+    virtual bool isChild(int id) = 0;
+    virtual void handleInPacket(CommPacket* packet) = 0;
     void interflow(uint32_t sibId, uint32_t messageSize);
-    virtual void receivePacket(CommPacket* packet) = 0;
-
-    void handleOutPacket(CommPacket* packet); 
-    bool isSibling(uint32_t id) {
-        return (id >= siblingBeginId && id <= siblingEndId && id != commId);
+    bool isSibling(int id) {
+        return (id >= 0 && (uint32_t)id >= siblingBeginId && 
+            (uint32_t)id <= siblingEndId && (uint32_t)id != commId);
     }
+public:
+    virtual void initStats(AggregateStat* parentStat) {}
 };
 
 class PimBridgeTaskUnit;
 
 class BottomCommModule : public CommModuleBase{
-private:
-    PimBridgeTaskUnit* taskUnit;
-
 public:
+    PimBridgeTaskUnit* taskUnit;
     BottomCommModule(uint32_t _level, uint32_t _commId, 
                      bool _enableInterflow, PimBridgeTaskUnit* _taskUnit);
     uint64_t communicate(uint64_t curCycle) override { return curCycle; }
-    void receivePacket(CommPacket* packet) override;
-    void generatePacket(uint32_t dst, TaskPtr t);
+    CommPacket* nextPacket(uint32_t fromLevel, uint32_t fromCommI, 
+                           uint32_t sizeLimit) override;
+    void commandLoadBalance(uint64_t curCycle) override { return; }
+    void executeLoadBalance(uint32_t command, 
+        std::vector<DataHotness>& outInfo) override;
 
-    void initStats(AggregateStat* parentStat) override;
+    uint64_t stateLocalTaskQueueSize() override;
 private:
-    Counter s_GenPackets, s_RecvPackets;
+    void handleInPacket(CommPacket* packet) override;
+    bool isChild(int id) override {
+        return ((uint32_t)id == this->commId);
+    }
+public:
+    void initStats(AggregateStat* parentStat) override;
+
+    friend class PimBridgeTaskUnit;
+    friend class ReserveLbPimBridgeTaskUnit;
 };
 
 class CommModule : public CommModuleBase {
@@ -87,41 +133,70 @@ private:
     ScatterScheme* scatterScheme;
 
     // state information
-    bool gatherJustNow;
+    uint64_t lastGatherPhase;
+    uint64_t lastScatterPhase;
 
     // packet buffer
-    std::vector<std::deque<CommPacket*>> scatterBuffer;
+    std::vector<CommPacketQueue> scatterBuffer;
+
+    std::vector<uint64_t> childQueueLength;
+    std::vector<uint64_t> childTransferSize;
+    std::vector<uint64_t> childQueueReadyLength;
 
 public:
     CommModule(uint32_t _level, uint32_t _commId, bool _enableInterflow, 
                uint32_t _childBeginId, uint32_t _childEndId, 
                GatherScheme* _gatherScheme, ScatterScheme* _scatterScheme);
-    void receivePacket(CommPacket* packet) override;
     
     uint64_t communicate(uint64_t curCycle) override;
+    CommPacket* nextPacket(uint32_t fromLevel, uint32_t fromCommId, 
+                           uint32_t sizeLimit) override;
+    void gatherState() override; 
+    void commandLoadBalance(uint64_t curCycle) override;
+    void executeLoadBalance(uint32_t command, 
+        std::vector<DataHotness>& outInfo) { return; }
     bool isEmpty() override;
-
-    void initStats(AggregateStat* parentStat) override;
+    
+    uint64_t stateLocalTaskQueueSize() override;
+    // getters & setters
+    uint64_t getLastGatherPhase() { return this->lastGatherPhase; }
+    uint64_t getLastScatterPhase() { return this->lastScatterPhase; }
 
 private: 
-    bool inLocalModule(uint32_t loc) {
-        return (loc >= this->childBeginId && loc < this->childEndId);
+    void handleInPacket(CommPacket* packet) override;
+    bool isChild(int id) override {
+        return (id >= 0 && (uint32_t)id >= this->bankBeginId && 
+            (uint32_t)id < this->bankEndId);
     }
-    bool shouldGather();
-    bool shouldScatter();
     uint64_t gather(uint64_t curCycle);
     uint64_t scatter(uint64_t curCycle);
+    bool shouldCommandLoadBalance();
 
-    Counter s_RecvPackets, s_GatherTimes, s_ScatterTimes;
+public:
+    void initStats(AggregateStat* parentStat) override;
+private:
+    Counter s_GatherTimes, s_ScatterTimes, s_GatherPackets, s_ScatterPackets;
     VectorCounter sv_GatherPackets, sv_ScatterPackets;
 
-    friend class IntervalGather;
-    friend class OnDemandGather;
-    friend class WheneverGather;
-    friend class AfterGatherScatter;
-    friend class IntervalScatter;
-    friend class OnDemandScatter;
+    friend class pimbridge::GatherScheme;
+    friend class pimbridge::IntervalGather;
+    friend class pimbridge::OnDemandGather;
+    friend class pimbridge::OnDemandOfAllGather;
+    friend class pimbridge::WheneverGather;
+    friend class pimbridge::DynamicGather;
+    friend class pimbridge::DynamicOnDemandGather;
+    friend class pimbridge::DynamicIntervalGather;
+    friend class pimbridge::TaskGenerationTrackGather;
+
+    friend class pimbridge::AfterGatherScatter;
+    friend class pimbridge::IntervalScatter;
+    friend class pimbridge::OnDemandScatter;
+
+    friend class pimbridge::LoadBalancer;
+    friend class pimbridge::StealingLoadBalancer;
+    friend class pimbridge::ReserveLoadBalancer;
+    friend class pimbridge::AverageLoadBalancer;
 };
 
     
-} // namespace task_support
+} // namespace pimbridge

@@ -9,7 +9,8 @@
 #include "g_std/g_vector.h"
 #include "locks.h"
 #include "memory_hierarchy.h"
-#include "zsim.h"  // for lineBits
+#include "process_local_val.h"
+// #include "zsim.h"  // for lineBits
 
 class NUMAPolicy : public GlobAlloc {
     public:
@@ -83,6 +84,14 @@ class NUMAMap : public GlobAlloc {
         inline Address getPageAddress(const Address addr) {
             // NOTE: this must be equivalent to vAddr -> pLineAddr logic in filter_cache.h.
             return (addr >> pageBits) | (procMask >> (pageBits - lineBits));
+        }
+
+        inline Address getPageAddressFromLbPageAddress(const Address lbPageAddr) {
+            return (lbPageAddr >> (pageBits - lbPageBits));
+        }
+
+        inline Address getLbPageAddress(const Address addr) {
+            return (addr >> lbPageBits) | (procMask >> (lbPageBits - lineBits));
         }
 
         // Allocate an address from a core if not yet allocated, use the policy of the thread running on the core.

@@ -3,100 +3,14 @@
 #include "core.h"
 #include "zsim.h"
 #include "comm_support/comm_module.h"
+#include "comm_support/comm_mapping.h"
+#include "gather_scheme.h"
+#include "scatter_scheme.h"
+#include "numa_map.h"
 
 using namespace pimbridge;
 using namespace task_support;
 
-CommModuleBase::CommModuleBase(uint32_t _level, uint32_t _commId, 
-                               bool _enableInterflow)
-    : level(_level), commId(_commId), enableInterflow(_enableInterflow) {
-    std::stringstream ss; 
-    ss << "comm-" << level << "-" << commId;
-    this->name = std::string(ss.str());
-    futex_init(&commLock); 
-}
-
-void CommModuleBase::initSiblings(uint32_t sibBegin, uint32_t sibEnd) {
-    assert(this->enableInterflow);
-    this->siblingBeginId = sibBegin;
-    this->siblingEndId = sibEnd;
-    this->siblingPackets.resize(sibEnd - sibBegin);
-}
-
-void CommModuleBase::interflow(uint32_t sibId, uint32_t messageSize) {
-    zinfo->commModules[this->level][sibId]->receiveMessage(
-        this->getSiblingPackets(sibId), messageSize, 0/*TBY TODO: readyCycle*/);
-}
-
-uint32_t CommModuleBase::receiveMessage(std::deque<CommPacket*>* parentBuffer, 
-                                    uint32_t messageSize, uint64_t readyCycle) {
-    uint32_t totalSize = 0;
-    uint32_t numPackets = 0;
-    while(!parentBuffer->empty()) {
-        CommPacket* p = parentBuffer->front();
-        parentBuffer->pop_front();
-        p->readyCycle = readyCycle;
-        this->receivePacket(p);
-        numPackets += 1;
-        totalSize += p->getSize();
-        if (totalSize >= messageSize) {
-            break;
-        }
-    }
-    return numPackets;                                   
-}
-
-bool CommModuleBase::isEmpty() {
-    if (!this->parentPackets.empty()) {
-        return false;
-    }
-    if (this->enableInterflow) {
-        for (auto pb : this->siblingPackets) {
-            if (!pb.empty()) { return false; }
-        }
-    }
-    return true;
-}
-
-void CommModuleBase::handleOutPacket(CommPacket* packet) {
-    if (enableInterflow && this->isSibling(packet->to)) {
-        this->siblingPackets[packet->to].push_back(packet);
-    } else {
-        this->parentPackets.push_back(packet);
-    }
-}
-
-BottomCommModule::BottomCommModule(uint32_t _level, uint32_t _commId, 
-                                   bool _enableInterflow, PimBridgeTaskUnit* _taskUnit)
-    : CommModuleBase(_level, _commId, _enableInterflow), taskUnit(_taskUnit) {
-    assert(taskUnit->getTaskUnitId() == this->commId);
-    this->taskUnit->setCommModule(this);
-}
-
-void BottomCommModule::receivePacket(CommPacket* packet) {
-    packet->task->readyCycle = packet->readyCycle;
-    this->taskUnit->taskEnqueue(packet->task);
-    delete packet;
-    s_RecvPackets.atomicInc(1);
-}
-
-void BottomCommModule::generatePacket(uint32_t dst, TaskPtr t) {
-    CommPacket* p = new CommPacket(0, this->commId, dst, t);
-    this->handleOutPacket(p);
-    s_GenPackets.atomicInc(1);
-}
-
-void BottomCommModule::initStats(AggregateStat* parentStat) {
-    AggregateStat* commStat = new AggregateStat();
-    commStat->init(name.c_str(), "Communication module stats");
-
-    s_GenPackets.init("genPackets", "Number of generated packets");
-    commStat->append(&s_GenPackets);
-    s_RecvPackets.init("recvPackets", "Number of received packets");
-    commStat->append(&s_RecvPackets);
-
-    parentStat->append(commStat);
-}
 
 CommModule::CommModule(uint32_t _level, uint32_t _commId, bool _enableInterflow, 
                        uint32_t _childBeginId, uint32_t _childEndId, 
@@ -105,14 +19,77 @@ CommModule::CommModule(uint32_t _level, uint32_t _commId, bool _enableInterflow,
     : CommModuleBase(_level, _commId, _enableInterflow), 
       childBeginId(_childBeginId), childEndId(_childEndId), 
       gatherScheme(_gatherScheme),scatterScheme(_scatterScheme), 
-      gatherJustNow(false) {
+      lastGatherPhase(0), lastScatterPhase(0) {
     info("---build comm module: childBegin: %u, childEnd: %u", childBeginId, childEndId);
+    assert(this->level > 0);
+    this->bankBeginId = zinfo->commModules[level-1][childBeginId]->getBankBeginId();
+    this->bankEndId = zinfo->commModules[level-1][childEndId-1]->getBankEndId();
+    zinfo->commMapping->setMapping(level, bankBeginId, bankEndId, commId);
+    info("begin Id: %u, endId: %u", bankBeginId, bankEndId);
     this->scatterBuffer.resize(childEndId - childBeginId);
+    gatherScheme->setCommModule(this);
+    scatterScheme->setCommModule(this);
+    this->childQueueLength.resize(childEndId - childBeginId);
+    this->childTransferSize.resize(childEndId - childBeginId);
+    this->childQueueReadyLength.resize(childEndId - childBeginId);
 }
 
-void CommModule::receivePacket(CommPacket* packet) {
-    this->scatterBuffer[packet->to - childBeginId].push_back(packet);
-    s_RecvPackets.atomicInc(1);
+uint64_t CommModule::communicate(uint64_t curCycle) {
+    uint64_t respCycle = curCycle;
+    if (this->gatherScheme->shouldTrigger()) {
+        respCycle = gather(respCycle);
+    }
+    if (this->scatterScheme->shouldTrigger()) {
+        respCycle = scatter(respCycle);
+    }
+    return respCycle;
+}
+
+CommPacket* CommModule::nextPacket(uint32_t fromLevel, uint32_t fromCommId, 
+                                   uint32_t sizeLimit) {
+    CommPacketQueue* cpd = nullptr;
+    if (fromLevel == this->level - 1) {
+        // scatter
+        cpd = &(this->scatterBuffer[fromCommId - childBeginId]);
+    } else if (fromLevel == this->level) {
+        // interflow
+        cpd = &(this->siblingPackets[fromCommId - siblingBeginId]);
+    } else if (fromLevel == this->level + 1) {
+        // gather
+        cpd = &(this->parentPackets);
+    } else {
+        panic("invalid fromLevel %u for nextPacket from CommModule", fromLevel);
+    }
+    CommPacket* ret = cpd->front();
+    if (ret != nullptr && ret->getSize() < sizeLimit) {
+        cpd->pop();
+        return ret;
+    }
+    return nullptr;
+}
+
+void CommModule::commandLoadBalance(uint64_t curCycle) {
+    if (!this->shouldCommandLoadBalance()) {
+        return;
+    }
+    // info("module %s begin command load balance", this->getName());
+    // for (uint32_t i = this->childBeginId; i < this->childEndId; ++i) {
+    //     info("curLength: %u: %lu", i, this->childQueueLength[i-childBeginId]);
+    // }
+    this->loadBalancer->generateCommand();
+    // The information of scheduled out data
+    // write in executeLoadBalance (by lb executors)
+    // read in assignLbTarget (by lb commanders)
+    std::vector<DataHotness> outInfo;
+    outInfo.clear();
+    for (uint32_t i = this->childBeginId; i < this->childEndId; ++i) {
+        assert(loadBalancer->commands[i-childBeginId] == 0 || loadBalancer->needs[i-childBeginId] == 0);
+        uint32_t curCommand = loadBalancer->commands[i-childBeginId];
+        if (curCommand > 0) {
+            zinfo->commModules[level-1][i]->executeLoadBalance(curCommand, outInfo);
+        }
+    }
+    this->loadBalancer->assignLbTarget(outInfo);   
 }
 
 bool CommModule::isEmpty() {
@@ -125,15 +102,39 @@ bool CommModule::isEmpty() {
     return true;
 }
 
-uint64_t CommModule::communicate(uint64_t curCycle) {
-    uint64_t respCycle = curCycle;
-    if (this->shouldGather()) {
-        respCycle = gather(respCycle);
+uint64_t CommModule::stateLocalTaskQueueSize() {
+    uint64_t res = 0;
+    for (uint32_t i = childBeginId; i < childEndId; ++i) {
+        res += zinfo->commModules[level-1][i]->stateLocalTaskQueueSize();
     }
-    if (this->shouldScatter()) {
-        respCycle = scatter(respCycle);
+    return res;
+}
+
+void CommModule::handleInPacket(CommPacket* packet) {
+    if (this->addrRemapTable->getAddrLend(packet->getAddr())) {
+        packet->to = -1;
+    } else {
+        int remap = this->addrRemapTable->getChildRemap(packet->getAddr());
+        if (remap != -1) {
+            packet->to = remap;
+        } /*else {
+            // not lend, not remap, then it is in the original location. 
+            Address pageAddr = zinfo->numaMap->getPageAddressFromLbPageAddress(packet->getAddr());
+            assert((uint32_t)packet->to == zinfo->numaMap->getNodeOfPage(pageAddr));
+        }*/
+    } 
+    // Notice that it is possible that to == from
+    // This happens when a unit lends a data and then borrows it back
+    // assert(packet->to >= 0 /*&& packet->to != packet->from*/);
+    // Notice that packet->to can still be less than 0 with cross-rank scheduling.
+    if (isChild(packet->to)) {
+        uint32_t bufferId = zinfo->commMapping->getCommId(this->level-1, (uint32_t)packet->to) - childBeginId;
+        this->scatterBuffer[bufferId].push(packet);
+    } else {
+        this->handleOutPacket(packet);
+        this->s_GenPackets.atomicInc(1);
     }
-    return respCycle;
+    s_RecvPackets.atomicInc(1);
 }
 
 uint64_t CommModule::gather(uint64_t curCycle) {
@@ -146,30 +147,20 @@ uint64_t CommModule::gather(uint64_t curCycle) {
         }
     }
 
+    zinfo->gatherProfiler->initTransfer(this->level, this->commId);
+
     for (size_t i = childBeginId; i < childEndId; ++i) {
-        std::deque<CommPacket*>* buffer = 
-            zinfo->commModules[this->level-1][i]->getParentPackets();
-        uint32_t totalSize = 0;
-        while(!buffer->empty()) {
-            CommPacket* p = buffer->front();
-            assert(p->readyCycle <= curCycle);
-            p->readyCycle = readyCycle;
-            buffer->pop_front();
-            // info("gather packet: from: %u, to: %u, taskId: %u", p->from, p->to, p->task->taskId);
-            assert(inLocalModule(p->from));
-            if (inLocalModule(p->to)) {
-                this->scatterBuffer[p->to - childBeginId].push_back(p);
-            } else {
-                this->handleOutPacket(p);
-            }
-            totalSize += p->getSize();
-            this->sv_GatherPackets.atomicInc(i-childBeginId, 1);
-            if (totalSize >= this->gatherScheme->packetSize) {
-                break;
-            }
-        }
+        CommModuleBase* src = zinfo->commModules[this->level-1][i];
+        uint32_t numPackets = 0, totalSize = 0;
+        uint32_t packetSize = this->gatherScheme->packetSize;
+        
+        this->receivePackets(src, packetSize, readyCycle, numPackets, totalSize);
+        this->sv_GatherPackets.atomicInc(i-childBeginId, numPackets);
+        this->s_GatherPackets.atomicInc(numPackets);
+        zinfo->gatherProfiler->record(this->level, this->commId, i-childBeginId, totalSize);
     }
-    this->gatherJustNow = true;
+
+    this->lastGatherPhase = zinfo->numPhases;
     this->s_GatherTimes.atomicInc(1);
     return readyCycle;
 }
@@ -183,44 +174,71 @@ uint64_t CommModule::scatter(uint64_t curCycle) {
             readyCycle = respCycle > readyCycle ? respCycle : readyCycle;
         }
     }
-
     for (size_t i = childBeginId; i < childEndId; ++i) {
-        uint32_t numPackets = zinfo->commModules[level-1][i]->
-            receiveMessage(&(this->scatterBuffer[i-childBeginId]), 
-                           this->scatterScheme->packetSize, readyCycle);
+        uint32_t numPackets = 0, totalSize = 0;
+        zinfo->commModules[level-1][i]->
+            receivePackets(this, this->scatterScheme->packetSize, readyCycle, 
+                           numPackets, totalSize);
         this->sv_ScatterPackets.atomicInc(i-childBeginId, numPackets);
+        this->s_GatherPackets.atomicInc(numPackets);
     }
     this->s_ScatterTimes.atomicInc(1);
+    this->lastScatterPhase = zinfo->numPhases;
     return readyCycle;
 }
 
-bool CommModule::shouldGather() { 
-    return gatherScheme->shouldTrigger(this); 
+void CommModule::gatherState() {
+    for (uint32_t i = childBeginId; i < childEndId; ++i) {
+        CommModuleBase* child = zinfo->commModules[level-1][i];
+        uint32_t id = i - childBeginId;
+        this->childQueueReadyLength[id] = child->stateLocalTaskQueueSize();
+        this->childQueueLength[id] = child->stateLocalTaskQueueSize() + 
+            child->stateToStealSize();
+        this->childTransferSize[id] = child->stateTransferRegionSize();
+    }
+    this->loadBalancer->updateChildStateForLB();
 }
 
-bool CommModule::shouldScatter() {
-    bool ret = scatterScheme->shouldTrigger(this);
-    this->gatherJustNow = false;
-    return ret;
+bool CommModule::shouldCommandLoadBalance() {
+    bool hasIdle = false, hasNotIdle = false;
+    for (uint32_t i = childBeginId; i < childEndId; ++i) {
+        if (childQueueLength[i-childBeginId] < LoadBalancer::IDLE_THRESHOLD) {
+            hasIdle = true;
+        } else if (childQueueReadyLength[i-childBeginId] >= LoadBalancer::IDLE_THRESHOLD){
+            hasNotIdle = true;
+        }
+    }
+    return (hasIdle && hasNotIdle);
 }
 
 void CommModule::initStats(AggregateStat* parentStat) {
     AggregateStat* commStat = new AggregateStat();
     commStat->init(name.c_str(), "Communication module stats");
 
-    s_GatherTimes.init("gatherTimes", "Number of gathering");
-    commStat->append(&s_GatherTimes);
-    s_ScatterTimes.init("scatterTimes", "Number of scattering");
-    commStat->append(&s_ScatterTimes);
+    s_GenTasks.init("genTasks", "Number of generated tasks");
+    commStat->append(&s_GenTasks);
+    s_FinishTasks.init("finishTasks", "Number of finished tasks");
+    commStat->append(&s_FinishTasks);
 
+    s_GenPackets.init("genPackets", "Number of generated packets");
+    commStat->append(&s_GenPackets);
     s_RecvPackets.init("recvPackets", "Number of received packets");
     commStat->append(&s_RecvPackets);
+
+    s_GatherTimes.init("gatherTimes", "Number of gathering");
+    commStat->append(&s_GatherTimes);
+    s_GatherPackets.init("gatherPackets", "Number of gathered packets");
+    commStat->append(&s_GatherPackets);
+    s_ScatterTimes.init("scatterTimes", "Number of scattering");
+    commStat->append(&s_ScatterTimes);
+    s_ScatterPackets.init("scatterPackets", "Number of scattered packets");
+    commStat->append(&s_ScatterPackets);
+
     uint32_t numChild = childEndId - childBeginId;
-    sv_GatherPackets.init("gatherPackets", "Number of gathered packets", numChild);
+    sv_GatherPackets.init("gatherPacketsPerChild", "Number of gathered packets per child", numChild);
     commStat->append(&sv_GatherPackets);
-    sv_ScatterPackets.init("scatterPackets", "Number of scattered packets", numChild);
+    sv_ScatterPackets.init("scatterPacketsPerChild", "Number of scattered packets per child", numChild);
     commStat->append(&sv_ScatterPackets);
 
     parentStat->append(commStat);
-
 }

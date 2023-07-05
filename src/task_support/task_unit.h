@@ -10,8 +10,7 @@
 #include "comm_support/comm_packet.h"
 #include "comm_support/comm_module.h"
 
-namespace task_support
-{
+namespace task_support {
 
 class TaskUnitManager;
 
@@ -25,7 +24,6 @@ protected:
     bool isFinished;
 
 public:
-
     TaskUnit(const std::string& _name, uint32_t _tuId, TaskUnitManager* _tum)
         : name(_name), taskUnitId(_tuId), tum(_tum), endTask(nullptr), isFinished(false) {
         futex_init(&tuLock);
@@ -80,10 +78,9 @@ public:
     }
 };
 
-
 }
 
-namespace pimbridge{
+namespace pimbridge {
 
 using namespace task_support;
 
@@ -94,30 +91,41 @@ struct cmp {
 };
 
 class PimBridgeTaskUnit : public TaskUnit {
-private:
-    // std::deque<TaskPtr> taskQueue;
-    std::priority_queue<TaskPtr, std::deque<TaskPtr>, cmp> taskQueue;
+protected:
     BottomCommModule* commModule;
+    std::unordered_map<Address, std::deque<TaskPtr>> notReadyLbTasks;
+    std::priority_queue<TaskPtr, std::deque<TaskPtr>, cmp> taskQueue;
+    
 public:
     PimBridgeTaskUnit(const std::string& _name, uint32_t _tuId, TaskUnitManager* _tum)
         : TaskUnit(_name, _tuId, _tum) {}
 
-    virtual ~PimBridgeTaskUnit() {
-    }
-
     void assignNewTask(TaskPtr t, Hint* hint) override;
+
     void taskEnqueue(TaskPtr t) override;
     TaskPtr taskDequeue() override;
     void taskFinish(TaskPtr t) override;
 
-    void setCommModule(BottomCommModule* _commModule) {
-        this->commModule = _commModule;
-    }
+    virtual void executeLoadBalanceCommand(uint32_t command, 
+        std::vector<DataHotness>& outInfo);
+
+    virtual uint64_t getTaskQueueSize() { return this->taskQueue.size(); }
+    void setCommModule(BottomCommModule* _commModule) { this->commModule = _commModule; }
 
     void initStats(AggregateStat* parentStat) override;
-private:
-    Counter s_EnqueueTasks, s_DequeueTasks, s_FinishTasks, s_GenPackets;
-};
+protected:
+    // return 1 for available, 0 for not available, -1 for not fully transferred 
+    int checkAvailable(TaskPtr t);
+    int checkAvailable(Address lbPageAddr);
+    void newAddrLend(Address lbPageAddr);
+    void newAddrBorrow(Address lbPageAddr);
+    void newNotReadyTask(TaskPtr t);
 
+    Counter s_EnqueueTasks, s_DequeueTasks, s_FinishTasks, s_GenPackets;
+    Counter s_ScheduleOutTasks, s_ScheduleInTasks, s_ScheduleOutData, s_ScheduleInData;
+    Counter s_InAndOutData, s_OutAndInData;
+
+    friend class pimbridge::BottomCommModule;
+};
     
 } // namespace task_support

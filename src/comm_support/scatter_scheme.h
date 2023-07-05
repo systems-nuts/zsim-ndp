@@ -14,16 +14,18 @@ public:
     };
     Trigger trigger;
     uint32_t packetSize;
+    CommModule* commModule;
     ScatterScheme(Trigger _trigger, uint32_t _packetSize)
         : trigger(_trigger), packetSize(_packetSize){}
-    virtual bool shouldTrigger(CommModule* commModule) = 0;
+    virtual bool shouldTrigger() = 0;
+    void setCommModule(CommModule* _commModule) { this->commModule = _commModule; }
 };
 
 class AfterGatherScatter : public ScatterScheme {
 public:
     AfterGatherScatter(uint32_t _packetSize)
         : ScatterScheme(Trigger::AfterGather, _packetSize) {}
-    bool shouldTrigger(CommModule* commModule) override;
+    bool shouldTrigger() override;
 };
 
 class IntervalScatter : public ScatterScheme {
@@ -31,15 +33,17 @@ public:
     const uint32_t interval;
     IntervalScatter(uint32_t _packetSize, uint32_t _interval)
         : ScatterScheme(Trigger::Interval, _packetSize), interval(_interval) {}
-    bool shouldTrigger(CommModule* CommModule) override;
+    bool shouldTrigger() override;
 };
 
 class OnDemandScatter : public ScatterScheme {
 public:
     const uint32_t threshold;
-    OnDemandScatter(uint32_t _packetSize, uint32_t _threshold)
-        : ScatterScheme(Trigger::AfterGather, _packetSize), threshold(_threshold) {}
-    bool shouldTrigger(CommModule* commModule) override;
+    const uint32_t maxInterval;
+    OnDemandScatter(uint32_t _packetSize, uint32_t _threshold, uint32_t _maxInterval)
+        : ScatterScheme(Trigger::AfterGather, _packetSize), 
+          threshold(_threshold), maxInterval(_maxInterval) {}
+    bool shouldTrigger() override;
 };
 
 }
