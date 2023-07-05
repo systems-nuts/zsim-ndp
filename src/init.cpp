@@ -1421,6 +1421,9 @@ static void InitTaskSupport(Config& config) {
     zinfo->rootStat->append(tuStat);
 }
 
+// Restrictions that have not been checked in code:
+// chunkSize should be less than idleThreshold
+// if enableLoadBalance = True in level-x, then level-1 ~ level-(x-1) should all enableLoadBalance
 static void buildCommModules(Config& config) {
     std::vector<const char*> commModuleNames;
     config.subgroups("sys.pimBridge.commModules", commModuleNames);
@@ -1441,7 +1444,7 @@ static void buildCommModules(Config& config) {
 
         uint32_t numModules = config.get<uint32_t>(prefix + "numModules");
         info("Number of modules: %u", numModules);
-        bool enableInterflow = config.get<bool>(prefix + "enableInterflow") ;
+        bool enableInterflow = config.get<bool>(prefix + "enableInterflow");
 
         zinfo->commModules[curLevel].resize(numModules);
 
@@ -1465,10 +1468,12 @@ static void buildCommModules(Config& config) {
                 info("child num: %u", childNum);
                 GatherScheme* gatherScheme = buildGatherScheme(config, prefix + "gatherScheme.");
                 ScatterScheme* scatterScheme = buildScatterScheme(config, prefix + "scatterScheme.");
+                bool enableLoadBalance = config.get<bool>(prefix + "enableLoadBalance");
                 zinfo->commModules[curLevel][i] = 
                     new CommModule(curLevel, i, enableInterflow, 
                                    i * childNum, (i+1)*childNum, 
-                                   gatherScheme, scatterScheme);
+                                   gatherScheme, scatterScheme, 
+                                   enableLoadBalance);
                 zinfo->commModules[curLevel][i]->initStats(commStat);
                 if (curLevel != commModuleNames.size() - 1) {
                     for (uint32_t j = i * childNum; j < (i+1)*childNum; ++j) {
@@ -1513,19 +1518,18 @@ static void buildLoadBalancer(Config& config) {
     zinfo->ENABLE_LOAD_BALANCE = config.get<bool>("sys.pimBridge.loadBalancer.enable");
     zinfo->lbPageSize = config.get<uint32_t>("sys.pimBridge.loadBalancer.lbPageSize");
     std::string lbType = config.get<const char*>("sys.pimBridge.loadBalancer.type");
-    LoadBalancer::IDLE_THRESHOLD = config.get<uint32_t>("sys.pimBridge.loadBalancer.idleThreshold");
     for (uint32_t level = 1; level < zinfo->commModules.size(); ++level) {
         for (auto c : zinfo->commModules[level]) {
             uint32_t commId = c->getCommId();
             LoadBalancer* lb = nullptr;
             if (lbType == "Stealing") {    
-                lb = new StealingLoadBalancer(level, commId, config);
+                lb = new StealingLoadBalancer(config, level, commId);
             } else if (lbType == "Average") {
-                lb = new AverageLoadBalancer(level, commId);
+                lb = new AverageLoadBalancer(config, level, commId);
             } else if (lbType == "Reserve") {
                 std::string taskUnitType = config.get<const char*>("sys.taskSupport.taskUnitType");
                 assert(taskUnitType == "ReserveLbPimBridge");
-                lb = new ReserveLoadBalancer(level, commId, config);
+                lb = new ReserveLoadBalancer(config, level, commId);
             } else {
                 panic("Invalid loadBalancer type: %s", lbType.c_str());
             }

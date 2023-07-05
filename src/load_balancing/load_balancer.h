@@ -28,7 +28,8 @@ class CommModule;
 // The commands are integers, indicating the number of tasks that should be scheduled out.
 class LoadBalancer {
 public:
-    static uint32_t IDLE_THRESHOLD;
+    // static uint32_t IDLE_THRESHOLD;
+    uint32_t IDLE_THRESHOLD;
 protected:
     uint32_t level;
     uint32_t commId;
@@ -37,8 +38,9 @@ protected:
     // std::unordered_map<Address, uint32_t> assignTable;
     std::vector<uint32_t> needs;
 public: 
-    LoadBalancer(uint32_t _level, uint32_t _commId);
+    LoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
     virtual void generateCommand() = 0;
+    virtual void generateCommandFromUpper(uint32_t upperCommand) = 0;
     virtual void assignLbTarget(const std::vector<DataHotness>& outInfo);
     virtual void updateChildStateForLB() { return; }
 protected:
@@ -55,17 +57,19 @@ class StealingLoadBalancer : public LoadBalancer {
 private:
     uint32_t CHUNK_SIZE;
 public:
-    StealingLoadBalancer(uint32_t _level, uint32_t _commId, Config& config);
+    StealingLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
     void generateCommand() override;
+    void generateCommandFromUpper(uint32_t upperCommand) override;
 };
 
 // The AverageLoadBalancer schedule tasks from the tail of the task queue
 // Try to schedule the number of tasks of each queue to average
 class AverageLoadBalancer : public LoadBalancer {
 public:
-    AverageLoadBalancer(uint32_t _level, uint32_t _commId)
-        : LoadBalancer(_level, _commId) {}
+    AverageLoadBalancer(Config& config, uint32_t _level, uint32_t _commId)
+        : LoadBalancer(config, _level, _commId) {}
     void generateCommand() override;
+    void generateCommandFromUpper(uint32_t upperCommand) override { panic("todo"); }
 };
 
 class ReserveLoadBalancer : public LoadBalancer {
@@ -74,8 +78,9 @@ private:
     uint32_t HOT_DATA_NUMBER = 5;
     std::vector<DataHotness> childDataHotness;
 public:
-    ReserveLoadBalancer(uint32_t _level, uint32_t _commId, Config& config);
+    ReserveLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
     void generateCommand() override;
+    void generateCommandFromUpper(uint32_t upperCommand) override;
     void updateChildStateForLB() override;
 };
 

@@ -81,6 +81,7 @@ public:
     const char* getName() { return this->name.c_str(); }
     uint32_t getBankBeginId() { return bankBeginId; }
     uint32_t getBankEndId() { return bankEndId; }
+    uint32_t getNumBanks() {return bankEndId - bankBeginId; }
     uint32_t getLevel() { return this->level; }
     uint32_t getCommId() { return this->commId; }
     AddressRemapTable* getAddressRemapTable() { return addrRemapTable; }
@@ -143,10 +144,13 @@ private:
     std::vector<uint64_t> childTransferSize;
     std::vector<uint64_t> childQueueReadyLength;
 
+    bool enableLoadBalance;
+
 public:
     CommModule(uint32_t _level, uint32_t _commId, bool _enableInterflow, 
                uint32_t _childBeginId, uint32_t _childEndId, 
-               GatherScheme* _gatherScheme, ScatterScheme* _scatterScheme);
+               GatherScheme* _gatherScheme, ScatterScheme* _scatterScheme, 
+               bool _enableLoadBalance);
     
     uint64_t communicate(uint64_t curCycle) override;
     CommPacket* nextPacket(uint32_t fromLevel, uint32_t fromCommId, 
@@ -154,7 +158,7 @@ public:
     void gatherState() override; 
     void commandLoadBalance(uint64_t curCycle) override;
     void executeLoadBalance(uint32_t command, 
-        std::vector<DataHotness>& outInfo) { return; }
+        std::vector<DataHotness>& outInfo);
     bool isEmpty() override;
     
     uint64_t stateLocalTaskQueueSize() override;

@@ -15,11 +15,13 @@ using namespace task_support;
 CommModule::CommModule(uint32_t _level, uint32_t _commId, bool _enableInterflow, 
                        uint32_t _childBeginId, uint32_t _childEndId, 
                        GatherScheme* _gatherScheme, 
-                       ScatterScheme* _scatterScheme) 
+                       ScatterScheme* _scatterScheme, 
+                       bool _enableLoadBalance) 
     : CommModuleBase(_level, _commId, _enableInterflow), 
       childBeginId(_childBeginId), childEndId(_childEndId), 
       gatherScheme(_gatherScheme),scatterScheme(_scatterScheme), 
-      lastGatherPhase(0), lastScatterPhase(0) {
+      lastGatherPhase(0), lastScatterPhase(0), 
+      enableLoadBalance(_enableLoadBalance) {
     info("---build comm module: childBegin: %u, childEnd: %u", childBeginId, childEndId);
     assert(this->level > 0);
     this->bankBeginId = zinfo->commModules[level-1][childBeginId]->getBankBeginId();
@@ -72,10 +74,6 @@ void CommModule::commandLoadBalance(uint64_t curCycle) {
     if (!this->shouldCommandLoadBalance()) {
         return;
     }
-    // info("module %s begin command load balance", this->getName());
-    // for (uint32_t i = this->childBeginId; i < this->childEndId; ++i) {
-    //     info("curLength: %u: %lu", i, this->childQueueLength[i-childBeginId]);
-    // }
     this->loadBalancer->generateCommand();
     // The information of scheduled out data
     // write in executeLoadBalance (by lb executors)
@@ -90,6 +88,17 @@ void CommModule::commandLoadBalance(uint64_t curCycle) {
         }
     }
     this->loadBalancer->assignLbTarget(outInfo);   
+}
+
+void CommModule::executeLoadBalance(uint32_t command, 
+        std::vector<DataHotness>& outInfo) {
+    this->loadBalancer->generateCommandFromUpper(command);
+    for (uint32_t i = this->childBeginId; i < this->childEndId; ++i) { 
+        uint32_t curCommand = loadBalancer->commands[i-childBeginId];
+        if (curCommand > 0) {
+            zinfo->commModules[level-1][i]->executeLoadBalance(curCommand, outInfo);
+        }
+    }
 }
 
 bool CommModule::isEmpty() {
@@ -200,11 +209,14 @@ void CommModule::gatherState() {
 }
 
 bool CommModule::shouldCommandLoadBalance() {
+    if (!this->enableLoadBalance) {
+        return false;
+    }
     bool hasIdle = false, hasNotIdle = false;
     for (uint32_t i = childBeginId; i < childEndId; ++i) {
-        if (childQueueLength[i-childBeginId] < LoadBalancer::IDLE_THRESHOLD) {
+        if (childQueueLength[i-childBeginId] < loadBalancer->IDLE_THRESHOLD) {
             hasIdle = true;
-        } else if (childQueueReadyLength[i-childBeginId] >= LoadBalancer::IDLE_THRESHOLD){
+        } else if (childQueueReadyLength[i-childBeginId] >= loadBalancer->IDLE_THRESHOLD){
             hasNotIdle = true;
         }
     }
