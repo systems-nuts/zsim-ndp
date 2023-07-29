@@ -19,7 +19,7 @@ MemChannelBackendDDR::MemChannelBackendDDR(const g_string& _name,
         const char* addrMapping, uint32_t _queueDepth, bool _deferWrites,
         uint32_t _maxRowHits, uint32_t _powerDownCycles)
     : name(_name), rankCount(ranksPerChannel), bankCount(banksPerRank), bgrpCount(bankGroupsPerRank),
-      pageSize(pageSizeBytes), burstSize(burstCount*deviceIOBits),
+      pageSize(pageSizeBytes), burstSize(burstCount*deviceIOBits),channelWidth(channelWidthBits),
       devicesPerRank(channelWidthBits/deviceIOBits), freqKHz(memFreqMHz*1000), t(_t), p(_p),
       powerDownCycles(_powerDownCycles), queueDepth(_queueDepth), deferWrites(_deferWrites),
       maxRowHits(_maxRowHits) {
@@ -255,7 +255,7 @@ uint64_t MemChannelBackendDDR::process(const MemChannelAccReq* req) {
     const DDRAccReq* ddrReq = static_cast<const DDRAccReq*>(req);
 
     uint64_t burstCycle = requestHandler(ddrReq, true);
-    uint64_t respCycle = burstCycle + getBL(req->isWrite);
+    uint64_t respCycle = burstCycle + getBL(req->isWrite, req->data_size);
 
     lastIsWrite = req->isWrite;
     lastRankIdx = ddrReq->loc.rank;
@@ -322,7 +322,7 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
     }
 
     // RD/WR.
-    uint64_t rwCycle = calcRWCycle(bank, schedCycle, actCycle, isWrite, loc.rank);
+    uint64_t rwCycle = calcRWCycle(bank, schedCycle, actCycle, isWrite, loc.rank, req->data_size);
     if (update) {
         bank.recordRW(rwCycle);
         if (isWrite) profWR.inc();
@@ -335,12 +335,12 @@ uint64_t MemChannelBackendDDR::requestHandler(const DDRAccReq* req, bool update)
     assert(burstCycle >= minBurstCycle);
     if (update) {
         bank.recordBurst(burstCycle);  // increase monotonously
-        bank.rankState->lastActivityCycle = std::max(bank.rankState->lastActivityCycle, burstCycle + getBL(isWrite));
+        bank.rankState->lastActivityCycle = std::max(bank.rankState->lastActivityCycle, burstCycle + getBL(isWrite, req->data_size));
     }
 
     // (future) next PRE.
     if (update) {
-        uint64_t preCycle = updatePRECycle(bank, rwCycle, isWrite);
+        uint64_t preCycle = updatePRECycle(bank, rwCycle, isWrite, req->data_size);
         const auto& pl = prioLists(isWrite)[loc.rank * bankCount + loc.bank];
         const auto next = pl.front();
         if (pagePolicy == DDRPagePolicy::CLOSE ||
@@ -567,7 +567,7 @@ uint64_t MemChannelBackendDDR::calcACTCycle(const Bank& bank, uint64_t schedCycl
 }
 
 uint64_t MemChannelBackendDDR::calcRWCycle(const Bank& bank, uint64_t schedCycle, uint64_t actCycle,
-        bool isWrite, uint32_t rankIdx) const {
+        bool isWrite, uint32_t rankIdx, uint32_t data_size) const {
     // Constraints: tRCD, tWTR, tCCD, bus contention, tRTRS, tXP, tCMD.
     int64_t dataOnBus = minBurstCycle;
     if (lastIsWrite && isWrite) {
@@ -581,7 +581,7 @@ uint64_t MemChannelBackendDDR::calcRWCycle(const Bank& bank, uint64_t schedCycle
             schedCycle,
             actCycle + t.RCD,
             (lastIsWrite && !isWrite) ?
-                bank.rankState->lastBurstCycle + getBL(true) + (bank.rankState->lastBurstBankGroupIdx == bank.bankGroupIdx ? t.WTR : t.WTR_S)
+                bank.rankState->lastBurstCycle + getBL(true, data_size) + (bank.rankState->lastBurstBankGroupIdx == bank.bankGroupIdx ? t.WTR : t.WTR_S)
                 : 0,  // lastBurstCycle has not updated, i.e. last access
             bank.rankState->lastRWCycle + (bank.rankState->lastRWBankGroupIdx == bank.bankGroupIdx ? t.CCD : t.CCD_S),
             (uint64_t)std::max<int64_t>(0, dataOnBus - (isWrite ? t.CWL : t.CAS)), // avoid underflow
@@ -594,13 +594,13 @@ uint64_t MemChannelBackendDDR::calcBurstCycle(const Bank& bank, uint64_t rwCycle
     return rwCycle + (isWrite ? t.CWL : t.CAS);
 }
 
-uint64_t MemChannelBackendDDR::updatePRECycle(Bank& bank, uint64_t rwCycle, bool isWrite) {
+uint64_t MemChannelBackendDDR::updatePRECycle(Bank& bank, uint64_t rwCycle, bool isWrite, uint32_t data_size) {
     assert(bank.open);
     // Constraints: tRAS, tWR, tRTP, tCMD.
     bank.minPRECycle = maxN<uint64_t>(
             bank.minPRECycle,
             bank.lastACTCycle + t.RAS,
-            isWrite ? bank.rankState->lastBurstCycle + getBL(true) + t.WR : rwCycle + t.RTP,  // lastBurstCycle has updated, i.e., this access
+            isWrite ? bank.rankState->lastBurstCycle + getBL(true, data_size) + t.WR : rwCycle + t.RTP,  // lastBurstCycle has updated, i.e., this access
             rwCycle + t.CMD);
     return bank.minPRECycle;
 }

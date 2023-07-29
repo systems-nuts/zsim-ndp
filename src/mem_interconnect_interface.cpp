@@ -24,15 +24,20 @@ BaseCache* MemInterconnectInterface::getEndpoint(BaseCache* child, const g_strin
 
 uint64_t MemInterconnectInterface::forgeAccessParent(MemReq& req, 
                                                      uint32_t groupId, 
-                                                     uint32_t parentId) {
+                                                     uint32_t parentId, 
+                                                     uint32_t dataSize) {
     uint64_t respCycle = req.cycle;
     const uint32_t childId = req.childId;
+    // info("resp before travel: %lu", respCycle);
     respCycle = accReqTravel(req, respCycle, groupId, parentId, childId);
+    // info("resp after travel: %lu", respCycle);
     MemReq req2 = req;
     req2.cycle = respCycle;
     req2.set(MemReq::Flag::TRANSFER_REGION);
-    respCycle = groups[groupId].parents[parentId]->access(req2);
+    respCycle = groups[groupId].parents[parentId]->access(req2, true, dataSize);
+    // info("resp after access: %lu", respCycle);
     respCycle = accRespTravel(req, respCycle, groupId, parentId, childId);
+    // info("resp after resp: %lu", respCycle);
     return respCycle;
 }
 

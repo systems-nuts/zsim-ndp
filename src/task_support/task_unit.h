@@ -32,7 +32,7 @@ public:
     virtual ~TaskUnit() {}
 
     virtual void assignNewTask(TaskPtr t, Hint* hint) = 0;
-    virtual void taskEnqueue(TaskPtr t) = 0;
+    virtual void taskEnqueue(TaskPtr t, int available) = 0;
     virtual TaskPtr taskDequeue() = 0;
     virtual void taskFinish(TaskPtr t) = 0;
 
@@ -102,7 +102,7 @@ public:
 
     void assignNewTask(TaskPtr t, Hint* hint) override;
 
-    void taskEnqueue(TaskPtr t) override;
+    void taskEnqueue(TaskPtr t, int available) override;
     TaskPtr taskDequeue() override;
     void taskFinish(TaskPtr t) override;
 
@@ -114,16 +114,12 @@ public:
 
     void initStats(AggregateStat* parentStat) override;
 protected:
-    // return 1 for available, 0 for not available, -1 for not fully transferred 
-    int checkAvailable(TaskPtr t);
-    int checkAvailable(Address lbPageAddr);
-    void newAddrLend(Address lbPageAddr);
     void newAddrBorrow(Address lbPageAddr);
     void newNotReadyTask(TaskPtr t);
 
-    Counter s_EnqueueTasks, s_DequeueTasks, s_FinishTasks, s_GenPackets;
-    Counter s_ScheduleOutTasks, s_ScheduleInTasks, s_ScheduleOutData, s_ScheduleInData;
-    Counter s_InAndOutData, s_OutAndInData;
+    Counter s_EnqueueTasks, s_DequeueTasks, s_FinishTasks;
+    // Counter s_ScheduleOutTasks, s_ScheduleInTasks, s_ScheduleOutData, s_ScheduleInData;
+    // Counter s_InAndOutData, s_OutAndInData;
 
     friend class pimbridge::BottomCommModule;
 };

@@ -37,6 +37,7 @@ protected:
     std::vector<uint32_t> commands;
     // std::unordered_map<Address, uint32_t> assignTable;
     std::vector<uint32_t> needs;
+    std::vector<uint32_t> bankLevelNeeds;
 public: 
     LoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
     virtual void generateCommand() = 0;
@@ -47,6 +48,7 @@ protected:
     void assignOneAddr(Address addr, uint32_t target);
     void output();
     void reset();
+    void generateBankLevelNeeds();
 
     friend class CommModule;
 };
@@ -72,16 +74,19 @@ public:
     void generateCommandFromUpper(uint32_t upperCommand) override { panic("todo"); }
 };
 
+class ReserveLbPimBridgeTaskUnit;
+
 class ReserveLoadBalancer : public LoadBalancer {
 private:
     uint32_t CHUNK_SIZE;
-    uint32_t HOT_DATA_NUMBER = 5;
+    uint32_t HOT_DATA_NUMBER = 10;
     std::vector<DataHotness> childDataHotness;
 public:
     ReserveLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
     void generateCommand() override;
     void generateCommandFromUpper(uint32_t upperCommand) override;
     void updateChildStateForLB() override;
+    void copyToParentState(std::vector<DataHotness>& parentHotnessInfo) const ;
 };
 
 

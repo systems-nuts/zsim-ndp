@@ -19,32 +19,58 @@ LoadBalancer::LoadBalancer(Config& config, uint32_t _level, uint32_t _commId)
     uint32_t numChild = commModule->childEndId - commModule->childBeginId;
     this->commands.resize(numChild);
     this->needs.resize(numChild);
+    uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
+    this->bankLevelNeeds.resize(numBanks);
 }
 
 void LoadBalancer::assignLbTarget(const std::vector<DataHotness>& outInfo) {
-    uint32_t curChildId = 0;
+    uint32_t curBankId = 0;
+    this->generateBankLevelNeeds();
+    uint32_t lastInNeed = (uint32_t)-1; 
+
+    uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
+    std::vector<uint32_t> assignment(numBanks, 0);
+
     for (uint32_t i = 0; i < outInfo.size(); ++i) {
         auto item = outInfo[i];
-        while (this->needs[curChildId] == 0) {
-            if (++curChildId >= this->needs.size()) {
+        while (this->bankLevelNeeds[curBankId] == 0) {
+            ++curBankId;
+            if (curBankId >= bankLevelNeeds.size()) {
+                info("----------------- need lastInNeed! ---------------------");
+                curBankId = lastInNeed; 
                 break;
             }
         }
-        if (curChildId >= this->needs.size()) {
-            break;
-        }
-        // info("Assign lb target: cur childId: %u, needs: %u, addr: %lu, cnt: %u",  
-        //     curChildId + commModule->childBeginId, this->needs[curChildId], item.addr, item.cnt);
-        uint32_t targetCommId = curChildId + commModule->childBeginId;
-        this->assignOneAddr(item.addr, targetCommId);
-        zinfo->commModules[level-1][targetCommId]->addToSteal(item.cnt);
-        this->needs[curChildId] = this->needs[curChildId] < item.cnt ? 
-            0 : this->needs[curChildId] - item.cnt;
+        // assert(curBankId < this->bankLevelNeeds.size());
+        // if (curBankId >= this->needs.size()) {
+        //     break;
+        // }
+        uint32_t targetBankId = curBankId + commModule->bankBeginId;
+        // info("Assign lb target: from bank: %u, to bank: %u, needs: %u, addr: %lu, cnt: %u",  
+        //     item.srcBankId, targetBankId, this->bankLevelNeeds[curBankId], item.addr, item.cnt);
+        this->assignOneAddr(item.addr, targetBankId);
+        zinfo->commModules[0][targetBankId]->addToSteal(item.cnt);
+        assignment[curBankId] += item.cnt;
+        this->bankLevelNeeds[curBankId] = this->bankLevelNeeds[curBankId] < item.cnt ? 
+            0 : this->bankLevelNeeds[curBankId] - item.cnt;
+        lastInNeed = curBankId;
     }
+    // if (this->commId == 1) {
+    //     for (uint32_t i = 0; i < numBanks; ++i) {
+    //         info("assign: i: %u, amount: %u", i, assignment[i]);
+    //     }
+    // }
 }
 
-void LoadBalancer::assignOneAddr(Address addr, uint32_t target) {
-    this->commModule->addrRemapTable->setChildRemap(addr, target);
+void LoadBalancer::assignOneAddr(Address addr, uint32_t targetBankId) {
+    uint32_t curCommId = this->commId;
+    uint32_t childLevelCommId = (uint32_t)-1;
+    for (uint32_t l = this->level; l >= 1; --l) {
+        childLevelCommId = zinfo->commMapping->getCommId(l-1, targetBankId);
+        zinfo->commModules[l][curCommId]->newAddrRemap(addr, childLevelCommId);
+        curCommId = childLevelCommId;
+    }
+    zinfo->commModules[0][targetBankId]->newAddrRemap(addr, 0, true);
 }
 
 void LoadBalancer::output() {
@@ -57,10 +83,25 @@ void LoadBalancer::output() {
 }
 
 void LoadBalancer::reset() {
+    this->needs.assign(this->needs.size(), 0);
+    this->commands.assign(this->commands.size(), 0);
+    this->bankLevelNeeds.assign(this->bankLevelNeeds.size(), 0);
+}
+
+void LoadBalancer::generateBankLevelNeeds() {
+    if (this->level == 1) {
+        this->bankLevelNeeds.assign(needs.begin(), needs.end());
+        return;
+    }
+    uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
     uint32_t numChild = commModule->childEndId - commModule->childBeginId;
-    for (uint32_t i = 0; i < numChild; ++i) {
-        this->needs[i] = 0;
-        this->commands[i] = 0;
+    uint32_t banksPerComm = numBanks / numChild;
+    for(uint32_t i = 0; i < numChild; ++i) {
+        uint32_t curNeedPerBank = (this->needs[i]+banksPerComm-1) / banksPerComm;
+        for (uint32_t j = i * banksPerComm; j < (i+1) * banksPerComm; ++j) {
+            this->bankLevelNeeds[j] = curNeedPerBank;
+            // info("bank need: %u %u", j, curNeedPerBank);
+        }
     }
 }
 

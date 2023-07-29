@@ -91,6 +91,7 @@ class CoreRecorder {
         //Stats (called fully synchronized)
         uint64_t getUnhaltedCycles(uint64_t curCycle) const;
         uint64_t getContentionCycles() const;
+        TimingEvent* getPrevRespEvent() { return this->prevRespEvent; }
 
     private:
         void recordAccess(uint64_t startCycle, bool isCritical);

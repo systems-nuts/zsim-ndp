@@ -38,12 +38,15 @@ CommModule::CommModule(uint32_t _level, uint32_t _commId, bool _enableInterflow,
 
 uint64_t CommModule::communicate(uint64_t curCycle) {
     uint64_t respCycle = curCycle;
+    // info("resp before gather: %lu", respCycle);
     if (this->gatherScheme->shouldTrigger()) {
         respCycle = gather(respCycle);
     }
+    // info("resp after gather: %lu", respCycle);
     if (this->scatterScheme->shouldTrigger()) {
         respCycle = scatter(respCycle);
     }
+    // info("resp after scatter: %lu", respCycle);
     return respCycle;
 }
 
@@ -70,10 +73,16 @@ CommPacket* CommModule::nextPacket(uint32_t fromLevel, uint32_t fromCommId,
     return nullptr;
 }
 
-void CommModule::commandLoadBalance(uint64_t curCycle) {
+void CommModule::commandLoadBalance() {
     if (!this->shouldCommandLoadBalance()) {
         return;
     }
+    // if (this->commId == 1) {
+    //     for (uint32_t i = 0; i < this->childQueueLength.size(); ++i) {
+    //         info("i: %u, length: %u, readyLength: %u", i, childQueueLength[i], childQueueReadyLength[i]);
+    //     }
+    // }
+    // info("%s command load balance", this->getName());
     this->loadBalancer->generateCommand();
     // The information of scheduled out data
     // write in executeLoadBalance (by lb executors)
@@ -92,12 +101,17 @@ void CommModule::commandLoadBalance(uint64_t curCycle) {
 
 void CommModule::executeLoadBalance(uint32_t command, 
         std::vector<DataHotness>& outInfo) {
+    // info("%s execute load balance", this->getName());
     this->loadBalancer->generateCommandFromUpper(command);
+    uint64_t curOutSize = outInfo.size();
     for (uint32_t i = this->childBeginId; i < this->childEndId; ++i) { 
         uint32_t curCommand = loadBalancer->commands[i-childBeginId];
         if (curCommand > 0) {
             zinfo->commModules[level-1][i]->executeLoadBalance(curCommand, outInfo);
         }
+    }
+    for (uint64_t i = curOutSize; i < outInfo.size(); ++i) {
+        this->newAddrLend(outInfo[i].addr);
     }
 }
 
@@ -119,31 +133,53 @@ uint64_t CommModule::stateLocalTaskQueueSize() {
     return res;
 }
 
+uint64_t CommModule::stateToStealSize() {
+    uint64_t res = 0;
+    for (uint32_t i = childBeginId; i < childEndId; ++i) {
+        res += zinfo->commModules[level-1][i]->stateToStealSize();
+    }
+    return res;
+}
+
 void CommModule::handleInPacket(CommPacket* packet) {
-    if (this->addrRemapTable->getAddrLend(packet->getAddr())) {
-        packet->to = -1;
-    } else {
-        int remap = this->addrRemapTable->getChildRemap(packet->getAddr());
-        if (remap != -1) {
-            packet->to = remap;
-        } /*else {
-            // not lend, not remap, then it is in the original location. 
-            Address pageAddr = zinfo->numaMap->getPageAddressFromLbPageAddress(packet->getAddr());
-            assert((uint32_t)packet->to == zinfo->numaMap->getNodeOfPage(pageAddr));
-        }*/
-    } 
-    // Notice that it is possible that to == from
-    // This happens when a unit lends a data and then borrows it back
-    // assert(packet->to >= 0 /*&& packet->to != packet->from*/);
-    // Notice that packet->to can still be less than 0 with cross-rank scheduling.
-    if (isChild(packet->to)) {
-        uint32_t bufferId = zinfo->commMapping->getCommId(this->level-1, (uint32_t)packet->to) - childBeginId;
-        this->scatterBuffer[bufferId].push(packet);
-    } else {
+    // if (packet->getInnerType() == CommPacket::DataLend && packet->from == 4) {
+    //     info("addr: %lu, orig packet to: %d", packet->getAddr(), packet->to);
+    // }
+    assert(packet->toLevel == this->level);
+    int avail = this->checkAvailable(packet->getAddr());
+    if (avail == -1) {
         this->handleOutPacket(packet);
-        this->s_GenPackets.atomicInc(1);
+    } else {
+        assert(avail >= 0);
+        uint32_t availLoc = (uint32_t)avail;
+        this->handleToChildPacket(packet, availLoc);
     }
     s_RecvPackets.atomicInc(1);
+}
+
+void CommModule::handleToChildPacket(CommPacket* packet, uint32_t childCommId) {
+    packet->fromLevel = this->level;
+    packet->fromCommId = this->commId;
+    packet->toLevel = this->level - 1;
+    packet->toCommId = childCommId;
+    this->scatterBuffer[childCommId - childBeginId].push(packet);
+}
+
+int CommModule::checkAvailable(Address lbPageAddr) {
+    Address pageAddr = zinfo->numaMap->getPageAddressFromLbPageAddress(lbPageAddr);
+    uint32_t nodeId = zinfo->numaMap->getNodeOfPage(pageAddr);
+    int remap = this->addrRemapTable->getChildRemap(lbPageAddr);
+    if (remap != -1) {
+        assert(!this->addrRemapTable->getAddrLend(lbPageAddr));
+        return remap;
+    } else {
+        assert(!this->addrRemapTable->getAddrLend(lbPageAddr) || isChild(nodeId));
+        if (isChild(nodeId) && !this->addrRemapTable->getAddrLend(lbPageAddr)) {
+            return zinfo->commMapping->getCommId(this->level-1, nodeId);
+        } else {
+            return -1;
+        }
+    }
 }
 
 uint64_t CommModule::gather(uint64_t curCycle) {
@@ -151,7 +187,10 @@ uint64_t CommModule::gather(uint64_t curCycle) {
     uint64_t readyCycle = curCycle;
     if (this->level == 1) {
         for (uint32_t i = childBeginId; i < childEndId; ++i) {
-            uint64_t respCycle = zinfo->cores[i]->recvCommReq(true, curCycle, i);
+            uint64_t respCycle = zinfo->cores[i]->recvCommReq(true, curCycle, i, 
+                (this->gatherScheme->packetSize - 64));
+                // 8);
+            // info("resp of %u: %lu", i, respCycle);
             readyCycle = respCycle > readyCycle ? respCycle : readyCycle;
         }
     }
@@ -169,17 +208,21 @@ uint64_t CommModule::gather(uint64_t curCycle) {
         zinfo->gatherProfiler->record(this->level, this->commId, i-childBeginId, totalSize);
     }
 
+
     this->lastGatherPhase = zinfo->numPhases;
     this->s_GatherTimes.atomicInc(1);
     return readyCycle;
 }
 
 uint64_t CommModule::scatter(uint64_t curCycle) {
-    // info("scatter: %u-%u", level, commId);
+    // if(zinfo->beginDebugOutput) {
+        // info("scatter: %u-%u", level, commId);
+    // }
     uint64_t readyCycle = curCycle;
     if (this->level == 1) {
         for (uint32_t i = childBeginId; i < childEndId; ++i) {
-            uint64_t respCycle = zinfo->cores[i]->recvCommReq(true, curCycle, i);
+            uint64_t respCycle = zinfo->cores[i]->recvCommReq(false, curCycle, 
+                i, this->scatterScheme->packetSize);
             readyCycle = respCycle > readyCycle ? respCycle : readyCycle;
         }
     }
@@ -200,10 +243,21 @@ void CommModule::gatherState() {
     for (uint32_t i = childBeginId; i < childEndId; ++i) {
         CommModuleBase* child = zinfo->commModules[level-1][i];
         uint32_t id = i - childBeginId;
-        this->childQueueReadyLength[id] = child->stateLocalTaskQueueSize();
-        this->childQueueLength[id] = child->stateLocalTaskQueueSize() + 
-            child->stateToStealSize();
+
+        uint64_t newChildReadyLength = child->stateLocalTaskQueueSize();
+        uint64_t newStealLength = child->stateToStealSize();
+        uint64_t newChildLength = newChildReadyLength + newStealLength;
+        // if (this->level == 1 && zinfo->SCHEDULE_ALGO == "Reserve") {
+        //     if (this->childQueueReadyLength[id] == 0 && newChildReadyLength == 0 
+        //             && newChildLength != 0 && newChildLength == this->childQueueLength[id]) {
+        //         child->clearToSteal();
+        //         newStealLength = 0;
+        //     }
+        // }
+        this->childQueueReadyLength[id] = newChildReadyLength;
+        this->childQueueLength[id] = newChildLength;
         this->childTransferSize[id] = child->stateTransferRegionSize();
+        //  info("module %s length: %u", child->getName(), this->childQueueReadyLength[id]);
     }
     this->loadBalancer->updateChildStateForLB();
 }
@@ -245,6 +299,15 @@ void CommModule::initStats(AggregateStat* parentStat) {
     commStat->append(&s_ScatterTimes);
     s_ScatterPackets.init("scatterPackets", "Number of scattered packets");
     commStat->append(&s_ScatterPackets);
+
+    s_ScheduleOutData.init("scheduleOutData", "Number of scheduled out data");
+    commStat->append(&s_ScheduleOutData);
+    s_ScheduleInData.init("scheduleInData", "Number of scheduled in data");
+    commStat->append(&s_ScheduleInData);
+    s_ScheduleOutTasks.init("scheduleOutTasks", "Number of scheduled out tasks");
+    commStat->append(&s_ScheduleOutTasks);
+    s_ScheduleInTasks.init("scheduleInTasks", "Number of scheduled in tasks");
+    commStat->append(&s_ScheduleInTasks);
 
     uint32_t numChild = childEndId - childBeginId;
     sv_GatherPackets.init("gatherPacketsPerChild", "Number of gathered packets per child", numChild);

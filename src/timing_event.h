@@ -158,6 +158,7 @@ class TimingEvent {
             state = EV_RUNNING;
             assert_msg(startCycle >= minStartCycle, "startCycle %ld < minStartCycle %ld, preDelay %d postDelay %d numChildren %d str %s",
                     startCycle, minStartCycle, preDelay, postDelay, numChildren, str().c_str());
+            // startCycle = startCycle >= minStartCycle ? startCycle:minStartCycle;
             simulate(startCycle);
             // NOTE: This assertion is invalid now, because a call to done() may destroy the event.
             // However, since we check other transitions, this should not be a problem.

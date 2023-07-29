@@ -76,10 +76,11 @@ public:
 
 class DynamicGather : public GatherScheme {
 public:
-    DynamicGather(Trigger _trigger, uint32_t _packetSize)
-        : GatherScheme(_trigger, _packetSize) {}
+    DynamicGather(Trigger _trigger, uint32_t _packetSize, uint32_t _safeThreshold)
+        : GatherScheme(_trigger, _packetSize), safeThreshold(_safeThreshold) {}
 protected:
     const double highBwUtil = 1.0, midBwUtil = 0.5, lowBwUtil = 0.2;
+    uint32_t safeThreshold;
     bool enoughTransferPacket();
     bool isDangerous();
     bool isSafe();
@@ -93,7 +94,7 @@ private:
 public:
     DynamicOnDemandGather(uint32_t _packetSize, uint32_t _highThreshold, 
         uint32_t _lowThreshold, uint32_t _maxInterval)
-        : DynamicGather(Trigger::DynamicOnDemand, _packetSize), 
+        : DynamicGather(Trigger::DynamicOnDemand, _packetSize, _lowThreshold), 
           highThreshold(_highThreshold), lowThreshold(_lowThreshold), 
           maxInterval(_maxInterval) {}
     
@@ -103,8 +104,8 @@ public:
 class DynamicIntervalGather : public DynamicGather {
 public:
     uint32_t interval;
-    DynamicIntervalGather(uint32_t _packetSize, uint32_t _initialInterval) 
-        : DynamicGather(Trigger::DynamicInterval, _packetSize), 
+    DynamicIntervalGather(uint32_t _packetSize, uint32_t _initialInterval, uint32_t _safeThrehold) 
+        : DynamicGather(Trigger::DynamicInterval, _packetSize, _safeThrehold), 
           interval(_initialInterval) {}
 
     bool shouldTrigger() override;

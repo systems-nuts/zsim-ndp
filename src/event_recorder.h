@@ -41,6 +41,7 @@ struct TimingRecord {
     AccessType type;
     TimingEvent* startEvent;
     TimingEvent* endEvent;
+    TimingEvent* nonCriticalEndEvent;
 
     bool isValid() const { return startEvent; }
     void clear() { startEvent = nullptr; }

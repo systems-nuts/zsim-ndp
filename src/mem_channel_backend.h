@@ -19,6 +19,7 @@ struct MemChannelAccReq : public GlobAlloc {
     // Cycle when entering schedule queues. Minimum time to be issued.
     // in mem cycles.
     uint64_t schedCycle;
+    uint32_t data_size;
 
     // Event to response. Null for writes as they get responses immediately.
     MemChannelAccEvent* ev;
@@ -56,7 +57,7 @@ class MemChannelBackend : public GlobAlloc {
         virtual uint64_t getTickCycleLowerBound() const = 0;
 
         virtual uint32_t getMemFreqKHz() const = 0;
-        virtual uint32_t getMinLatency(const bool isWrite) const = 0;
+        virtual uint32_t getMinLatency(const bool isWrite, const uint32_t data_size) const = 0;
 
         // Number of periodical events.
         virtual uint32_t getPeriodicalEventCount() const { return 0; }
@@ -135,7 +136,7 @@ class MemChannelBackendSimple : public MemChannelBackend {
         }
 
         uint32_t getMemFreqKHz() const { return freqMHz * 1000; }
-        uint32_t getMinLatency(const bool isWrite) const { return latency; }
+        uint32_t getMinLatency(const bool isWrite, const uint32_t data_size) const { return latency; }
 
     private:
         // Frequency.

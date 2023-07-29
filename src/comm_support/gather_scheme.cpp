@@ -71,7 +71,7 @@ bool DynamicGather::isDangerous() {
 bool DynamicGather::isSafe() {
     for (size_t i = commModule->childBeginId; i < commModule->childEndId; ++i) {
         uint64_t curSize = commModule->childQueueReadyLength[i-commModule->childBeginId];
-        if (curSize <= 5) {
+        if (curSize <= safeThreshold) {
             return false;
         }
     }

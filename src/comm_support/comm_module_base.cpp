@@ -2,6 +2,7 @@
 #include "stats.h"
 #include "core.h"
 #include "zsim.h"
+#include "numa_map.h"
 #include "comm_support/comm_module.h"
 #include "comm_support/comm_mapping.h"
 #include "comm_support/comm_packet_queue.h"
@@ -20,7 +21,6 @@ CommModuleBase::CommModuleBase(uint32_t _level, uint32_t _commId,
     this->name = std::string(ss.str());
     futex_init(&commLock); 
     this->parentId = (uint32_t)-1;
-    this->toStealSize = 0;
     this->addrRemapTable = new AddressRemapTable(level, commId);
 }
 
@@ -54,6 +54,11 @@ void CommModuleBase::receivePackets(CommModuleBase* src,
             // if the size is not enough, also return nullptr
             break;
         }
+        // if (zinfo->beginDebugOutput) {
+            // info("packet: type %u, fromLevel: %u, fromComm: %u, toLevel: %u, toComm: %d, priority: %u, sig: %lu, addr: %lu", 
+            //     p->type, p->fromLevel, p->fromCommId, p->toLevel, p->toCommId, 
+            //     p->priority, p->getSignature(), p->getAddr());
+        // }
         p->readyCycle = readyCycle;
         totalSize += p->getSize();
         this->handleInPacket(p);
@@ -66,10 +71,15 @@ void CommModuleBase::receivePackets(CommModuleBase* src,
 }
 
 void CommModuleBase::handleOutPacket(CommPacket* packet) {
-    if (enableInterflow && this->isSibling(packet->to)) {
-        uint32_t bufferId = zinfo->commMapping->getCommId(this->level, packet->to) - siblingBeginId;
+    packet->fromCommId = this->commId;
+    packet->fromLevel = this->level;
+    if (enableInterflow && this->isSibling(packet->toCommId)) {
+        uint32_t bufferId = packet->toCommId - siblingBeginId;
+        packet->toLevel = this->level;
         this->siblingPackets[bufferId].push(packet);
     } else {
+        packet->toLevel = this->level+1;
+        packet->toCommId = -1;
         this->parentPackets.push(packet);
     } 
     this->s_GenPackets.atomicInc(1);
@@ -86,19 +96,61 @@ void CommModuleBase::interflow(uint32_t sibId, uint32_t messageSize) {
             numPackets, totalSize);
 }
 
-void CommModuleBase::addToSteal(uint32_t num) {
-    this->toStealSize += num;
+void CommModuleBase::newAddrLend(Address lbPageAddr) {
+    Address pageAddr = zinfo->numaMap->getPageAddressFromLbPageAddress(lbPageAddr);
+    uint32_t nodeId = zinfo->numaMap->getNodeOfPage(pageAddr);
+    // info("module %s lend data: %lu, nodeId: %u", this->getName(), lbPageAddr, nodeId);
+    assert(!addrRemapTable->getAddrLend(lbPageAddr) && 
+        !addrRemapTable->getAddrBorrowMidState(lbPageAddr));
+    addrRemapTable->setChildRemap(lbPageAddr, -1);
+    if (isChild(nodeId)) {
+        addrRemapTable->setAddrLend(lbPageAddr, true);
+    } 
+    this->s_ScheduleOutData.atomicInc(1);
 }
 
-// void CommModuleBase::finishTask() {
-//     this->s_FinishTasks.atomicInc(1);
-//     if (this->parentId != (uint32_t)-1) {
-//         zinfo->commModules[level+1][parentId]->finishTask();
-//     }
-// }
-// void CommModuleBase::generateTask() {
-//     this->s_GenTasks.atomicInc(1);
-//     if (this->parentId != (uint32_t)-1) {
-//         zinfo->commModules[level+1][parentId]->generateTask();
-//     }
-// }
+void CommModuleBase::newAddrRemap(Address lbPageAddr, uint32_t dst, bool isMidState) {
+    // info("module %s receive data %lu commId: %u: isMid: %u", 
+    //     this->getName(), lbPageAddr, this->commId, isMidState);
+    Address pageAddr = zinfo->numaMap->getPageAddressFromLbPageAddress(lbPageAddr);
+    uint32_t nodeId = zinfo->numaMap->getNodeOfPage(pageAddr);
+    if (this->level == 0) {
+        if (isChild(nodeId)) {
+            assert(nodeId == this->commId);
+            if (isMidState) {
+                addrRemapTable->setAddrBorrowMidState(lbPageAddr, 0);
+            } else if (addrRemapTable->getAddrBorrowMidState(lbPageAddr)) {
+                addrRemapTable->eraseAddrBorrowMidState(lbPageAddr);
+            }
+            addrRemapTable->setAddrLend(lbPageAddr, false);
+        } else {
+            assert(!addrRemapTable->getAddrLend(lbPageAddr));
+            assert(addrRemapTable->getChildRemap(lbPageAddr) == -1);
+            if (isMidState) {
+                addrRemapTable->setAddrBorrowMidState(lbPageAddr, 0);
+            } else {
+                if (addrRemapTable->getAddrBorrowMidState(lbPageAddr)) {
+                    addrRemapTable->eraseAddrBorrowMidState(lbPageAddr);
+                }
+                addrRemapTable->setChildRemap(lbPageAddr, dst);
+            }
+        }
+        this->s_ScheduleInData.atomicInc(1);
+    } else {
+        assert(!isMidState);
+        if (isChild(nodeId)) {
+            if (addrRemapTable->getAddrLend(lbPageAddr)) {
+                addrRemapTable->setAddrLend(lbPageAddr, false);
+            }
+            uint32_t childCommId = zinfo->commMapping->getCommId(level-1, nodeId);
+            if (childCommId != dst) {
+                addrRemapTable->setChildRemap(lbPageAddr, dst);
+            } else {
+                addrRemapTable->setChildRemap(lbPageAddr, -1);
+            }
+        } else {
+            assert(!addrRemapTable->getAddrLend(lbPageAddr));
+            addrRemapTable->setChildRemap(lbPageAddr, dst);
+        }
+    }
+}

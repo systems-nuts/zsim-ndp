@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <queue>
 #include <deque>
+#include "load_balancer.h"
 
 
 namespace pimbridge {
@@ -51,16 +52,19 @@ public:
     ReserveLbPimBridgeTaskUnit(const std::string& _name, uint32_t _tuId, 
                                TaskUnitManager* _tum, uint32_t numBucket, 
                                uint32_t bucketSize);
-    void taskEnqueue(TaskPtr t) override;
+    void taskEnqueue(TaskPtr t, int available) override;
     TaskPtr taskDequeue() override;
 
     void executeLoadBalanceCommand(uint32_t command, 
         std::vector<DataHotness>& outInfo) override;
     uint64_t getTaskQueueSize() override;
+    void exitReserveState(Address lbPageAddr);
 private:
     bool shouldReserve(TaskPtr t);
     TaskPtr reservedTaskDequeue();
     void reservedTaskEnqueue(TaskPtr t);
+
+    friend class ReserveLoadBalancer;
 };
 
 

@@ -66,15 +66,15 @@ class MemInterconnectInterface : public GlobAlloc {
 
                 void setParents(uint32_t _childId, const g_vector<MemObject*>& parents, Network* network);
                 
-                uint64_t forgeAccess(MemReq& req, uint32_t parentId) {
-                    return this->interface->forgeAccessParent(req, groupId, parentId);
+                uint64_t forgeAccess(MemReq& req, uint32_t parentId, uint32_t dataSize) {
+                    return this->interface->forgeAccessParent(req, groupId, parentId, dataSize);
                 }
                 uint64_t access(MemReq& req);
 
                 uint64_t invalidate(const InvReq& req);
         };
     protected: 
-        uint64_t forgeAccessParent(MemReq& req, uint32_t groupId, uint32_t parentId);
+        uint64_t forgeAccessParent(MemReq& req, uint32_t groupId, uint32_t parentId, uint32_t dataSize);
         uint64_t accessParent(MemReq& req, uint32_t groupId);
 
         uint64_t invalidateChild(const InvReq& req, uint32_t groupId, BaseCache* child, uint32_t childId);

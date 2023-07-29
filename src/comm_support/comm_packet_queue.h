@@ -9,13 +9,23 @@ struct packetCmp {
     bool operator()(const CommPacket* p1, const CommPacket* p2) {
         if (p1->priority != p2->priority) {
             return p1->priority > p2->priority;
+        } else if (p1->getIdx() != p2->getIdx()) {
+            // TBY TODO: is this correct?
+            return p1->getIdx() > p2->getIdx();
         } else if (p1->readyCycle != p2->readyCycle) {
             return p1->readyCycle > p2->readyCycle;
-        } else if (p1->getIdx() != p2->getIdx()) {
-            return p1->getIdx() > p2->getIdx();
         } else {
             return p1->getSignature() > p2->getSignature();
         }
+        // if (p1->priority != p2->priority) {
+        //     return p1->priority > p2->priority;
+        // } else if (p1->readyCycle != p2->readyCycle) {
+        //     return p1->readyCycle > p2->readyCycle;
+        // } else if (p1->getIdx() != p2->getIdx()) {
+        //     return p1->getIdx() > p2->getIdx();
+        // } else {
+        //     return p1->getSignature() > p2->getSignature();
+        // }
     }
 };
 
@@ -40,7 +50,7 @@ public:
             // use (a+b-1)/b to get ceil(a/b)
             uint32_t total = (p->getSize() + CommPacket::MAX_SIZE - 1) / CommPacket::MAX_SIZE;
             for (uint32_t i = 0; i < total; ++i) {
-                SubCommPacket* sp = new SubCommPacket(p, i, total);
+                SubCommPacket* sp = new SubCommPacket(p, i+1, total);
                 pdq.push(sp);
                 this->size += sp->getSize();
             }

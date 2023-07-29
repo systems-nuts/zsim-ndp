@@ -64,6 +64,7 @@ CoreRecorder::CoreRecorder(uint32_t _domain, g_string& _name)
 
 
 uint64_t CoreRecorder::notifyJoin(uint64_t curCycle) {
+    
     if (state == HALTED) {
         assert(!prevRespEvent);
         curCycle = zinfo->globPhaseCycles; //start at beginning of the phase
@@ -117,6 +118,14 @@ void CoreRecorder::notifyLeave(uint64_t curCycle) {
 
 void CoreRecorder::recordAccess(uint64_t startCycle, bool isCritical) {
     assert(eventRecorder.hasRecord());
+    // if (!prevRespEvent) {
+    //     assert(!isCritical);
+    //     prevRespEvent = new (eventRecorder) TimingCoreEvent(0, startCycle, this, domain);
+    //     prevRespCycle = startCycle;
+    //     prevRespEvent->setMinStartCycle(startCycle);
+    //     prevRespEvent->queue(startCycle);
+    //     eventRecorder.setStartSlack(0);
+    // }
     TimingRecord tr = eventRecorder.popRecord();
     TimingEvent* origPrevResp = prevRespEvent;
 
@@ -134,10 +143,17 @@ void CoreRecorder::recordAccess(uint64_t startCycle, bool isCritical) {
     } else {
         assert(IsPut(tr.type) || !isCritical);
         // Link previous response and this req directly (don't even create a new event)
-        DelayEvent* dr = new (eventRecorder) DelayEvent(tr.reqCycle - prevRespCycle);
-        dr->setMinStartCycle(prevRespCycle);
-        assert_msg(prevRespEvent, "Invalid prevRespEvent");
-        prevRespEvent->addChild(dr, eventRecorder)->addChild(tr.startEvent, eventRecorder);
+        uint64_t delay = tr.reqCycle - prevRespCycle;
+        DelayEvent* ev = new (eventRecorder) DelayEvent(delay);
+        ev->setMinStartCycle(prevRespCycle);
+        // if (!prevRespEvent) {
+        //     DelayEvent* prevEv = new (eventRecorder) DelayEvent(0);
+        //     prevEv->setMinStartCycle(prevRespCycle);
+        //     prevRespEvent = prevEv;
+        // }
+        assert_msg(prevRespEvent, "Invalid prevRespEvent of core %s, cycles: %lu, startCycle: %lu", 
+            this->name, prevRespCycle, startCycle);
+        prevRespEvent->addChild(ev, eventRecorder)->addChild(tr.startEvent, eventRecorder);
         //tr.endEvent not linked to anything, it's a PUT
     }
 
@@ -149,7 +165,7 @@ void CoreRecorder::recordAccess(uint64_t startCycle, bool isCritical) {
 uint64_t CoreRecorder::cSimStart(uint64_t curCycle) {
     if (state == HALTED) return curCycle; //nothing to do
 
-    DEBUG_MSG("[%s] Cycle %ld cSimStart %d", name.c_str(), curCycle, state);
+    // DEBUG_MSG("[%s] Cycle %ld cSimStart %d", name.c_str(), curCycle, state);
 
     uint64_t nextPhaseCycle = zinfo->globPhaseCycles + zinfo->phaseLength;
 

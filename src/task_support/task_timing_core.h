@@ -25,7 +25,8 @@ public:
     }
     void forwardToNextPhase(THREADID tid) override;
     void fetchTask(task_support::TaskPtr t, uint32_t memId) override;
-    uint64_t recvCommReq(bool isRead, uint64_t startCycle, uint32_t memId) override;
+    uint64_t recvCommReq(bool isRead, uint64_t startCycle, uint32_t memId, uint32_t dataSize) override;
+    bool canSimEvent() override;
 
  private:
     inline void loadAndRecord(Address addr);

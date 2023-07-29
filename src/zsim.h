@@ -213,6 +213,9 @@ struct GlobSimInfo {
     bool BEGIN_TASK_EXECUTION;
     bool END_TASK_EXECUTION;
     bool SIM_COMM_EVENT;
+    bool CAN_SIM_COMM_EVENT;
+    bool SIM_TASK_FETCH_EVENT;
+    std::string SCHEDULE_ALGO;
     uint64_t beginPhase;
     TaskUnitManager* taskUnitManager;
     g_vector<PimBridgeTaskUnit*> taskUnits;
@@ -230,6 +233,9 @@ struct GlobSimInfo {
     // Profiling
     GatherScatterProfiler* gatherProfiler;
     GatherScatterProfiler* scatterProfiler;
+
+    // debug
+    bool beginDebugOutput;
 
 };
 

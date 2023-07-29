@@ -40,6 +40,8 @@ void MemSketch::enter(Address addr) {
             hot[idx].cnt -= 1;
         }
         if (hot[idx].cnt == 0) {
+            ((ReserveLbPimBridgeTaskUnit*)zinfo->taskUnits[taskUnitId])
+                ->exitReserveState(hot[idx].addr);
             hot[idx].addr = addr;
             hot[idx].cnt = 1;
         }
@@ -53,6 +55,8 @@ void MemSketch::exit(Address addr) {
         if (cur.addr == addr) {
             cur.cnt--;
             if (cur.cnt == 0) {
+                ((ReserveLbPimBridgeTaskUnit*)zinfo->taskUnits[taskUnitId])
+                    ->exitReserveState(cur.addr);
                 cur.addr = 0;
             }
             break;
@@ -88,7 +92,7 @@ void MemSketch::prepareForAccess() {
 
 DataHotness MemSketch::fetchHotItem() {
     if (topHotStart == this->topHot.size()) {
-        return DataHotness(0, 0, 0);
+        return DataHotness(0, this->taskUnitId, 0);
     }
     IdxAndDataHotness res = topHot[topHotStart++];
     this->hot[res.first].reset();
@@ -116,7 +120,7 @@ ReserveLbPimBridgeTaskUnit::ReserveLbPimBridgeTaskUnit(
       sketch(MemSketch(taskUnitId, numBucket, bucketSize)), 
       reserveRegionSize(0) {}
 
-void ReserveLbPimBridgeTaskUnit::taskEnqueue(TaskPtr t) {
+void ReserveLbPimBridgeTaskUnit::taskEnqueue(TaskPtr t, int available) {
     futex_lock(&tuLock);
     // maintain finish information
     if (this->isFinished) {
@@ -124,17 +128,12 @@ void ReserveLbPimBridgeTaskUnit::taskEnqueue(TaskPtr t) {
         tum->reportRestart();
     }
     // check available
-    int available = this->checkAvailable(t);
-    if (available == -1) {
+    assert(available != -1);
+    if (available == -2) {
         newNotReadyTask(t);
         futex_unlock(&tuLock);
         return;
-    } else if (available == 0) {
-        TaskCommPacket* p = new TaskCommPacket(0, this->taskUnitId, -1, t);
-        this->commModule->handleOutPacket(p);
-        futex_unlock(&tuLock);
-        return;
-    }
+    } 
     // actually enter
     // maintain reserve information
     Address lbPageAddr = zinfo->numaMap->getLbPageAddress(t->hint->dataPtr);
@@ -160,7 +159,6 @@ TaskPtr ReserveLbPimBridgeTaskUnit::taskDequeue() {
         ret = this->taskQueue.top();
         this->taskQueue.pop();
     } else if (!this->reserveRegion.empty()) {
-        assert(this->reserveRegionSize != 0);
         ret = this->reservedTaskDequeue();
     } else {
         if (this->notReadyLbTasks.empty()) {
@@ -174,23 +172,25 @@ TaskPtr ReserveLbPimBridgeTaskUnit::taskDequeue() {
     // maintain reserve information
     this->sketch.exit(zinfo->numaMap->getLbPageAddress(ret->hint->dataPtr));
 
+    int available = commModule->checkAvailable(
+            zinfo->numaMap->getLbPageAddress(ret->hint->dataPtr));
     // check whether the task can be run locally
-    int available = checkAvailable(ret);
-    if (available == 1) {
+    if (available >= 0) {
         this->s_DequeueTasks.inc(1);
         futex_unlock(&tuLock);
         return ret;
-    } else if (available == 0) {
+    } else if (available == -1) {
         // not available, send to reserve region and retry taskDequeue
-        TaskCommPacket* p = new TaskCommPacket(0, this->taskUnitId, -1, ret);
+        TaskCommPacket* p = new TaskCommPacket(0, this->taskUnitId, 1, -1, ret);
         this->commModule->handleOutPacket(p);
-        this->s_GenPackets.atomicInc(1);
         futex_unlock(&tuLock);
         return taskDequeue();
-    } else {
+    } else if (available == -2) {
         newNotReadyTask(ret);
         futex_unlock(&tuLock);
         return taskDequeue();
+    } else {
+        panic("invalid avail! %d", available);
     }
 }
 
@@ -212,9 +212,10 @@ void ReserveLbPimBridgeTaskUnit::executeLoadBalanceCommand(uint32_t command,
             info("no hot data!");
             break;
         }
-        outInfo.push_back(item);
+        // outInfo.push_back(item);
         auto& q = reserveRegion[item.addr];
         assert(!q.empty());
+        outInfo.push_back(DataHotness(item.addr, this->taskUnitId, q.size()));
         while(true) {
             TaskPtr t = q.top();
             q.pop();
@@ -222,20 +223,17 @@ void ReserveLbPimBridgeTaskUnit::executeLoadBalanceCommand(uint32_t command,
             if (command > 0) {
                 command--;
             }
-            TaskCommPacket* p = new TaskCommPacket(0, this->taskUnitId, -1, t, 2);
+            TaskCommPacket* p = new TaskCommPacket(0, this->taskUnitId, 1, -1, t, 2);
             this->commModule->handleOutPacket(p);
             if (q.empty()) {
                 reserveRegion.erase(item.addr);
                 break;
             }
+            this->commModule->s_ScheduleOutTasks.atomicInc(1);
         }
-        int avail = checkAvailable(item.addr);
-        Address pageAddr = zinfo->numaMap->getPageAddressFromLbPageAddress(item.addr);
-        uint32_t node = zinfo->numaMap->getNodeOfPage(pageAddr);
-        bool addrLend = this->commModule->addrRemapTable->getAddrLend(item.addr);
-        assert_msg(avail == 1, "data %lu not available by %d, taskUnit: %u, originNode: %u, lend: %d", 
-            item.addr, avail, taskUnitId, node, addrLend);
-        newAddrLend(item.addr);
+        DataLendCommPacket* p = new DataLendCommPacket(0, this->taskUnitId, 1, -1, 
+            item.addr, zinfo->lbPageSize);
+        this->commModule->handleOutPacket(p);
         if (command == 0) {
             break;
         }
@@ -261,4 +259,18 @@ void ReserveLbPimBridgeTaskUnit::reservedTaskEnqueue(TaskPtr t) {
     }
     this->reserveRegion[pageAddr].push(t);
     this->reserveRegionSize++;
+}
+
+void ReserveLbPimBridgeTaskUnit::exitReserveState(Address lbPageAddr) {
+    if (this->reserveRegion.find(lbPageAddr) == reserveRegion.end()) {
+        return;
+    }
+    auto& rq = this->reserveRegion[lbPageAddr];
+    while(!rq.empty()) {
+        TaskPtr t = rq.top();
+        rq.pop();
+        this->reserveRegionSize--;
+        this->taskQueue.push(t);
+    }
+    this->reserveRegion.erase(lbPageAddr);
 }

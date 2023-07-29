@@ -109,20 +109,26 @@ void TaskTimingCore::PredStoreAndRecordFunc(THREADID tid, ADDRINT addr,
 
 
 void TaskTimingCore::fetchTask(task_support::TaskPtr t, uint32_t memId) {
-    if (!zinfo->SIM_COMM_EVENT) {
+    if (!zinfo->SIM_TASK_FETCH_EVENT) {
         return;
     }
     uint64_t startCycle = t->readyCycle >= curCycle ? t->readyCycle : curCycle;
-    curCycle = l1d->forgeAccess(t->taskId, true, startCycle, memId);   
+    curCycle = l1d->forgeAccess(t->taskId, true, startCycle, memId, t->taskSize);   
     cRec.record(startCycle);
 }
 
-uint64_t TaskTimingCore::recvCommReq(bool isRead, uint64_t startCycle, uint32_t memId) {
-    if (!zinfo->SIM_COMM_EVENT) {
+uint64_t TaskTimingCore::recvCommReq(bool isRead, uint64_t startCycle, uint32_t memId, uint32_t dataSize) {
+    if (!zinfo->SIM_COMM_EVENT || !zinfo->CAN_SIM_COMM_EVENT) {
         return startCycle;
     }
-    startCycle = startCycle >= curCycle ? startCycle : curCycle;
-    uint64_t finishCycle = l1d->forgeAccess(0, isRead, startCycle, memId);
+    // startCycle = startCycle >= curCycle ? startCycle : curCycle;
+    startCycle = curCycle;
+    uint64_t finishCycle = l1d->forgeAccess(0, isRead, startCycle, memId, dataSize);
     cRec.record(startCycle, false);
+    // cRec.record(startCycle);
     return finishCycle;
+}
+
+bool TaskTimingCore::canSimEvent() {
+    return (cRec.getPrevRespEvent() != nullptr);
 }

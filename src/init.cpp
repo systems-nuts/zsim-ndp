@@ -1359,7 +1359,8 @@ static GatherScheme* buildGatherScheme(Config& config, const std::string& prefix
         gatherScheme = new IntervalGather(packetSize, interval);
     } else if (gatherTrigger == "DynamicInterval") {
         uint32_t interval = config.get<uint32_t>(prefix + "interval");
-        gatherScheme = new DynamicIntervalGather(packetSize, interval);
+        uint32_t safeThreshold = config.get<uint32_t>(prefix + "safeThreshold");
+        gatherScheme = new DynamicIntervalGather(packetSize, interval, safeThreshold);
     } else if (gatherTrigger == "OnDemand") {
         uint32_t threshold = config.get<uint32_t>(prefix + "threshold");
         uint32_t maxInterval = config.get<uint32_t>(prefix + "maxInterval");
@@ -1483,6 +1484,7 @@ static void buildCommModules(Config& config) {
             }
             zinfo->rootStat->append(commStat);
         }
+        info("build level %u end", curLevel);
         curLevel += 1;
         lastNumModules = numModules;
     }
@@ -1518,6 +1520,7 @@ static void buildLoadBalancer(Config& config) {
     zinfo->ENABLE_LOAD_BALANCE = config.get<bool>("sys.pimBridge.loadBalancer.enable");
     zinfo->lbPageSize = config.get<uint32_t>("sys.pimBridge.loadBalancer.lbPageSize");
     std::string lbType = config.get<const char*>("sys.pimBridge.loadBalancer.type");
+    zinfo->SCHEDULE_ALGO = lbType;
     for (uint32_t level = 1; level < zinfo->commModules.size(); ++level) {
         for (auto c : zinfo->commModules[level]) {
             uint32_t commId = c->getCommId();
@@ -1544,6 +1547,8 @@ static void InitPimBridge(Config& config) {
     zinfo->numRanks = config.get<uint32_t>("sys.pimBridge.numRanks", 0);
     zinfo->numDimms = config.get<uint32_t>("sys.pimBridge.numDimms", 0);
     zinfo->SIM_COMM_EVENT = config.get<bool>("sys.pimBridge.simCommEvent", true);
+    zinfo->CAN_SIM_COMM_EVENT = true;
+    zinfo->SIM_TASK_FETCH_EVENT = config.get<bool>("sys.pimBridge.simTaskFetchEvent", true);
     buildCommModules(config);
     buildProfilers(config);
     buildLoadBalancer(config);

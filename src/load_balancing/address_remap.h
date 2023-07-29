@@ -18,12 +18,9 @@ private:
     std::unordered_map<Address, uint32_t> addrLend;
     // Used to maintain whether an address is borrowed into this commModule
     // the key is page address. 
-    std::unordered_map<Address, uint32_t> addrBorrow;
     std::unordered_map<Address, uint32_t> addrBorrowMidState;
     // Used to record the remapping between child commModule.
-    // the value in childRemapTable is always bankId, no matter what the level is, 
-    // which is the same to the implementation of communication packet. 
-    // the key is page address
+    // the key is page address and the value is commId.
     std::unordered_map<Address, uint32_t> childRemapTable;
 
 public:
@@ -31,53 +28,52 @@ public:
         : level(_level), commId(_commId) {}
 
     /* --- getters and setters --- */
-    void setAddrLend(Address pageAddr, bool val) {
+    void setAddrLend(Address lbPageAddr, bool val) {
+        // info("%u-%u set addr lend: addr: %lu, val: %u", level, commId, lbPageAddr, val);
         if (val) {
-            addrLend[pageAddr] = 1;
+            addrLend[lbPageAddr] = 1;
         } else {
-            assert(addrLend.count(pageAddr) != 0);
-            this->addrBorrowMidState.erase(pageAddr);
-            addrLend.erase(pageAddr);
+            addrLend.erase(lbPageAddr);
         }
     }
-    bool getAddrLend(Address pageAddr) {
-        return addrLend.find(pageAddr) != addrLend.end();
+    bool getAddrLend(Address lbPageAddr) {
+        return (addrLend.count(lbPageAddr) != 0);
     }
-    void setAddrBorrow(Address pageAddr, bool val) {
-        if (val) {
-            this->addrBorrowMidState.erase(pageAddr);
-            addrBorrow[pageAddr] = 1;
-        } else {
-            assert(addrBorrow.count(pageAddr) != 0);
-            addrBorrow.erase(pageAddr);
-        }
-    }
-    void setAddrBorrowMidState(Address pageAddr, uint32_t id) {
-        assert(this->addrBorrow.count(pageAddr) == 0);
+    void setAddrBorrowMidState(Address lbPageAddr, uint32_t id) {
+        assert(this->level == 0);
+        assert(this->childRemapTable.count(lbPageAddr) == 0);
+        // info("set mid state: addr: %lu, id: %u, level: %u, commId: %u", 
+        //     lbPageAddr, id, level, commId);
         if (id == 0) {
-            assert(addrBorrowMidState.count(pageAddr) == 0);
-            addrBorrowMidState.insert(std::make_pair(pageAddr, 0));
+            assert(addrBorrowMidState.count(lbPageAddr) == 0);
+            addrBorrowMidState[lbPageAddr] = 0;
         } else {
-            assert(getAddrBorrowMidState(pageAddr) && 
-                addrBorrowMidState[pageAddr] == id - 1);
-            addrBorrowMidState[pageAddr] = id;
+            assert_msg(addrBorrowMidState.count(lbPageAddr) != 0, 
+                "addr: %lu, id: %u, level: %u, commId: %u", 
+                lbPageAddr, id, level, commId);
+            assert(addrBorrowMidState[lbPageAddr] == id - 1); 
+            addrBorrowMidState[lbPageAddr] = id;
         }
     }
-    bool getAddrBorrowMidState(Address pageAddr) {
-        return addrBorrowMidState.find(pageAddr) != addrBorrowMidState.end();
+    void eraseAddrBorrowMidState(Address lbPageAddr) {
+        this->addrBorrowMidState.erase(lbPageAddr);
     }
-    bool getAddrBorrow(Address pageAddr) {
-        return addrBorrow.find(pageAddr) != addrBorrow.end();
+    bool getAddrBorrowMidState(Address lbPageAddr) {
+        return (addrBorrowMidState.count(lbPageAddr) != 0);
     }
-    void setChildRemap(Address pageAddr, uint32_t dst) {
-        childRemapTable[pageAddr] = dst;
+    void setChildRemap(Address lbPageAddr, int dst) {
+        if (dst == -1) {
+            childRemapTable.erase(lbPageAddr);
+        } else {
+            childRemapTable[lbPageAddr] = dst;
+        }
     }
-    // -1 means pageAddr is not remapped.
-    int getChildRemap(Address pageAddr) {
-        if (childRemapTable.count(pageAddr) == 0) {
+    // -1 means lbPageAddr is not remapped.
+    int getChildRemap(Address lbPageAddr) {
+        if (childRemapTable.count(lbPageAddr) == 0) {
             return -1;
         } else {
-            return childRemapTable[pageAddr];
+            return childRemapTable[lbPageAddr];
         }
     }
 };

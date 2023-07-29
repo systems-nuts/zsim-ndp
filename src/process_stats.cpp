@@ -74,9 +74,11 @@ void ProcessStats::updateCore(uint32_t cid, uint32_t p) {
     uint64_t cCycles = zinfo->cores[cid]->getCycles();
     uint64_t cInstrs = zinfo->cores[cid]->getInstrs();
 
-    assert(cCycles >= lastCoreCycles[cid] && cInstrs >= lastCoreInstrs[cid]);
-    processCycles[p]  += cCycles - lastCoreCycles[cid];
-    processInstrs[p]  += cInstrs - lastCoreInstrs[cid];
+    // assert(cCycles >= lastCoreCycles[cid] && cInstrs >= lastCoreInstrs[cid]);
+    if (cCycles >= lastCoreCycles[cid] && cInstrs >= lastCoreInstrs[cid]) {
+        processCycles[p] += cCycles - lastCoreCycles[cid];
+        processInstrs[p] += cInstrs - lastCoreInstrs[cid];
+    }
 
     lastCoreCycles[cid] = cCycles;
     lastCoreInstrs[cid] = cInstrs;

@@ -11,15 +11,18 @@ class MemChannelAccEvent : public TimingEvent {
     private:
         MemChannel* mem;
         Address addr;
+        uint32_t data_size;
         bool write;
 
     public:
-        MemChannelAccEvent(MemChannel* _mem, bool _isWrite, Address _addr, int32_t domain,
-                uint32_t preDelay, uint32_t postDelay)
-            : TimingEvent(preDelay, postDelay, domain), mem(_mem), addr(_addr), write(_isWrite) {}
+        MemChannelAccEvent(MemChannel* _mem, bool _isWrite, Address _addr, uint32_t _data_size, 
+                int32_t domain, uint32_t preDelay, uint32_t postDelay)
+            : TimingEvent(preDelay, postDelay, domain), mem(_mem), addr(_addr), 
+              data_size(_data_size), write(_isWrite) {}
 
         Address getAddr() const { return addr; }
         bool isWrite() const { return write; }
+        uint32_t get_data_size() const { return data_size; }
 
         void simulate(uint64_t startCycle) {
             mem->acceptAccEvent(this, startCycle);
@@ -122,12 +125,12 @@ MemChannel::MemChannel(MemChannelBackend* _be, const uint32_t _sysFreqMHz, const
       waitForWriteAck(_waitForWriteAck), tickCycle(-1uL), tickEvent(nullptr), freeTickEvent(nullptr)
 {
     memFreqKHz = be->getMemFreqKHz();
-    minRdDelay = memToSysCycle(be->getMinLatency(false));
-    minWrDelay = memToSysCycle(be->getMinLatency(true));
+    // minRdDelay = memToSysCycle(be->getMinLatency(false));
+    // minWrDelay = memToSysCycle(be->getMinLatency(true));
     // Memory ctrl delay is pre the contention.
-    preRdDelay = preWrDelay = controllerSysDelay;
-    postRdDelay = minRdDelay - preRdDelay;
-    postWrDelay = minWrDelay - preWrDelay;
+    // preRdDelay = preWrDelay = controllerSysDelay;
+    // postRdDelay = minRdDelay - preRdDelay;
+    // postWrDelay = minWrDelay - preWrDelay;
 
     // Allocate periodical event from global space. Will be automatically reclaimed.
     for (uint32_t index = 0; index < be->getPeriodicalEventCount(); index++) {
@@ -181,12 +184,64 @@ uint64_t MemChannel::access(MemReq& req) {
         uint64_t respCycle = req.cycle + (isWrite ? minWrDelay : minRdDelay);
         if (zinfo->eventRecorders[req.srcId]) {
             MemChannelAccEvent* memEv = new (zinfo->eventRecorders[req.srcId])
-                MemChannelAccEvent(this, isWrite, req.lineAddr, domain,
+                MemChannelAccEvent(this, isWrite, req.lineAddr, 64U, domain,
                         isWrite ? preWrDelay : preRdDelay,
                         isWrite ? postWrDelay : postRdDelay);
             memEv->setMinStartCycle(req.cycle);
             TimingRecord tr = {req.lineAddr, req.cycle, respCycle, req.type, memEv, memEv};
             zinfo->eventRecorders[req.srcId]->pushRecord(tr);
+        }
+        return respCycle;
+    }
+}
+
+uint64_t MemChannel::access(MemReq& req, bool isCritical, uint32_t data_size) {
+    switch (req.type) {
+        case PUTS:
+        case PUTX:
+            *req.state = I;
+            break;
+        case GETS:
+            *req.state = req.is(MemReq::NOEXCL) ? S : E;
+            break;
+        case GETX:
+            *req.state = M;
+            break;
+        default: panic("!?");
+    }
+    // assert(data_size == this->burstCount * this->channelWidth)
+    assert(data_size >= 8); // at least 8B unit
+
+    if (req.type == PUTS) {
+        return req.cycle; // zero latency
+    } else {
+        bool isWrite = (req.type == PUTX);
+        uint64_t respCycle = req.cycle + (isWrite? minWrDelay : minRdDelay)/*  + memToSysCycle(data_size - 8) */;
+        // uint64_t respCycle = req.cycle + getMinDelay(isWrite, data_size);
+        EventRecorder* eventRec = zinfo->eventRecorders[req.srcId];
+        if (eventRec) {
+            MemChannelAccEvent* memEv = new (eventRec)
+            MemChannelAccEvent(this, isWrite, req.lineAddr, data_size, domain,
+                    isWrite ? preWrDelay : preRdDelay,
+                    isWrite ? postWrDelay : postRdDelay);
+            if (eventRec->hasRecord()) {
+                TimingRecord tr = eventRec->popRecord();
+                memEv->setMinStartCycle(req.cycle);
+                assert(req.cycle >= tr.respCycle);
+                DelayEvent* dr = new (eventRec) DelayEvent(req.cycle - tr.respCycle);
+                dr->setMinStartCycle(tr.respCycle);
+                tr.endEvent->addChild(dr, eventRec)->addChild(memEv, eventRec);
+
+                tr.endEvent = memEv;
+                tr.respCycle = respCycle;
+                eventRec->pushRecord(tr);
+            } else {
+                memEv->setMinStartCycle(req.cycle);
+                TimingRecord tr = {req.lineAddr, req.cycle, respCycle, req.type, memEv, memEv};
+                zinfo->eventRecorders[req.srcId]->pushRecord(tr);
+            }
+        } else {
+            panic("no event recorder!");
         }
         return respCycle;
     }

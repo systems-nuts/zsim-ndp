@@ -34,6 +34,7 @@ class MemChannel : public MemObject {
 
         /* Bound phase. */
         uint64_t access(MemReq& req);
+        uint64_t access(MemReq& req, bool isCritical, uint32_t data_size);
 
         /* Weave phase. */
         void acceptAccEvent(MemChannelAccEvent* ev, uint64_t sysCycle);
@@ -60,6 +61,19 @@ class MemChannel : public MemObject {
 
         uint64_t sysFreqKHz;
         uint64_t memFreqKHz;
+
+        // uint32_t getPreDelay(const bool is_write, const uint32_t data_size) {
+        //     // Memory ctrl delay is pre the contention.
+        //     return controllerSysDelay;
+        // }
+
+        uint32_t getMinDelay(const bool is_write, const uint32_t data_size) {
+            return memToSysCycle(be->getMinLatency(is_write, data_size));
+        }
+
+        // uint32_t getPostDelay(const bool is_write, const uint32_t data_size) {
+        //     return getMinDelay(is_write, data_size) - getPreDelay(is_write, data_size);
+        // }
 
         // sys <-> mem cycle translation.
         // We receive and return system cycles, but all internal logic is in memory cycles.

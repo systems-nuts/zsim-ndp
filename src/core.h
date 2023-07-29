@@ -109,8 +109,11 @@ class Core : public GlobAlloc {
         virtual void storeTask(task_support::TaskPtr t, uint32_t memId) {
             panic("Call storeTask without task support!");
         }
-        virtual uint64_t recvCommReq(bool isRead, uint64_t startCycle, uint32_t memId) {
+        virtual uint64_t recvCommReq(bool isRead, uint64_t startCycle, uint32_t memId, uint32_t dataSize) {
             panic("Call recvCommReq without task support!");
+        }
+        virtual bool canSimEvent() {
+            panic("Call canSimEvent without task support!");
         }
 };
 

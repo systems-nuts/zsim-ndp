@@ -12,3 +12,4 @@ myPatchRoot*
 *.log
 zsim_results/
 *.csv
+res*

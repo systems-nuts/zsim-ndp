@@ -40,11 +40,13 @@ protected:
 
     AddressRemapTable* addrRemapTable;
     LoadBalancer* loadBalancer;
-    uint64_t toStealSize;
 
     // data collected from task unit during execution
     Counter s_GenTasks, s_FinishTasks;
     Counter s_GenPackets, s_RecvPackets;
+
+    Counter s_ScheduleOutTasks, s_ScheduleInTasks, s_ScheduleOutData, s_ScheduleInData;
+    // Counter s_InAndOutData, s_OutAndInData;
 
 public:
     // initialization
@@ -62,10 +64,11 @@ public:
     void handleOutPacket(CommPacket* packet);  
 
     // load balance
-    virtual void commandLoadBalance(uint64_t curCycle) = 0; 
+    virtual void commandLoadBalance() = 0; 
     virtual void executeLoadBalance(uint32_t command, 
         std::vector<DataHotness>& outInfo) = 0;
-    void addToSteal(uint32_t num);
+    virtual void addToSteal(uint64_t val) { panic("?!"); }
+    virtual void clearToSteal() { panic("?!"); }
 
     // update through the hierarchy
     // void finishTask();
@@ -74,7 +77,7 @@ public:
     // state that accessed by filtered command
     virtual uint64_t stateLocalTaskQueueSize() = 0;
     uint64_t stateTransferRegionSize();
-    uint64_t stateToStealSize() { return this->toStealSize; }
+    virtual uint64_t stateToStealSize() = 0;
     
     // getters and setters
     void setParentId(uint32_t _parentId) { this->parentId = _parentId; }
@@ -84,8 +87,11 @@ public:
     uint32_t getNumBanks() {return bankEndId - bankBeginId; }
     uint32_t getLevel() { return this->level; }
     uint32_t getCommId() { return this->commId; }
-    AddressRemapTable* getAddressRemapTable() { return addrRemapTable; }
+    LoadBalancer* getLoadBalancer() { return this->loadBalancer; }
     void setLoadBalancer(LoadBalancer* lb) { this->loadBalancer = lb; }
+
+    void newAddrLend(Address lbPageAddr);
+    void newAddrRemap(Address lbPageAddr, uint32_t dst, bool isMidState = false);
 
 protected:
     virtual bool isChild(int id) = 0;
@@ -95,6 +101,11 @@ protected:
         return (id >= 0 && (uint32_t)id >= siblingBeginId && 
             (uint32_t)id <= siblingEndId && (uint32_t)id != commId);
     }
+    // >= 0: available location
+    // -1: not available
+    // -2: being transferred
+    virtual int checkAvailable(Address lbPageAddr) = 0;
+
 public:
     virtual void initStats(AggregateStat* parentStat) {}
 };
@@ -102,6 +113,8 @@ public:
 class PimBridgeTaskUnit;
 
 class BottomCommModule : public CommModuleBase{
+private:
+    uint64_t toStealSize;
 public:
     PimBridgeTaskUnit* taskUnit;
     BottomCommModule(uint32_t _level, uint32_t _commId, 
@@ -109,13 +122,24 @@ public:
     uint64_t communicate(uint64_t curCycle) override { return curCycle; }
     CommPacket* nextPacket(uint32_t fromLevel, uint32_t fromCommI, 
                            uint32_t sizeLimit) override;
-    void commandLoadBalance(uint64_t curCycle) override { return; }
+    void commandLoadBalance() override { return; }
     void executeLoadBalance(uint32_t command, 
         std::vector<DataHotness>& outInfo) override;
 
     uint64_t stateLocalTaskQueueSize() override;
+    uint64_t stateToStealSize() override {
+        return this->toStealSize;
+    }
+    void addToSteal(uint64_t val) override {
+        this->toStealSize += val;
+    }
+    void clearToSteal() override {
+        this->toStealSize -= 10;
+    }
 private:
     void handleInPacket(CommPacket* packet) override;
+    // 1 for available
+    int checkAvailable(Address lbPageAddr) override;
     bool isChild(int id) override {
         return ((uint32_t)id == this->commId);
     }
@@ -156,18 +180,21 @@ public:
     CommPacket* nextPacket(uint32_t fromLevel, uint32_t fromCommId, 
                            uint32_t sizeLimit) override;
     void gatherState() override; 
-    void commandLoadBalance(uint64_t curCycle) override;
+    void commandLoadBalance() override;
     void executeLoadBalance(uint32_t command, 
         std::vector<DataHotness>& outInfo);
     bool isEmpty() override;
     
     uint64_t stateLocalTaskQueueSize() override;
+    uint64_t stateToStealSize() override;
     // getters & setters
     uint64_t getLastGatherPhase() { return this->lastGatherPhase; }
     uint64_t getLastScatterPhase() { return this->lastScatterPhase; }
 
 private: 
     void handleInPacket(CommPacket* packet) override;
+    void handleToChildPacket(CommPacket* packet, uint32_t childCommId);
+    int checkAvailable(Address lbPageAddr) override;
     bool isChild(int id) override {
         return (id >= 0 && (uint32_t)id >= this->bankBeginId && 
             (uint32_t)id < this->bankEndId);

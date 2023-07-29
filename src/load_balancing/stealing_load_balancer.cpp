@@ -16,7 +16,6 @@ StealingLoadBalancer::StealingLoadBalancer(Config& config, uint32_t _level,
     this->CHUNK_SIZE = oneChunkSize * child->getNumBanks();
 }
 
-// TBY TODO: only support intra-rank scheduling, since the number of needs is incorrect
 void StealingLoadBalancer::generateCommand() {
     reset();
     srand((unsigned)time(NULL));
@@ -33,19 +32,14 @@ void StealingLoadBalancer::generateCommand() {
     if (notIdleVec.size() == 0) {
         return;
     }
+    for (auto theifId : idleVec) {
+        this->needs[theifId] = CHUNK_SIZE;
+    }
     for (size_t i = 0; i < idleVec.size(); ++i) {
-        uint32_t theifId = idleVec[i];
         uint32_t victimPos = rand() % notIdleVec.size();
         uint32_t victimId = notIdleVec[victimPos];
-        uint32_t cnt = 0;
-        if (CHUNK_SIZE == 0) {
-            cnt = (commModule->childQueueLength[victimId] - commands[victimId]) / 2;
-        } else {
-            assert(CHUNK_SIZE > 0);
-            cnt = CHUNK_SIZE;
-        }
-        this->needs[theifId] = cnt;
-        this->commands[victimId] += cnt;
+        assert(CHUNK_SIZE > 0);
+        this->commands[victimId] += CHUNK_SIZE;
         if (commModule->childQueueReadyLength[victimId] - 
                 commands[victimId] < IDLE_THRESHOLD) {
             notIdleVec.erase(notIdleVec.begin() + victimPos);

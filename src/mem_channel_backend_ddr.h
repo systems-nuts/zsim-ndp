@@ -102,8 +102,8 @@ class MemChannelBackendDDR : public MemChannelBackend {
             return freqKHz;
         }
 
-        uint32_t getMinLatency(const bool isWrite) const {
-            return isWrite ? 0 : t.CAS + getBL(isWrite);
+        uint32_t getMinLatency(const bool isWrite, const uint32_t data_size) const {
+            return isWrite ? 0 : t.CAS + getBL(isWrite, data_size);
         }
 
         uint32_t getPeriodicalEventCount() const { return 2; }
@@ -309,13 +309,23 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
         // Timing helper functions.
         uint64_t calcACTCycle(const Bank& bank, uint64_t schedCycle, uint64_t preCycle) const;
-        uint64_t calcRWCycle(const Bank& bank, uint64_t schedCycle, uint64_t actCycle, bool isWrite, uint32_t rankIdx) const;
+        uint64_t calcRWCycle(const Bank& bank, uint64_t schedCycle, uint64_t actCycle, bool isWrite, uint32_t rankIdx, uint32_t data_size) const;
         uint64_t calcBurstCycle(const Bank& bank, uint64_t rwCycle, bool isWrite) const;
-        uint64_t updatePRECycle(Bank& bank, uint64_t rwCycle, bool isWrite);
+        uint64_t updatePRECycle(Bank& bank, uint64_t rwCycle, bool isWrite, uint32_t data_size);
 
-        uint32_t getBL(bool isWrite) const {
-            return t.BL + (isWrite ? t.wrBurstChannelOccupyOverhead : t.rdBurstChannelOccupyOverhead);
+        uint32_t getBL(bool isWrite, uint32_t data_size) const {
+            // Yiwei: support arbitrary burst length
+            uint32_t extraBurstLat = 0;
+            if (data_size > zinfo->lineSize) {
+                extraBurstLat = (data_size - zinfo->lineSize) / (channelWidth / 8) / 2; // data_size / (channelWidth / 8) / 2
+            }
+            uint32_t res = t.BL + (isWrite ? t.wrBurstChannelOccupyOverhead : t.rdBurstChannelOccupyOverhead) + extraBurstLat;
+            return res;
         }
+
+        // uint32_t getBL(bool isWrite, ) const {
+        //     return t.BL + (isWrite ? t.wrBurstChannelOccupyOverhead : t.rdBurstChannelOccupyOverhead);
+        // }
 
         // Energy helper functions.
         void updateEnergyACTPRE();
@@ -332,6 +342,7 @@ class MemChannelBackendDDR : public MemChannelBackend {
 
         const uint32_t pageSize;  // in Bytes
         const uint32_t burstSize; // in bits, deviceIO * # burst
+        const uint32_t channelWidth; // in bits
         const uint32_t devicesPerRank;
 
         const uint32_t freqKHz;

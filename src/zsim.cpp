@@ -505,35 +505,57 @@ VOID EndOfPhaseActions() {
         info("Synced fast-forwarding done, resuming simulation");
     }
 
+    CheckForTermination();
+    zinfo->contentionSim->simulatePhase(zinfo->globPhaseCycles + zinfo->phaseLength);
+    zinfo->eventQueue->tick();
+    zinfo->profSimTime->transition(PROF_BOUND);
+
     if (zinfo->BEGIN_TASK_EXECUTION && !zinfo->END_TASK_EXECUTION) {
         uint64_t curCycle = zinfo->globPhaseCycles + zinfo->phaseLength;
-        uint64_t levelFinishCycle = curCycle;
+        // uint64_t curCycle = zinfo->globPhaseCycles;
+        // uint64_t levelFinishCycle = curCycle;
+        // info("--- new phase ---")
         for (auto l : zinfo->commModules) {
             for (auto c : l) {
                 c->gatherState();
             }
         }
         if (zinfo->ENABLE_LOAD_BALANCE) {
-            for (auto c : zinfo->commModules[1]) {
-                c->commandLoadBalance(curCycle);
+            for (size_t i = zinfo->commModules.size() - 1; i > 0; i--) {
+                for (auto c : zinfo->commModules[i]) {
+                    // info("module %s command lb", c->getName());
+                    c->commandLoadBalance();
+                    // info("module %s finish command lb", c->getName());
+                }
+            }
+        }
+        zinfo->CAN_SIM_COMM_EVENT = true;
+        for (uint32_t i = 0; i < zinfo->numCores; ++i) {
+            if (!zinfo->cores[i]->canSimEvent()) {
+                zinfo->CAN_SIM_COMM_EVENT = false;
+                info("------------------ cannot sim event! -----------------");
+                break;
             }
         }
         for (auto l : zinfo->commModules) {
             for (auto c : l) {
                 // info("module %s communicate", c->getName());
                 uint64_t curFinishCycle = c->communicate(curCycle);
-                levelFinishCycle = curFinishCycle > levelFinishCycle ? 
-                    curFinishCycle : levelFinishCycle;
+                // if (c->getLevel() == 1) {
+                //     info("curCycle: %lu, curFinishCycle: %lu of %s", curCycle, curFinishCycle, c->getName());
+                // }
+                // levelFinishCycle = curFinishCycle > levelFinishCycle ? 
+                //     curFinishCycle : levelFinishCycle;
                 // info("module %s finish communicate", c->getName());
             }
-            curCycle = levelFinishCycle;
+            // curCycle = levelFinishCycle;
         }
     }
 
-    CheckForTermination();
-    zinfo->contentionSim->simulatePhase(zinfo->globPhaseCycles + zinfo->phaseLength);
-    zinfo->eventQueue->tick();
-    zinfo->profSimTime->transition(PROF_BOUND);
+    // CheckForTermination();
+    // zinfo->contentionSim->simulatePhase(zinfo->globPhaseCycles + zinfo->phaseLength);
+    // zinfo->eventQueue->tick();
+    // zinfo->profSimTime->transition(PROF_BOUND);
 
     if (zinfo->TASK_BASED && !zinfo->BEGIN_TASK_EXECUTION) {
         if (zinfo->sched->getThreadsCount() == zinfo->numCores) {
@@ -544,8 +566,7 @@ VOID EndOfPhaseActions() {
             for (uint32_t i = 0; i < zinfo->numCores; ++i) {
                 zinfo->cores[i]->setBeginCycle();
             }
-        } 
-        return;
+        }
     }
 }
 
@@ -1250,10 +1271,13 @@ static void endTaskExecution(THREADID tid, CONTEXT* ctxt, Scheduler::ThreadInfo*
     info("All finish! tid: %d", tid);
 }
 
-static bool allCommModuleEmpty() {
+static bool allCommModuleEmpty(bool output) {
     for (auto l : zinfo->commModules) {
         for (auto c : l) {
             if (!c->isEmpty()) { 
+                if (output) {
+                    info("commModule %s not empty", c->getName());
+                }
                 return false; 
             }
         }
@@ -1290,12 +1314,18 @@ VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
     }
     
     if (taskPtr->isEndTask) {
-        if (zinfo->taskUnitManager->allFinish() && allCommModuleEmpty()) { 
+        bool finish = zinfo->taskUnitManager->allFinish();
+        bool emptyComm = allCommModuleEmpty(finish);
+        // if (finish && !zinfo->beginDebugOutput) {
+        //     info("\n\n\n\n\n\n\nbeginDebugOutput!\n\n\n\n\n\n");
+        //     zinfo->beginDebugOutput = true;
+        // }
+        if (finish && emptyComm) { 
             endTaskExecution(tid, ctxt, curThread);
             return;
         } else {
             // begin wait. Jump function pointer to the wait-loop
-            // info("tid: %u, cid: %u begin forward", tid, coreId);
+            // info("tid: %u, cid: %u begin forward, finish: %d, emptyComm: %d", tid, coreId, finish, emptyComm);
             zinfo->cores[coreId]->forwardToNextPhase(tid);
             PIN_SetContextRegval(ctxt, REG::REG_RSP, (uint8_t*)&curThread->rspCheckpoint);
             PIN_SetContextRegval(ctxt, REG::REG_RIP, (uint8_t*)&curThread->finishPc);
@@ -1303,8 +1333,9 @@ VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
             return;
         }
     }
-    // info("-- DEQUEUE: tid: %d    uid: %d    taskPtrId: %lu    timestamp: %lu", 
-    //         tid, coreId, taskPtr->taskId, taskPtr->timeStamp);
+    // info("-- DEQUEUE: tid: %d    uid: %d    taskPtrId: %lu    timestamp: %lu, query: %u", 
+    //         tid, coreId, taskPtr->taskId, taskPtr->timeStamp, *((uint8_t*)&taskPtr->args[1]));
+
 
     zinfo->cores[coreId]->fetchTask(taskPtr, zinfo->numaMap->getNodeOfCore(coreId));
 
@@ -1808,6 +1839,7 @@ int main(int argc, char *argv[]) {
     zinfo->BEGIN_TASK_EXECUTION = false;
     zinfo->END_TASK_EXECUTION = false;
     zinfo->beginPhase = 0;
+    zinfo->beginDebugOutput = false;
 
     //Initialize process-local per-thread state, even if ThreadStart does so later
     for (uint32_t i = 0; i < MAX_THREADS; i++) {
