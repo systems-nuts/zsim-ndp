@@ -89,6 +89,7 @@
 #include "task_support/task.h"
 #include "task_support/task_unit.h"
 #include "task_support/task_timing_core.h"
+#include "task_support/cpu_comm_task_unit.h"
 #include "comm_support/comm_module.h"
 #include "comm_support/comm_mapping.h"
 #include "comm_support/gather_scheme.h"
@@ -884,13 +885,11 @@ static void InitSystem(Config& config) {
                 cMap[endpoint] = new CacheGroup;
                 constructEndpoints(endpoint, *cMap[endpoint], *cMap[llc]);
 
-                if (zinfo->IS_PIMBRIDGE) {
-                    for (size_t epId = 0; epId < cMap[endpoint]->at(0).size(); ++epId) {
-                        MemInterconnectInterface::Endpoint* ep = 
-                            static_cast<MemInterconnectInterface::Endpoint*>
-                            (cMap[endpoint]->at(0).at(epId));
-                        zinfo->toMemEndpoints.push_back(ep);
-                    }
+                for (size_t epId = 0; epId < cMap[endpoint]->at(0).size(); ++epId) {
+                    MemInterconnectInterface::Endpoint* ep = 
+                        static_cast<MemInterconnectInterface::Endpoint*>
+                        (cMap[endpoint]->at(0).at(epId));
+                    zinfo->toMemEndpoints.push_back(ep);
                 }
 
                 // Add to hierarchy.
@@ -1330,12 +1329,11 @@ static void InitGlobalStats() {
     zinfo->rootStat->append(phaseStat);
 }
 
-static PimBridgeTaskUnit* buildTaskUnit(Config& config, 
+static TaskUnit* buildTaskUnit(Config& config, 
                                         const std::string& type, 
                                         uint32_t id) {
     std::stringstream ss; 
     ss << "unit-" << id;
-    // return new PimBridgeTaskUnit(ss.str(), id, zinfo->taskUnitManager);
     if (type == "PimBridge") {
         return new PimBridgeTaskUnit(ss.str(), id, zinfo->taskUnitManager);
     } else if (type == "ReserveLbPimBridge") {
@@ -1343,6 +1341,8 @@ static PimBridgeTaskUnit* buildTaskUnit(Config& config,
         uint32_t bucketSize = config.get<uint32_t>("sys.taskSupport.sketchBucketSize");
         return new ReserveLbPimBridgeTaskUnit(ss.str(), id, 
             zinfo->taskUnitManager, numBucket, bucketSize);
+    } else if(type == "CpuComm") {
+        return new CpuCommTaskUnit(ss.str(), id, zinfo->taskUnitManager);
     } else {
         panic("unsupported task unit type: %s", type.c_str());
     }
@@ -1401,13 +1401,24 @@ static ScatterScheme* buildScatterScheme(Config& config, const std::string& pref
 
 static void InitTaskSupport(Config& config) {
     zinfo->taskUnitManager = nullptr;
-
     zinfo->TASK_BASED = config.get<bool>("sys.taskSupport.enable");
     if (!zinfo->TASK_BASED) { return; }
-    zinfo->taskUnitManager = new TaskUnitManager();
+
+    zinfo->SIM_TASK_FETCH_EVENT = config.get<bool>("sys.pimBridge.simTaskFetchEvent", true);
     zinfo->taskUnits.resize(zinfo->numCores);
     std::string taskUnitType = 
         config.get<const char*>("sys.taskSupport.taskUnitType");
+    if (taskUnitType == "PimBridge" || taskUnitType == "ReserveLbPimBridge") {
+        zinfo->IS_PIMBRIDGE = true;
+    } else {
+        zinfo->IS_PIMBRIDGE = false;
+    }
+
+    if (taskUnitType == "CpuComm") {
+        zinfo->taskUnitManager = new CpuCommTaskUnitManager();
+    } else {
+        zinfo->taskUnitManager = new TaskUnitManager();
+    }
 
     for (uint32_t i = 0; i < zinfo->numCores; ++i) {
         zinfo->taskUnits[i] = buildTaskUnit(config, taskUnitType, i);
@@ -1457,7 +1468,7 @@ static void buildCommModules(Config& config) {
             assert(numModules == zinfo->numBanks);
             for (uint32_t i = 0; i < numModules; ++i) {
                 zinfo->commModules[curLevel][i] = new BottomCommModule(0, i, 
-                    enableInterflow, zinfo->taskUnits[i]);
+                    enableInterflow, (PimBridgeTaskUnit*)zinfo->taskUnits[i]);
                 zinfo->commModules[curLevel][i]->initStats(bottomCommStat);
             }
             zinfo->rootStat->append(bottomCommStat);
@@ -1542,13 +1553,11 @@ static void buildLoadBalancer(Config& config) {
 }
 
 static void InitPimBridge(Config& config) {
-    zinfo->IS_PIMBRIDGE = true;
     zinfo->numBanks = config.get<uint32_t>("sys.pimBridge.numBanks", 0);
     zinfo->numRanks = config.get<uint32_t>("sys.pimBridge.numRanks", 0);
     zinfo->numDimms = config.get<uint32_t>("sys.pimBridge.numDimms", 0);
     zinfo->SIM_COMM_EVENT = config.get<bool>("sys.pimBridge.simCommEvent", true);
     zinfo->CAN_SIM_COMM_EVENT = true;
-    zinfo->SIM_TASK_FETCH_EVENT = config.get<bool>("sys.pimBridge.simTaskFetchEvent", true);
     buildCommModules(config);
     buildProfilers(config);
     buildLoadBalancer(config);
@@ -1683,7 +1692,9 @@ void SimInit(const char* configFile, const char* outputDir, uint32_t shmid) {
     InitNUMA(config);
 
     InitTaskSupport(config);
-    InitPimBridge(config);
+    if (zinfo->IS_PIMBRIDGE) {
+        InitPimBridge(config);
+    }
 
     info("finish building");
 

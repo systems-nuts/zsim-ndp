@@ -218,7 +218,7 @@ struct GlobSimInfo {
     std::string SCHEDULE_ALGO;
     uint64_t beginPhase;
     TaskUnitManager* taskUnitManager;
-    g_vector<PimBridgeTaskUnit*> taskUnits;
+    g_vector<TaskUnit*> taskUnits;
     g_vector<g_vector<CommModuleBase*>> commModules;
     CommMapping* commMapping;
     uint32_t numBanks;

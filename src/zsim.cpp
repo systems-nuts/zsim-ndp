@@ -510,6 +510,27 @@ VOID EndOfPhaseActions() {
     zinfo->eventQueue->tick();
     zinfo->profSimTime->transition(PROF_BOUND);
 
+    if (zinfo->TASK_BASED && !zinfo->BEGIN_TASK_EXECUTION) {
+        if (zinfo->sched->getThreadsCount() == zinfo->numCores) {
+            zinfo->BEGIN_TASK_EXECUTION = true;
+            zinfo->beginPhase = zinfo->numPhases;
+            info("BEGIN TASK EXECUTION");
+            zinfo->rootStat->reset();
+            zinfo->taskUnitManager->beginRun();
+            for (uint32_t i = 0; i < zinfo->numCores; ++i) {
+                zinfo->cores[i]->setBeginCycle();
+            }
+        }
+        return;
+    }
+
+    // only for CpuComm
+    zinfo->taskUnitManager->endOfPhaseAction();
+
+    if (!zinfo->IS_PIMBRIDGE) {
+        return;
+    }
+
     if (zinfo->BEGIN_TASK_EXECUTION && !zinfo->END_TASK_EXECUTION) {
         uint64_t curCycle = zinfo->globPhaseCycles + zinfo->phaseLength;
         // uint64_t curCycle = zinfo->globPhaseCycles;
@@ -549,23 +570,6 @@ VOID EndOfPhaseActions() {
                 // info("module %s finish communicate", c->getName());
             }
             // curCycle = levelFinishCycle;
-        }
-    }
-
-    // CheckForTermination();
-    // zinfo->contentionSim->simulatePhase(zinfo->globPhaseCycles + zinfo->phaseLength);
-    // zinfo->eventQueue->tick();
-    // zinfo->profSimTime->transition(PROF_BOUND);
-
-    if (zinfo->TASK_BASED && !zinfo->BEGIN_TASK_EXECUTION) {
-        if (zinfo->sched->getThreadsCount() == zinfo->numCores) {
-            zinfo->BEGIN_TASK_EXECUTION = true;
-            zinfo->beginPhase = zinfo->numPhases;
-            info("BEGIN TASK EXECUTION");
-            zinfo->rootStat->reset();
-            for (uint32_t i = 0; i < zinfo->numCores; ++i) {
-                zinfo->cores[i]->setBeginCycle();
-            }
         }
     }
 }
@@ -1260,7 +1264,7 @@ VOID HandleMagicOpConstContext(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
 
 static void endTaskExecution(THREADID tid, CONTEXT* ctxt, Scheduler::ThreadInfo* curThread) {
     zinfo->END_TASK_EXECUTION = true;
-    if (tid == 0) {
+    if (tid == 0 && zinfo->IS_PIMBRIDGE) {
         zinfo->gatherProfiler->toFile();
         zinfo->scatterProfiler->toFile();
     }
@@ -1272,6 +1276,9 @@ static void endTaskExecution(THREADID tid, CONTEXT* ctxt, Scheduler::ThreadInfo*
 }
 
 static bool allCommModuleEmpty(bool output) {
+    if (!zinfo->IS_PIMBRIDGE) {
+        return true;
+    }
     for (auto l : zinfo->commModules) {
         for (auto c : l) {
             if (!c->isEmpty()) { 
@@ -1316,10 +1323,6 @@ VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
     if (taskPtr->isEndTask) {
         bool finish = zinfo->taskUnitManager->allFinish();
         bool emptyComm = allCommModuleEmpty(finish);
-        // if (finish && !zinfo->beginDebugOutput) {
-        //     info("\n\n\n\n\n\n\nbeginDebugOutput!\n\n\n\n\n\n");
-        //     zinfo->beginDebugOutput = true;
-        // }
         if (finish && emptyComm) { 
             endTaskExecution(tid, ctxt, curThread);
             return;

@@ -43,10 +43,15 @@ public:
     uint32_t getTaskUnitId() { return this->taskUnitId; }
 
     virtual void initStats(AggregateStat* parentStat) {}
+
+    // for CpuComm
+    virtual uint64_t getMinTimeStamp() { panic("!!"); }
+    virtual void beginRun(uint64_t newTs) { panic("!!"); }
+
 };
 
 class TaskUnitManager : public GlobAlloc {
-private:
+protected:
     g_vector<TaskUnit*> taskUnits;
     lock_t tumLock;
     uint32_t finishUnitNumber;
@@ -63,6 +68,7 @@ public:
     void reportFinish(uint32_t tuId) {
         futex_lock(&tumLock);
         this->finishUnitNumber += 1;
+        // info("taskUnit %u report finish, all Finish: %u", tuId, finishUnitNumber);
         futex_unlock(&tumLock);
     }
     void reportRestart() {
@@ -76,6 +82,11 @@ public:
         futex_unlock(&tumLock);
         return res;
     }
+    // for CpuComm
+    virtual void endOfPhaseAction() {}
+    virtual void beginRun() {}
+    virtual uint64_t getAllowedTimeStamp() { panic("!!"); }
+    virtual bool reportChangeAllowedTimestamp(uint32_t taskUnitId) { panic("!!"); }
 };
 
 }
