@@ -97,7 +97,11 @@ using namespace task_support;
 
 struct cmp {
     bool operator()(const TaskPtr& t1, const TaskPtr& t2) const {
-        return t1->readyCycle > t2->readyCycle;
+        if (t1->readyCycle != t2->readyCycle) {
+            return t1->readyCycle > t2->readyCycle;
+        } else {
+            return t1->taskId > t2->taskId;
+        }
     }
 };
 
@@ -112,7 +116,6 @@ public:
         : TaskUnit(_name, _tuId, _tum) {}
 
     void assignNewTask(TaskPtr t, Hint* hint) override;
-
     void taskEnqueue(TaskPtr t, int available) override;
     TaskPtr taskDequeue() override;
     void taskFinish(TaskPtr t) override;
@@ -129,8 +132,6 @@ protected:
     void newNotReadyTask(TaskPtr t);
 
     Counter s_EnqueueTasks, s_DequeueTasks, s_FinishTasks;
-    // Counter s_ScheduleOutTasks, s_ScheduleInTasks, s_ScheduleOutData, s_ScheduleInData;
-    // Counter s_InAndOutData, s_OutAndInData;
 
     friend class pimbridge::BottomCommModule;
 };

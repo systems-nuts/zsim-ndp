@@ -14,8 +14,6 @@ void PimBridgeTaskUnit::taskEnqueue(TaskPtr t, int available) {
         this->isFinished = false;
         tum->reportRestart();
     }
-    // assert(commModule->checkAvailable(zinfo->numaMap->getLbPageAddress(t->hint->dataPtr)) != -1);
-    // info("unit %u enqueue data: %lu", taskUnitId, zinfo->numaMap->getLbPageAddress(t->hint->dataPtr));
     assert(available != -1);
     if (available == -2) {
         newNotReadyTask(t);
