@@ -64,6 +64,7 @@
 
 #include "task_support/task.h"
 #include "task_support/task_unit.h"
+#include "task_support/pim_bridge_task_unit.h"
 #include "comm_support/gather_scheme.h"
 
 using namespace std;

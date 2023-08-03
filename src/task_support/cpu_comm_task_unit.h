@@ -1,4 +1,5 @@
-#include "task_unit.h"
+#pragma once
+#include "task_support/task_unit.h"
 #include "log.h"
 
 namespace task_support {

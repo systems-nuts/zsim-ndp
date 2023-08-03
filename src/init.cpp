@@ -88,6 +88,7 @@
 
 #include "task_support/task.h"
 #include "task_support/task_unit.h"
+#include "task_support/pim_bridge_task_unit.h"
 #include "task_support/task_timing_core.h"
 #include "task_support/cpu_comm_task_unit.h"
 #include "comm_support/comm_module.h"

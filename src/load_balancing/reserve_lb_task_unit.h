@@ -1,5 +1,6 @@
 #pragma once
 #include "task_support/task_unit.h"
+#include "task_support/pim_bridge_task_unit.h"
 #include <map>
 #include <unordered_map>
 #include <queue>

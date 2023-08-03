@@ -7,6 +7,7 @@
 #include "comm_support/comm_mapping.h"
 #include "gather_scheme.h"
 #include "scatter_scheme.h"
+#include "task_support/pim_bridge_task_unit.h"
 
 using namespace pimbridge;
 using namespace task_support;

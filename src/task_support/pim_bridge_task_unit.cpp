@@ -4,6 +4,7 @@
 #include "zsim.h"
 #include "task_support/hint.h"
 #include "task_support/task_unit.h"
+#include "task_support/pim_bridge_task_unit.h"
 
 using namespace task_support;
 using namespace pimbridge;
