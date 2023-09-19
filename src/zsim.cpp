@@ -114,7 +114,9 @@ uint32_t pageBits; //process-local for performance, but logically global
 uint32_t lbPageBits;
 Address procMask;
 uint64_t allFinishTask;
+lock_t taskIdLock;
 uint64_t allEnqueueTask;
+// Counter allEnqueueTask;
 
 static ProcessTreeNode* procTreeNode;
 
@@ -487,6 +489,23 @@ VOID CheckForTermination() {
 /* This is called by the scheduler at the end of a phase. At that point, zinfo->numPhases
  * has not incremented, so it denotes the END of the current phase
  */
+static bool allCommModuleEmpty(bool output) {
+    if (!zinfo->IS_PIMBRIDGE) {
+        return true;
+    }
+    for (auto l : zinfo->commModules) {
+        for (auto c : l) {
+            if (!c->isEmpty()) { 
+                if (output) {
+                    info("commModule %s not empty", c->getName());
+                }
+                return false; 
+            }
+        }
+    }
+    return true;
+}
+
 VOID EndOfPhaseActions() {
     zinfo->profSimTime->transition(PROF_WEAVE);
     if (zinfo->globalPauseFlag) {
@@ -525,8 +544,10 @@ VOID EndOfPhaseActions() {
         return;
     }
 
-    // only for CpuComm
-    zinfo->taskUnitManager->endOfPhaseAction();
+    if (zinfo->taskUnitManager->getReadyForNewTimeStamp() 
+            && allCommModuleEmpty(true)) {
+        zinfo->taskUnitManager->finishTimeStamp();
+    }
 
     if (!zinfo->IS_PIMBRIDGE) {
         return;
@@ -534,20 +555,24 @@ VOID EndOfPhaseActions() {
 
     if (zinfo->BEGIN_TASK_EXECUTION && !zinfo->END_TASK_EXECUTION) {
         uint64_t curCycle = zinfo->globPhaseCycles + zinfo->phaseLength;
-        // uint64_t curCycle = zinfo->globPhaseCycles;
-        // uint64_t levelFinishCycle = curCycle;
-        // info("--- new phase ---")
+#ifdef DEBUG_PHASE
+        info("--- new phase ---");
+#endif
+        zinfo->commModuleManager->clearStaleToSteal();
+        for (auto tu : zinfo->taskUnits) {
+            tu->getCurUnit()->prepareState();
+        }
+
         for (auto l : zinfo->commModules) {
             for (auto c : l) {
                 c->gatherState();
             }
         }
+
         if (zinfo->ENABLE_LOAD_BALANCE) {
             for (size_t i = zinfo->commModules.size() - 1; i > 0; i--) {
                 for (auto c : zinfo->commModules[i]) {
-                    // info("module %s command lb", c->getName());
                     c->commandLoadBalance();
-                    // info("module %s finish command lb", c->getName());
                 }
             }
         }
@@ -572,6 +597,15 @@ VOID EndOfPhaseActions() {
             }
             // curCycle = levelFinishCycle;
         }
+#ifdef DEBUG_LB_OUTPUT
+        info("after communicate state");
+        for (auto l : zinfo->commModules) {
+            for (auto c : l) {
+                c->gatherState();
+            }
+        }
+        info("after comm state end\n\n");
+#endif
     }
 }
 
@@ -1276,23 +1310,6 @@ static void endTaskExecution(THREADID tid, CONTEXT* ctxt, Scheduler::ThreadInfo*
     info("All finish! tid: %d", tid);
 }
 
-static bool allCommModuleEmpty(bool output) {
-    if (!zinfo->IS_PIMBRIDGE) {
-        return true;
-    }
-    for (auto l : zinfo->commModules) {
-        for (auto c : l) {
-            if (!c->isEmpty()) { 
-                if (output) {
-                    info("commModule %s not empty", c->getName());
-                }
-                return false; 
-            }
-        }
-    }
-    return true;
-}
-
 VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
     // info("------------------Handle Dequeue------------------op: %d", op);
     Scheduler::ThreadInfo* curThread = zinfo->sched->getThreadInfo(procIdx, tid);
@@ -1384,18 +1401,26 @@ VOID HandleTaskEnqueueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
     Hint* hintPtr = (Hint*)getRegVal(ctxt, regs[curReg++]);
     TaskPtr t;
     std::vector<uint64_t> args;
+    uint32_t cid = getCid(tid);
+    uint64_t curCycle = 0;
+    if (!hintPtr->firstRound) {
+        curCycle = zinfo->cores[cid]->getCurCycle();
+    }
+    futex_lock(&taskIdLock);
+    uint64_t taskId = allEnqueueTask++;
+    futex_unlock(&taskIdLock);
     if (op == ZSIM_MAGIC_OP_TASK_ENQUEUE_END) {
         // initialization, is end task
         int location = hintPtr->location;
         assert(location >= 0);
-        t = new Task(allEnqueueTask++, taskFn, ts, args, true, hintPtr); 
+        t = new Task(taskId, taskFn, ts, args, true, hintPtr, 0); 
         zinfo->taskUnits[location]->setEndTask(t);
     } else {
         for (uint32_t i = 0; i < numArgs; ++i) {
             uint64_t regVal = getRegVal(ctxt, regs[curReg++]);
             args.push_back(regVal);
         }
-        t = new Task(allEnqueueTask++, taskFn, ts, args, false, hintPtr); 
+        t = new Task(taskId, taskFn, ts, args, false, hintPtr, curCycle); 
         uint32_t uid = getCid(tid);
         TaskUnit* tu = zinfo->taskUnits[uid];
         tu->assignNewTask(t, hintPtr);
@@ -1840,6 +1865,7 @@ int main(int argc, char *argv[]) {
 
     allFinishTask = 0;
     allEnqueueTask = 0;
+    futex_init(&taskIdLock);
     zinfo->BEGIN_TASK_EXECUTION = false;
     zinfo->END_TASK_EXECUTION = false;
     zinfo->beginPhase = 0;

@@ -99,7 +99,7 @@ void CommModuleBase::interflow(uint32_t sibId, uint32_t messageSize) {
 void CommModuleBase::newAddrLend(Address lbPageAddr) {
     Address pageAddr = zinfo->numaMap->getPageAddressFromLbPageAddress(lbPageAddr);
     uint32_t nodeId = zinfo->numaMap->getNodeOfPage(pageAddr);
-    // info("module %s lend data: %lu, nodeId: %u", this->getName(), lbPageAddr, nodeId);
+    DEBUG_SCHED_META_O("module %s lend data: %lu, nodeId: %u", this->getName(), lbPageAddr, nodeId);
     assert(!addrRemapTable->getAddrLend(lbPageAddr) && 
         !addrRemapTable->getAddrBorrowMidState(lbPageAddr));
     addrRemapTable->setChildRemap(lbPageAddr, -1);
@@ -110,8 +110,8 @@ void CommModuleBase::newAddrLend(Address lbPageAddr) {
 }
 
 void CommModuleBase::newAddrRemap(Address lbPageAddr, uint32_t dst, bool isMidState) {
-    // info("module %s receive data %lu commId: %u: isMid: %u", 
-    //     this->getName(), lbPageAddr, this->commId, isMidState);
+    DEBUG_SCHED_META_O("module %s receive data %lu commId: %u: isMid: %u", 
+        this->getName(), lbPageAddr, this->commId, isMidState);
     Address pageAddr = zinfo->numaMap->getPageAddressFromLbPageAddress(lbPageAddr);
     uint32_t nodeId = zinfo->numaMap->getNodeOfPage(pageAddr);
     if (this->level == 0) {

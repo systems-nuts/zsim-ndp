@@ -25,7 +25,7 @@ void StealingLoadBalancer::generateCommand() {
     for (uint32_t i = 0; i < numChild; ++i) {
         if (commModule->childQueueLength[i] < IDLE_THRESHOLD) {
             idleVec.push_back(i);
-        } else if (commModule->childQueueReadyLength[i] >= IDLE_THRESHOLD) {
+        } else if (commModule->childQueueReadyLength[i] >= 2 * IDLE_THRESHOLD) {
             notIdleVec.push_back(i);
         }
     }
@@ -48,7 +48,7 @@ void StealingLoadBalancer::generateCommand() {
             break;
         }
     }
-    // output();
+    output();
 }
 
 void StealingLoadBalancer::generateCommandFromUpper(uint32_t upperCommand) {

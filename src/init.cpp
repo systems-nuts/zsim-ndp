@@ -92,6 +92,7 @@
 #include "task_support/task_timing_core.h"
 #include "task_support/cpu_comm_task_unit.h"
 #include "comm_support/comm_module.h"
+#include "comm_support/comm_module_manager.h"
 #include "comm_support/comm_mapping.h"
 #include "comm_support/gather_scheme.h"
 #include "comm_support/scatter_scheme.h"
@@ -1330,25 +1331,6 @@ static void InitGlobalStats() {
     zinfo->rootStat->append(phaseStat);
 }
 
-static TaskUnit* buildTaskUnit(Config& config, 
-                                        const std::string& type, 
-                                        uint32_t id) {
-    std::stringstream ss; 
-    ss << "unit-" << id;
-    if (type == "PimBridge") {
-        return new PimBridgeTaskUnit(ss.str(), id, zinfo->taskUnitManager);
-    } else if (type == "ReserveLbPimBridge") {
-        uint32_t numBucket = config.get<uint32_t>("sys.taskSupport.sketchBucketNum");
-        uint32_t bucketSize = config.get<uint32_t>("sys.taskSupport.sketchBucketSize");
-        return new ReserveLbPimBridgeTaskUnit(ss.str(), id, 
-            zinfo->taskUnitManager, numBucket, bucketSize);
-    } else if(type == "CpuComm") {
-        return new CpuCommTaskUnit(ss.str(), id, zinfo->taskUnitManager);
-    } else {
-        panic("unsupported task unit type: %s", type.c_str());
-    }
-}
-
 static GatherScheme* buildGatherScheme(Config& config, const std::string& prefix) {
     std::string gatherTrigger = config.get<const char*>(prefix + "trigger", "Whenever");
     uint32_t packetSize = config.get<uint32_t>(prefix + "packetSize");
@@ -1407,6 +1389,8 @@ static void InitTaskSupport(Config& config) {
 
     zinfo->SIM_TASK_FETCH_EVENT = config.get<bool>("sys.pimBridge.simTaskFetchEvent", true);
     zinfo->taskUnits.resize(zinfo->numCores);
+    zinfo->taskUnitManager = new TaskUnitManager();
+
     std::string taskUnitType = 
         config.get<const char*>("sys.taskSupport.taskUnitType");
     if (taskUnitType == "PimBridge" || taskUnitType == "ReserveLbPimBridge") {
@@ -1414,15 +1398,18 @@ static void InitTaskSupport(Config& config) {
     } else {
         zinfo->IS_PIMBRIDGE = false;
     }
-
-    if (taskUnitType == "CpuComm") {
-        zinfo->taskUnitManager = new CpuCommTaskUnitManager();
-    } else {
-        zinfo->taskUnitManager = new TaskUnitManager();
-    }
-
     for (uint32_t i = 0; i < zinfo->numCores; ++i) {
-        zinfo->taskUnits[i] = buildTaskUnit(config, taskUnitType, i);
+        std::stringstream ss; 
+        ss << "unit-" << i;
+        TaskUnit* cur = nullptr;
+        if (taskUnitType == "PimBridge" || taskUnitType == "ReserveLbPimBridge") {
+            cur = new PimBridgeTaskUnit(ss.str(), i, zinfo->taskUnitManager, config);
+        } else if(taskUnitType == "CpuComm") {
+            cur = new CpuCommTaskUnit(ss.str(), i, zinfo->taskUnitManager);
+        } else {
+            panic("unsupported task unit type: %s", taskUnitType.c_str());
+        }
+        zinfo->taskUnits[i] = cur;
         zinfo->taskUnitManager->addTaskUnit(zinfo->taskUnits[i]);
     }
 
@@ -1500,6 +1487,7 @@ static void buildCommModules(Config& config) {
         curLevel += 1;
         lastNumModules = numModules;
     }
+    zinfo->commModuleManager = new CommModuleManager(config);
 }
 
 static void buildProfilers(Config& config) {

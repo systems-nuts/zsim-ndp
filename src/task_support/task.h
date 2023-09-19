@@ -28,11 +28,11 @@ public:
     uint64_t readyCycle;
 
     Task(uint64_t _taskId, uintptr_t _func, uint64_t _ts, 
-         const std::vector<uint64_t>& _args, bool _isEnd, Hint* _hint) 
+         const std::vector<uint64_t>& _args, bool _isEnd, Hint* _hint, 
+         uint64_t _readyCycle) 
         : taskId(_taskId), taskFn(_func), timeStamp(_ts), 
-          args(_args), isEndTask(_isEnd), hint(_hint) {
+          args(_args), isEndTask(_isEnd), hint(_hint), readyCycle(_readyCycle) {
         taskSize = 8;
-        readyCycle = 0;
     }
         
     ~Task() {}

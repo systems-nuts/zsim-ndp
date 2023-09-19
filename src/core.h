@@ -115,6 +115,9 @@ class Core : public GlobAlloc {
         virtual bool canSimEvent() {
             panic("Call canSimEvent without task support!");
         }
+        virtual uint64_t getCurCycle() {
+            panic("Call getCurCycle without task support!");
+        }
 };
 
 #endif  // CORE_H_

@@ -132,3 +132,6 @@ uint64_t TaskTimingCore::recvCommReq(bool isRead, uint64_t startCycle, uint32_t 
 bool TaskTimingCore::canSimEvent() {
     return (cRec.getPrevRespEvent() != nullptr);
 }
+uint64_t TaskTimingCore::getCurCycle() {
+    return this->curCycle;
+}

@@ -46,14 +46,25 @@ void BottomCommModule::executeLoadBalance(uint32_t command,
         std::vector<DataHotness>& outInfo) {
     // info("%s execute load balance", this->getName());
     uint64_t curOutSize = outInfo.size();
-    this->taskUnit->executeLoadBalanceCommand(command, outInfo);
+    this->taskUnit->getCurUnit()->executeLoadBalanceCommand(command, outInfo);
     for (size_t i = curOutSize; i < outInfo.size(); ++i) {
         this->newAddrLend(outInfo[i].addr);
     }
 }
 
-uint64_t BottomCommModule::stateLocalTaskQueueSize() {
-    return this->taskUnit->getTaskQueueSize();
+uint64_t BottomCommModule::stateReadyLength() {
+    return this->taskUnit->getCurUnit()->getTaskQueueSize();
+}
+
+uint64_t BottomCommModule::stateAllLength() {
+    return this->taskUnit->getCurUnit()->getTaskQueueSize() + 
+        this->toStealSize + 
+        ((PimBridgeTaskUnitKernel*)this->taskUnit->getCurUnit())->notReadyTaskNumber;
+}
+
+uint64_t BottomCommModule::stateTopItemLength() {
+    // return 0;
+    return this->taskUnit->getCurUnit()->getTopItemLength();
 }
 
 void BottomCommModule::handleInPacket(CommPacket* packet) {
@@ -82,7 +93,9 @@ void BottomCommModule::handleInPacket(CommPacket* packet) {
         } else {
             auto p = (TaskCommPacket*) packet;
             if (p->forLb()) {
-                this->s_ScheduleInTasks.atomicInc(1);
+                this->s_ScheduleInTasks.atomicInc(1); 
+                // info("module %s receive lb task, addr: %lu, toSteal: %lu, sig: %lu", 
+                //     this->getName(), p->getAddr(), this->toStealSize, p->getSignature());
                 if (this->toStealSize >= 1) {
                     --this->toStealSize;
                 }

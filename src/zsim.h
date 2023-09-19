@@ -33,16 +33,19 @@
 #include "locks.h"
 #include "pad.h"
 #include "comm_support/comm_module.h"
+#include "comm_support/comm_module_manager.h"
 #include "comm_support/comm_mapping.h"
 #include "task_support/task_unit.h"
 #include "process_local_val.h"
 #include "mem_interconnect_interface.h"
 #include "comm_support/profiling/gather_scatter_profiler.h"
+#include "debug_output.h"
 
 using task_support::TaskUnitManager;
 using task_support::TaskUnit;
 using pimbridge::PimBridgeTaskUnit;
 using pimbridge::CommModuleBase;
+using pimbridge::CommModuleManager;
 using pimbridge::CommMapping;
 using pimbridge::GatherScatterProfiler;
 
@@ -220,6 +223,7 @@ struct GlobSimInfo {
     TaskUnitManager* taskUnitManager;
     g_vector<TaskUnit*> taskUnits;
     g_vector<g_vector<CommModuleBase*>> commModules;
+    CommModuleManager* commModuleManager;
     CommMapping* commMapping;
     uint32_t numBanks;
     uint32_t numRanks;

@@ -6,9 +6,10 @@
 
 namespace pimbridge {
 
-Address TaskCommPacket::getAddr() {
+Address TaskCommPacket::getAddr() const {
     assert(this->task->hint->dataPtr != 0);
     return zinfo->numaMap->getLbPageAddress(this->task->hint->dataPtr);
 }
+
 }
 

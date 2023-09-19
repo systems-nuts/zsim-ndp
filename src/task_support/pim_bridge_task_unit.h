@@ -1,38 +1,57 @@
 #pragma once
 #include "task_support/task_unit.h"
+#include "config.h"
  
 namespace pimbridge {
 
-class PimBridgeTaskUnit : public task_support::TaskUnit {
+using namespace task_support;
+struct cmp {
+    bool operator()(const TaskPtr& t1, const TaskPtr& t2) const {
+        if (t1->readyCycle != t2->readyCycle) {
+            return t1->readyCycle > t2->readyCycle;
+        } else {
+            return t1->taskId > t2->taskId;
+        }
+    }
+};
+
+class PimBridgeTaskUnitKernel : public TaskUnitKernel {
 protected:
-    BottomCommModule* commModule;
+    uint32_t notReadyTaskNumber;
+    BottomCommModule* commModule;   
     std::unordered_map<Address, std::deque<TaskPtr>> notReadyLbTasks;
     std::priority_queue<TaskPtr, std::deque<TaskPtr>, cmp> taskQueue;
-    
 public:
-    PimBridgeTaskUnit(const std::string& _name, uint32_t _tuId, TaskUnitManager* _tum)
-        : TaskUnit(_name, _tuId, _tum) {}
+    PimBridgeTaskUnitKernel(uint32_t _tuId) : TaskUnitKernel(_tuId), notReadyTaskNumber(0) {}
+    void taskEnqueueKernel(TaskPtr t, int available) override;
+    TaskPtr taskDequeueKernel() override;
+    bool isEmpty() override;
+    uint64_t getTaskQueueSize() override;
 
-    void assignNewTask(TaskPtr t, Hint* hint) override;
-    void taskEnqueue(TaskPtr t, int available) override;
-    TaskPtr taskDequeue() override;
-    void taskFinish(TaskPtr t) override;
+    void executeLoadBalanceCommand(uint32_t command, 
+        std::vector<DataHotness>& outInfo) override;
 
-    virtual void executeLoadBalanceCommand(uint32_t command, 
-        std::vector<DataHotness>& outInfo);
-
-    virtual uint64_t getTaskQueueSize() { return this->taskQueue.size(); }
-    void setCommModule(BottomCommModule* _commModule) { this->commModule = _commModule; }
-
-    void initStats(AggregateStat* parentStat) override;
 protected:
-    void newAddrBorrow(Address lbPageAddr);
     void newNotReadyTask(TaskPtr t);
+    void newAddrBorrowKernel(Address lbPageAddr);
 
-    Counter s_EnqueueTasks, s_DequeueTasks, s_FinishTasks;
+    friend class pimbridge::PimBridgeTaskUnit;
+    friend class pimbridge::BottomCommModule;
+};
 
+class PimBridgeTaskUnit : public TaskUnit {
+protected:
+    BottomCommModule* commModule;
+public:
+    PimBridgeTaskUnit(const std::string& _name, uint32_t _tuId, 
+                      TaskUnitManager* _tum, Config& config);
+    void assignNewTask(TaskPtr t, Hint* hint) override;
+    void setCommModule(BottomCommModule* _commModule);
+
+    void newAddrBorrow(Address lbPageAddr);
+protected:
     friend class pimbridge::BottomCommModule;
 };
 
 
-}
+} // namespace pimbridges

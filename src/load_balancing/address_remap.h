@@ -3,6 +3,7 @@
 #include <cstdint>
 #include "memory_hierarchy.h"
 #include "log.h"
+#include "debug_output.h"
 
 namespace pimbridge {
 
@@ -29,7 +30,7 @@ public:
 
     /* --- getters and setters --- */
     void setAddrLend(Address lbPageAddr, bool val) {
-        // info("%u-%u set addr lend: addr: %lu, val: %u", level, commId, lbPageAddr, val);
+        DEBUG_SCHED_META_O("%u-%u set addr lend: addr: %lu, val: %u", level, commId, lbPageAddr, val);
         if (val) {
             addrLend[lbPageAddr] = 1;
         } else {
@@ -42,8 +43,8 @@ public:
     void setAddrBorrowMidState(Address lbPageAddr, uint32_t id) {
         assert(this->level == 0);
         assert(this->childRemapTable.count(lbPageAddr) == 0);
-        // info("set mid state: addr: %lu, id: %u, level: %u, commId: %u", 
-        //     lbPageAddr, id, level, commId);
+        // DEBUG_SCHED_META_O("%u-%u set mid state: addr: %lu, id: %u", 
+        //     level, commId, lbPageAddr, id);
         if (id == 0) {
             assert(addrBorrowMidState.count(lbPageAddr) == 0);
             addrBorrowMidState[lbPageAddr] = 0;
@@ -62,6 +63,7 @@ public:
         return (addrBorrowMidState.count(lbPageAddr) != 0);
     }
     void setChildRemap(Address lbPageAddr, int dst) {
+        DEBUG_SCHED_META_O("%u-%u set childRemap: addr: %lu, val: %d", level, commId, lbPageAddr, dst);
         if (dst == -1) {
             childRemapTable.erase(lbPageAddr);
         } else {

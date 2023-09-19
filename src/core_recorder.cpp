@@ -152,7 +152,7 @@ void CoreRecorder::recordAccess(uint64_t startCycle, bool isCritical) {
         //     prevRespEvent = prevEv;
         // }
         assert_msg(prevRespEvent, "Invalid prevRespEvent of core %s, cycles: %lu, startCycle: %lu", 
-            this->name, prevRespCycle, startCycle);
+            this->name.c_str(), prevRespCycle, startCycle);
         prevRespEvent->addChild(ev, eventRecorder)->addChild(tr.startEvent, eventRecorder);
         //tr.endEvent not linked to anything, it's a PUT
     }

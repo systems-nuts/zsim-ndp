@@ -39,8 +39,6 @@ void ReserveLoadBalancer::generateCommand() {
     // assert(totalNeeds != 0);
     std::sort(childDataHotness.begin(), childDataHotness.end(), hotter);
     for (auto& item : childDataHotness) {
-        // item.cnt = ((ReserveLbPimBridgeTaskUnit*)zinfo->taskUnits[item.srcBankId])
-        //     ->reserveRegion[item.addr].size();
         uint32_t idx = 
             zinfo->commMapping->getCommId(this->level-1, item.srcBankId)
             - commModule->childBeginId;
@@ -57,9 +55,7 @@ void ReserveLoadBalancer::generateCommand() {
             break;
         }
     }
-    // if (this->commId == 1) {
-    //     output();
-    // }
+    output();
 }
 
 void ReserveLoadBalancer::generateCommandFromUpper(uint32_t upperCommand) {
@@ -67,7 +63,8 @@ void ReserveLoadBalancer::generateCommandFromUpper(uint32_t upperCommand) {
     std::sort(childDataHotness.begin(), childDataHotness.end(), hotter);
     int totalNeeds = upperCommand;
     for (auto& item : childDataHotness) {
-        item.cnt = ((ReserveLbPimBridgeTaskUnit*)zinfo->taskUnits[item.srcBankId])
+        item.cnt = ((ReserveLbPimBridgeTaskUnitKernel*)
+            zinfo->taskUnits[item.srcBankId]->getCurUnit())
             ->reserveRegion[item.addr].size();
         uint32_t idx = item.srcBankId - commModule->childBeginId;
         this->commands[idx] += item.cnt;
@@ -83,31 +80,27 @@ void ReserveLoadBalancer::generateCommandFromUpper(uint32_t upperCommand) {
 // Every load balance command is passed down till the intra-rank level (level1 -> level0)
 void ReserveLoadBalancer::updateChildStateForLB() {
     this->childDataHotness.clear();
-    if (this->level == 1) {
-        for (uint32_t i = commModule->childBeginId; i < commModule->childEndId; ++i) {
-            if (this->commModule->childQueueReadyLength[i-commModule->childBeginId]
-                    <= IDLE_THRESHOLD) {
-                continue;
-            }
-            ReserveLbPimBridgeTaskUnit* tu = (ReserveLbPimBridgeTaskUnit*)zinfo->taskUnits[i];
-            tu->sketch.prepareForAccess();
-            tu->sketch.getHotItemInfo(this->childDataHotness, HOT_DATA_NUMBER);
+    for (uint32_t i = commModule->childBeginId; i < commModule->childEndId; ++i) {
+        uint64_t readyLength = this->commModule->childQueueReadyLength[i-commModule->childBeginId];
+        uint64_t topItemLength = this->commModule->childTopItemLength[i-commModule->childBeginId];
+        assert(readyLength >= topItemLength);
+        if (readyLength - topItemLength <= 2 * IDLE_THRESHOLD) {
+            continue;
         }
-    } else if (this->level >= 2) {
-        for (uint32_t i = commModule->childBeginId; i < commModule->childEndId; ++i) {
-            if (this->commModule->childQueueReadyLength[i-commModule->childBeginId]
-                    <= IDLE_THRESHOLD) {
-                continue;
-            }
+        if (this->level == 1) {
+            ReserveLbPimBridgeTaskUnitKernel* tu = (ReserveLbPimBridgeTaskUnitKernel*)
+                zinfo->taskUnits[i]->getCurUnit();
+            tu->sketch.getHotItemInfo(this->childDataHotness, HOT_DATA_NUMBER);
+        } else if (this->level >= 2) {
             ReserveLoadBalancer* childLb = 
                 (ReserveLoadBalancer*)
                 (zinfo->commModules[level-1][i-commModule->childBeginId]
                     ->getLoadBalancer());
             childLb->copyToParentState(this->childDataHotness);
+        } else {
+            panic("invalid level for updateChildStateForLB");
         }
-    } else {
-        panic("invalid level for updateChildStateForLB");
-    }
+     }
 }
 
 void ReserveLoadBalancer::copyToParentState

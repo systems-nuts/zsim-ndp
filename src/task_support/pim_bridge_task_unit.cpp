@@ -5,140 +5,101 @@
 #include "task_support/hint.h"
 #include "task_support/task_unit.h"
 #include "task_support/pim_bridge_task_unit.h"
+#include "load_balancing/reserve_lb_task_unit.h"
+#include "config.h"
+#include "core.h"
 
 using namespace task_support;
 using namespace pimbridge;
 
-void PimBridgeTaskUnit::taskEnqueue(TaskPtr t, int available) {
-    futex_lock(&tuLock);
-    if (this->isFinished) {
-        this->isFinished = false;
-        tum->reportRestart();
-    }
+void PimBridgeTaskUnitKernel::taskEnqueueKernel(TaskPtr t, int available) {
     assert(available != -1);
     if (available == -2) {
         newNotReadyTask(t);
-        futex_unlock(&tuLock);
         return;
     }
     this->taskQueue.push(t);
-    this->s_EnqueueTasks.inc(1);
-    futex_unlock(&tuLock);
 }
 
 // TBY TODO: we need to set the current cycle to available cycle
-TaskPtr PimBridgeTaskUnit::taskDequeue() {
-    if (this->isFinished) {
-        return this->endTask;
-    }
-    futex_lock(&tuLock);
+TaskPtr PimBridgeTaskUnitKernel::taskDequeueKernel() {
     TaskPtr ret = nullptr;
     if (this->taskQueue.empty()) {
-        if (this->notReadyLbTasks.empty()) {
-            this->isFinished = true;
-            this->tum->reportFinish(this->taskUnitId);
-        }
-        // info("taskUnit %u wait on notReadyTasks", this->taskUnitId);
-        futex_unlock(&tuLock);
         return this->endTask;
     } else {
         ret = this->taskQueue.top();
         this->taskQueue.pop();
     }
     int available = commModule->checkAvailable(
-            zinfo->numaMap->getLbPageAddress(ret->hint->dataPtr));
+        zinfo->numaMap->getLbPageAddress(ret->hint->dataPtr));
     if (available >= 0) {
-        this->s_DequeueTasks.inc(1);
-        futex_unlock(&tuLock);
         return ret;
     } else if (available == -1) {
-        TaskCommPacket* p = new TaskCommPacket(0, this->taskUnitId, 1, -1, ret);
+        uint64_t curCycle = zinfo->cores[taskUnitId]->getCurCycle();
+        TaskCommPacket* p = new TaskCommPacket(curCycle, 0, this->taskUnitId, 1, -1, ret);
         this->commModule->handleOutPacket(p);
-        futex_unlock(&tuLock);
-        return taskDequeue();
+        return taskDequeueKernel();
     } else if (available == -2) {
         // This happens when a unit lends a data and then borrows it back
         newNotReadyTask(ret);
-        futex_unlock(&tuLock);
-        return taskDequeue();
+        return taskDequeueKernel();
     } else {
         panic("invalid avail! %d", available);
     }
 }
 
-void PimBridgeTaskUnit::taskFinish(TaskPtr t) {
-    this->s_FinishTasks.atomicInc(1);
-    return;
+bool PimBridgeTaskUnitKernel::isEmpty() {
+    return this->taskQueue.empty() && this->notReadyLbTasks.empty();
 }
 
-void PimBridgeTaskUnit::executeLoadBalanceCommand(uint32_t command, 
+uint64_t PimBridgeTaskUnitKernel::getTaskQueueSize(){
+    return this->taskQueue.size();
+}
+
+void PimBridgeTaskUnitKernel::executeLoadBalanceCommand(uint32_t command, 
         std::vector<DataHotness>& outInfo) {
-    futex_lock(&tuLock);
+    uint64_t curCycle = zinfo->cores[taskUnitId]->getCurCycle();
     std::unordered_map<Address, uint32_t> info;
     while (!this->taskQueue.empty()) {
         TaskPtr t = this->taskQueue.top();
         this->taskQueue.pop();
         Address lbPageAddr = zinfo->numaMap->getLbPageAddress(t->hint->dataPtr);
         int available = this->commModule->checkAvailable(lbPageAddr);
-        if (available != -2) {
-            TaskCommPacket* p = new TaskCommPacket(0, this->taskUnitId, 1, -1, t, 2);
+        if (available == -2) {
+            newNotReadyTask(t);
+        } else if (available == -1) {
+            TaskCommPacket* p = new TaskCommPacket(curCycle, 0, this->taskUnitId, 1, -1, t, 3);
             this->commModule->handleOutPacket(p);
-            if (available >= 0) {
-                if (info.count(lbPageAddr) == 0) {
-                    info.insert(std::make_pair(lbPageAddr, 0));
-                }
-                info[lbPageAddr] += 1;
-                this->commModule->s_ScheduleOutTasks.atomicInc(1);
-            } 
+            this->commModule->s_ScheduleOutTasks.atomicInc(1);
+            if (--command == 0) {
+                break;
+            }
+        } else if (available >= 0) {
+            TaskCommPacket* p = new TaskCommPacket(curCycle, 0, this->taskUnitId, 1, -1, t, 2);
+            // info("unit %u sched task out: addr: %lu, sig: %lu", taskUnitId, p->getAddr(), p->getSignature());
+            this->commModule->handleOutPacket(p);
+            if (info.count(lbPageAddr) == 0) {
+                info.insert(std::make_pair(lbPageAddr, 0));
+            }
+            info[lbPageAddr] += 1;
+            this->commModule->s_ScheduleOutTasks.atomicInc(1);
             if (--command == 0) {
                 break;
             }
         } else {
-            newNotReadyTask(t);
+            panic("invalid available value");
         }
     }
     for (auto it = info.begin(); it != info.end(); ++it) {
+        // info("unit %u execute lb: addr: %lu, cnt: %u", taskUnitId, it->first, it->second);
         outInfo.push_back(DataHotness(it->first, this->taskUnitId, it->second));
-        DataLendCommPacket* p = new DataLendCommPacket(0, this->taskUnitId, 1, -1, it->first, zinfo->lbPageSize);
+        DataLendCommPacket* p = new DataLendCommPacket(curCycle, 0, this->taskUnitId, 1, -1, it->first, zinfo->lbPageSize);
         assert(this->commModule->checkAvailable(it->first) != -2);
         this->commModule->handleOutPacket(p);
     }
-    futex_unlock(&tuLock);
 }
 
-void PimBridgeTaskUnit::assignNewTask(TaskPtr t, Hint* hint) {
-    assert(hint->location == -1);
-    assert(hint->dataPtr != 0);
-    if (hint->firstRound) {
-        uint32_t nodeId = zinfo->numaMap->getNodeOfPage(zinfo->numaMap->getPageAddress(hint->dataPtr));
-        zinfo->taskUnits[nodeId]->taskEnqueue(t, 0);
-    } else {
-        int avail = commModule->checkAvailable(zinfo->numaMap->getLbPageAddress(hint->dataPtr));
-        if (avail >= 0) {
-            zinfo->taskUnits[taskUnitId]->taskEnqueue(t, 0);
-        } else {
-            CommPacket* p = new TaskCommPacket(0, this->taskUnitId, 1, -1, t);
-            this->commModule->handleOutPacket(p);
-        }
-        this->commModule->s_GenTasks.atomicInc(1);
-    }
-}
-
-void PimBridgeTaskUnit::initStats(AggregateStat* parentStat) {
-    AggregateStat* tuStat = new AggregateStat();
-    tuStat->init(name.c_str(), "Task unit stats");
-
-    s_EnqueueTasks.init("enqueueTasks", "Number of enqueued tasks");
-    tuStat->append(&s_EnqueueTasks);
-    s_DequeueTasks.init("dequeueTasks", "Number of dequeued tasks");
-    tuStat->append(&s_DequeueTasks);
-    s_FinishTasks.init("finishTasks", "Number of finish tasks");
-    tuStat->append(&s_FinishTasks);
-
-    parentStat->append(tuStat);
-}
-
-void PimBridgeTaskUnit::newAddrBorrow(Address lbPageAddr) {
+void PimBridgeTaskUnitKernel::newAddrBorrowKernel(Address lbPageAddr) {
     if (notReadyLbTasks.count(lbPageAddr) == 0) {
         return;
     }
@@ -147,16 +108,67 @@ void PimBridgeTaskUnit::newAddrBorrow(Address lbPageAddr) {
     while(!dq.empty()) {
         TaskPtr t = dq.front();
         dq.pop_front();
-        this->taskEnqueue(t, 0);
+        this->taskEnqueueKernel(t, 0);
+        assert(this->notReadyTaskNumber >= 1);
+        --this->notReadyTaskNumber;
     }
     notReadyLbTasks.erase(lbPageAddr);
 }
 
-void PimBridgeTaskUnit::newNotReadyTask(TaskPtr t) {
+void PimBridgeTaskUnitKernel::newNotReadyTask(TaskPtr t) {
     Address lbPageAddr = zinfo->numaMap->getLbPageAddress(t->hint->dataPtr);
     if (this->notReadyLbTasks.find(lbPageAddr) == notReadyLbTasks.end()) {
         notReadyLbTasks.insert(std::make_pair(lbPageAddr, std::deque<TaskPtr>()));
     }
     this->notReadyLbTasks[lbPageAddr].push_back(t);
+    ++this->notReadyTaskNumber;
 }
 
+PimBridgeTaskUnit::PimBridgeTaskUnit(const std::string& _name, uint32_t _tuId, 
+                                     TaskUnitManager* _tum, Config& config) 
+    : TaskUnit(_name, _tuId, _tum) {
+    std::string taskUnitType = 
+        config.get<const char*>("sys.taskSupport.taskUnitType");
+    if (taskUnitType == "PimBridge") {
+        this->taskUnit1 = new PimBridgeTaskUnitKernel(_tuId);
+        this->taskUnit2 = new PimBridgeTaskUnitKernel(_tuId);
+    } else if (taskUnitType == "ReserveLbPimBridge") {
+        uint32_t numBucket = config.get<uint32_t>("sys.taskSupport.sketchBucketNum");
+        uint32_t bucketSize = config.get<uint32_t>("sys.taskSupport.sketchBucketSize");
+        this->taskUnit1 = new ReserveLbPimBridgeTaskUnitKernel(_tuId, numBucket, bucketSize);
+        this->taskUnit2 = new ReserveLbPimBridgeTaskUnitKernel(_tuId, numBucket, bucketSize);
+    }
+    this->curTaskUnit = this->taskUnit2;
+    this->nxtTaskUnit = this->taskUnit1;  
+}
+
+
+void PimBridgeTaskUnit::assignNewTask(TaskPtr t, Hint* hint) {
+    assert(hint->location == -1);
+    assert(hint->dataPtr != 0);
+    if (hint->firstRound) {
+        assert(t->timeStamp == 1);
+        uint32_t nodeId = zinfo->numaMap->getNodeOfPage(zinfo->numaMap->getPageAddress(hint->dataPtr));
+        zinfo->taskUnits[nodeId]->taskEnqueue(t, 0);
+    } else {
+        int avail = commModule->checkAvailable(zinfo->numaMap->getLbPageAddress(hint->dataPtr));
+        if (avail >= 0) {
+            zinfo->taskUnits[taskUnitId]->taskEnqueue(t, 0);
+        } else {
+            CommPacket* p = new TaskCommPacket(t->readyCycle, 0, this->taskUnitId, 1, -1, t);
+            this->commModule->handleOutPacket(p);
+        }
+        this->commModule->s_GenTasks.atomicInc(1);
+    }
+}
+
+void PimBridgeTaskUnit::newAddrBorrow(Address lbPageAddr) {
+    ((PimBridgeTaskUnitKernel*)this->curTaskUnit)->newAddrBorrowKernel(lbPageAddr);
+    ((PimBridgeTaskUnitKernel*)this->nxtTaskUnit)->newAddrBorrowKernel(lbPageAddr);
+}
+
+void PimBridgeTaskUnit::setCommModule(BottomCommModule* _commModule) { 
+    this->commModule = _commModule; 
+    ((PimBridgeTaskUnitKernel*)taskUnit1)->commModule = _commModule;
+    ((PimBridgeTaskUnitKernel*)taskUnit2)->commModule = _commModule;
+}

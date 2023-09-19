@@ -60,7 +60,6 @@ bool DynamicGather::isDangerous() {
     uint64_t idleUnit = 0;
     for (size_t i = commModule->childBeginId; i < commModule->childEndId; ++i) {
         uint64_t curSize = commModule->childQueueReadyLength[i-commModule->childBeginId];
-        // info("id: %lu, curSize: %lu", i, curSize);
         if (curSize <= 2) {
             idleUnit += 1;
         }

@@ -8,24 +8,26 @@ namespace pimbridge {
 struct packetCmp {
     bool operator()(const CommPacket* p1, const CommPacket* p2) {
         if (p1->priority != p2->priority) {
-            return p1->priority > p2->priority;
-        } else if (p1->getIdx() != p2->getIdx()) {
-            // TBY TODO: is this correct?
-            return p1->getIdx() > p2->getIdx();
-        } else if (p1->readyCycle != p2->readyCycle) {
+            return p1->priority < p2->priority; // normal task first
+        } 
+        if (p1->readyCycle != p2->readyCycle) {
             return p1->readyCycle > p2->readyCycle;
-        } else {
+        } /*else if (p1->priority != p2->priority) {
+            return p1->priority > p2->priority; // normal task last
+        } */else if (p1->getInnerType() != p2->getInnerType()) {
+            return p1->getInnerType() < p2->getInnerType();
+        } else if (p1->getSignature() != p2->getSignature()) {
             return p1->getSignature() > p2->getSignature();
+        } else if (p1->getIdx() != p2->getIdx()) {
+            return  p1->getIdx() > p2->getIdx();
+        } else {
+            panic("Two totally same packet! sig: %lu, addr: %lu, %lu "\
+                "p1: type: %u, from: %u-%u, to: %u-%u, prio: %u,"\
+                "p2: type: %u, from: %u-%u, to: %u-%u, prio: %u",
+                p1->getSignature(),p1->getAddr(),p2->getAddr(), 
+                p1->type, p1->fromLevel, p1->fromCommId, p1->toLevel, p1->toCommId, p1->priority, 
+                p2->type, p2->fromLevel, p2->fromCommId, p2->toLevel, p2->toCommId, p2->priority);
         }
-        // if (p1->priority != p2->priority) {
-        //     return p1->priority > p2->priority;
-        // } else if (p1->readyCycle != p2->readyCycle) {
-        //     return p1->readyCycle > p2->readyCycle;
-        // } else if (p1->getIdx() != p2->getIdx()) {
-        //     return p1->getIdx() > p2->getIdx();
-        // } else {
-        //     return p1->getSignature() > p2->getSignature();
-        // }
     }
 };
 

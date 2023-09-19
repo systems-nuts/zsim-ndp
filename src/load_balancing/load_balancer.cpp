@@ -74,12 +74,16 @@ void LoadBalancer::assignOneAddr(Address addr, uint32_t targetBankId) {
 }
 
 void LoadBalancer::output() {
+#ifdef DEBUG_LB_OUTPUT
+    info("---begin lb output---");
     uint32_t numChild = commModule->childEndId - commModule->childBeginId;
     for (uint32_t i = 0; i < numChild; ++i) {
-        info("i: %u, needs: %u, commands: %u", i, needs[i], commands[i]);
+        info("bank: %u, needs: %u, commands: %u", 
+            i+commModule->childBeginId, needs[i], commands[i]);
         assert(this->needs[i] == 0 || this->commands[i] == 0);
     }
-    info("------");
+    info("---end lb output---");
+#endif
 }
 
 void LoadBalancer::reset() {

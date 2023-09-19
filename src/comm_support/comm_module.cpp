@@ -34,6 +34,7 @@ CommModule::CommModule(uint32_t _level, uint32_t _commId, bool _enableInterflow,
     this->childQueueLength.resize(childEndId - childBeginId);
     this->childTransferSize.resize(childEndId - childBeginId);
     this->childQueueReadyLength.resize(childEndId - childBeginId);
+    this->childTopItemLength.resize(childEndId - childBeginId);
 }
 
 uint64_t CommModule::communicate(uint64_t curCycle) {
@@ -77,13 +78,8 @@ void CommModule::commandLoadBalance() {
     if (!this->shouldCommandLoadBalance()) {
         return;
     }
-    // if (this->commId == 1) {
-    //     for (uint32_t i = 0; i < this->childQueueLength.size(); ++i) {
-    //         info("i: %u, length: %u, readyLength: %u", i, childQueueLength[i], childQueueReadyLength[i]);
-    //     }
-    // }
-    // info("%s command load balance", this->getName());
     this->loadBalancer->generateCommand();
+
     // The information of scheduled out data
     // write in executeLoadBalance (by lb executors)
     // read in assignLbTarget (by lb commanders)
@@ -125,20 +121,24 @@ bool CommModule::isEmpty() {
     return true;
 }
 
-uint64_t CommModule::stateLocalTaskQueueSize() {
+uint64_t CommModule::stateReadyLength() {
     uint64_t res = 0;
     for (uint32_t i = childBeginId; i < childEndId; ++i) {
-        res += zinfo->commModules[level-1][i]->stateLocalTaskQueueSize();
+        res += this->childQueueReadyLength[i-childBeginId];
     }
     return res;
 }
 
-uint64_t CommModule::stateToStealSize() {
+uint64_t CommModule::stateAllLength() {
     uint64_t res = 0;
     for (uint32_t i = childBeginId; i < childEndId; ++i) {
-        res += zinfo->commModules[level-1][i]->stateToStealSize();
+        res += this->childQueueLength[i-childBeginId];
     }
     return res;
+}
+
+uint64_t CommModule::stateTopItemLength() {
+    return 0; 
 }
 
 void CommModule::handleInPacket(CommPacket* packet) {
@@ -244,20 +244,20 @@ void CommModule::gatherState() {
         CommModuleBase* child = zinfo->commModules[level-1][i];
         uint32_t id = i - childBeginId;
 
-        uint64_t newChildReadyLength = child->stateLocalTaskQueueSize();
-        uint64_t newStealLength = child->stateToStealSize();
-        uint64_t newChildLength = newChildReadyLength + newStealLength;
-        // if (this->level == 1 && zinfo->SCHEDULE_ALGO == "Reserve") {
-        //     if (this->childQueueReadyLength[id] == 0 && newChildReadyLength == 0 
-        //             && newChildLength != 0 && newChildLength == this->childQueueLength[id]) {
-        //         child->clearToSteal();
-        //         newStealLength = 0;
-        //     }
-        // }
-        this->childQueueReadyLength[id] = newChildReadyLength;
+        uint64_t newChildLength = child->stateAllLength();
+        uint64_t newChildReadyLength = child->stateReadyLength();
+
         this->childQueueLength[id] = newChildLength;
+        this->childQueueReadyLength[id] = newChildReadyLength;
         this->childTransferSize[id] = child->stateTransferRegionSize();
-        //  info("module %s length: %u", child->getName(), this->childQueueReadyLength[id]);
+        this->childTopItemLength[id] = child->stateTopItemLength();
+
+#ifdef DEBUG_GATHER_STATE
+        info("module %s length: %lu readyLength: %lu notReadyLength: %lu, transferLength: %lu", 
+            child->getName(), newChildLength, newChildReadyLength, 
+            newChildLength-newChildReadyLength,
+            childTransferSize[id]);
+#endif
     }
     this->loadBalancer->updateChildStateForLB();
 }
@@ -270,7 +270,7 @@ bool CommModule::shouldCommandLoadBalance() {
     for (uint32_t i = childBeginId; i < childEndId; ++i) {
         if (childQueueLength[i-childBeginId] < loadBalancer->IDLE_THRESHOLD) {
             hasIdle = true;
-        } else if (childQueueReadyLength[i-childBeginId] >= loadBalancer->IDLE_THRESHOLD){
+        } else if (childQueueReadyLength[i-childBeginId] >= 2 * loadBalancer->IDLE_THRESHOLD){
             hasNotIdle = true;
         }
     }

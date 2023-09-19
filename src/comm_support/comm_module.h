@@ -68,6 +68,7 @@ public:
     virtual void executeLoadBalance(uint32_t command, 
         std::vector<DataHotness>& outInfo) = 0;
     virtual void addToSteal(uint64_t val) { panic("?!"); }
+    virtual uint64_t getToSteal() { panic("?!"); }
     virtual void clearToSteal() { panic("?!"); }
 
     // update through the hierarchy
@@ -75,9 +76,10 @@ public:
     // void generateTask();
 
     // state that accessed by filtered command
-    virtual uint64_t stateLocalTaskQueueSize() = 0;
+    virtual uint64_t stateReadyLength() = 0;
+    virtual uint64_t stateAllLength() = 0;
+    virtual uint64_t stateTopItemLength() = 0;
     uint64_t stateTransferRegionSize();
-    virtual uint64_t stateToStealSize() = 0;
     
     // getters and setters
     void setParentId(uint32_t _parentId) { this->parentId = _parentId; }
@@ -126,15 +128,18 @@ public:
     void executeLoadBalance(uint32_t command, 
         std::vector<DataHotness>& outInfo) override;
 
-    uint64_t stateLocalTaskQueueSize() override;
-    uint64_t stateToStealSize() override {
-        return this->toStealSize;
-    }
+    uint64_t stateReadyLength() override;
+    uint64_t stateAllLength() override;
+    uint64_t stateTopItemLength() override;
     void addToSteal(uint64_t val) override {
         this->toStealSize += val;
+        // info("module %s addToSteal: %lu, total: %lu", this->getName(), val, toStealSize);
+    }
+    uint64_t getToSteal() override {
+        return this->toStealSize;
     }
     void clearToSteal() override {
-        this->toStealSize -= 10;
+        this->toStealSize = 0;
     }
 private:
     void handleInPacket(CommPacket* packet) override;
@@ -146,7 +151,9 @@ private:
 public:
     void initStats(AggregateStat* parentStat) override;
 
+    friend class PimBridgeTaskUnitKernel;
     friend class PimBridgeTaskUnit;
+    friend class ReserveLbPimBridgeTaskUnitKernel;
     friend class ReserveLbPimBridgeTaskUnit;
 };
 
@@ -167,6 +174,7 @@ private:
     std::vector<uint64_t> childQueueLength;
     std::vector<uint64_t> childTransferSize;
     std::vector<uint64_t> childQueueReadyLength;
+    std::vector<uint64_t> childTopItemLength;
 
     bool enableLoadBalance;
 
@@ -185,8 +193,9 @@ public:
         std::vector<DataHotness>& outInfo);
     bool isEmpty() override;
     
-    uint64_t stateLocalTaskQueueSize() override;
-    uint64_t stateToStealSize() override;
+    uint64_t stateReadyLength() override;
+    uint64_t stateAllLength() override;
+    uint64_t stateTopItemLength() override;
     // getters & setters
     uint64_t getLastGatherPhase() { return this->lastGatherPhase; }
     uint64_t getLastScatterPhase() { return this->lastScatterPhase; }

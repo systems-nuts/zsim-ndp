@@ -14,27 +14,29 @@ public:
         Sub
     };
     PacketType type;
+    uint64_t readyCycle;
     uint32_t fromLevel;
     uint32_t fromCommId;
     uint32_t toLevel;
     int toCommId; 
-    uint64_t readyCycle;
     uint32_t priority;
     
-    CommPacket(PacketType _type, uint32_t _fromLevel, uint32_t _fromCommId, 
-               uint32_t _toLevel, int _toCommId, uint32_t _priority) 
-        : type(_type), fromLevel(_fromLevel), fromCommId(_fromCommId), 
-          toLevel(_toLevel), toCommId(_toCommId), 
-          readyCycle(0), priority(_priority) {}
+    CommPacket(PacketType _type, uint64_t _readyCycle, 
+               uint32_t _fromLevel, uint32_t _fromCommId, 
+               uint32_t _toLevel, int _toCommId, 
+               uint32_t _priority) 
+        : type(_type), readyCycle(_readyCycle), 
+          fromLevel(_fromLevel), fromCommId(_fromCommId), 
+          toLevel(_toLevel), toCommId(_toCommId), priority(_priority) {}
 
     virtual ~CommPacket() {}
     virtual uint64_t getSize() = 0;
-    virtual Address getAddr() = 0;
+    virtual Address getAddr() const = 0;
     virtual uint32_t getIdx() const {
         return 0;
     }
     virtual uint64_t getSignature() const = 0;
-    virtual PacketType getInnerType() {
+    virtual PacketType getInnerType() const {
         return this->type;
     }
 };
@@ -44,16 +46,17 @@ public:
     task_support::TaskPtr task;
     // priority = 3 means this is a normal transfer packet
     // priority = 2 means this is a packet for load balance
-    TaskCommPacket(uint32_t _fromLevel, uint32_t _fromCommId, 
+    TaskCommPacket(uint64_t _readyCycle,
+                   uint32_t _fromLevel, uint32_t _fromCommId, 
                    uint32_t _toLevel, int _toCommId,
                    task_support::TaskPtr _task, uint32_t _priority = 3)
-        : CommPacket(PacketType::Task, _fromLevel, _fromCommId, _toLevel, 
-                     _toCommId, _priority), task(_task) {}
+        : CommPacket(PacketType::Task, _readyCycle, _fromLevel, _fromCommId,
+            _toLevel, _toCommId, _priority), task(_task) {}
     
     uint64_t getSize() override {
         return this->task->taskSize;
     }
-    Address getAddr() override;
+    Address getAddr() const override;
     uint64_t getSignature() const override {
         return task->taskId;
     }
@@ -66,17 +69,18 @@ class DataLendCommPacket : public CommPacket {
 public: 
     Address lbPageAddr;
     uint32_t dataSize;
-    DataLendCommPacket(uint32_t _fromLevel, uint32_t _fromCommId, 
+    DataLendCommPacket(uint64_t _readyCycle, 
+                       uint32_t _fromLevel, uint32_t _fromCommId, 
                        uint32_t _toLevel, int _toCommId,
                        Address _lbPageAddr, uint32_t _dataSize)
-        : CommPacket(PacketType::DataLend ,_fromLevel, _fromCommId, 
-                    _toLevel, _toCommId, 1), 
+        : CommPacket(PacketType::DataLend, _readyCycle, 
+                    _fromLevel, _fromCommId, _toLevel, _toCommId, 2), 
           lbPageAddr(_lbPageAddr), dataSize(_dataSize){}
 
     uint64_t getSize() override {
         return dataSize;
     }
-    Address getAddr() override {
+    Address getAddr() const override {
         return this->lbPageAddr;
     }
     uint64_t getSignature() const override {
@@ -98,14 +102,15 @@ public:
     uint32_t idx; // start with 1;
     uint32_t total;
     SubCommPacket(CommPacket* _parent, uint32_t _idx, uint32_t _total) : 
-        CommPacket(PacketType::Sub, _parent->fromLevel, _parent->fromCommId, 
+        CommPacket(PacketType::Sub, _parent->readyCycle, 
+                    _parent->fromLevel, _parent->fromCommId, 
                    _parent->toLevel, _parent->toCommId, _parent->priority), 
         parent(_parent), idx(_idx), total(_total) {}
     
     uint64_t getSize() override {
         return CommPacket::MAX_SIZE;
     }
-    Address getAddr() override {
+    Address getAddr() const override {
         return this->parent->getAddr();
     }
     bool isLast() {
@@ -117,7 +122,7 @@ public:
     uint64_t getSignature() const override {
         return parent->getSignature();
     }
-    PacketType getInnerType() override {
+    PacketType getInnerType() const override {
         return parent->getInnerType();
     }
 };
