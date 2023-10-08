@@ -31,10 +31,10 @@ CommModule::CommModule(uint32_t _level, uint32_t _commId, bool _enableInterflow,
     this->scatterBuffer.resize(childEndId - childBeginId);
     gatherScheme->setCommModule(this);
     scatterScheme->setCommModule(this);
-    this->childQueueLength.resize(childEndId - childBeginId);
+
+    this->bankQueueLength.resize(bankEndId - bankBeginId);
+    this->bankQueueReadyLength.resize(bankEndId - bankBeginId);
     this->childTransferSize.resize(childEndId - childBeginId);
-    this->childQueueReadyLength.resize(childEndId - childBeginId);
-    this->childTopItemLength.resize(childEndId - childBeginId);
 }
 
 uint64_t CommModule::communicate(uint64_t curCycle) {
@@ -79,33 +79,29 @@ void CommModule::commandLoadBalance() {
         return;
     }
     this->loadBalancer->generateCommand();
-
     // The information of scheduled out data
     // write in executeLoadBalance (by lb executors)
     // read in assignLbTarget (by lb commanders)
     std::vector<DataHotness> outInfo;
     outInfo.clear();
-    for (uint32_t i = this->childBeginId; i < this->childEndId; ++i) {
-        assert(loadBalancer->commands[i-childBeginId] == 0 || loadBalancer->needs[i-childBeginId] == 0);
-        uint32_t curCommand = loadBalancer->commands[i-childBeginId];
-        if (curCommand > 0) {
-            zinfo->commModules[level-1][i]->executeLoadBalance(curCommand, outInfo);
+    for (uint32_t i = this->bankBeginId; i < bankEndId; ++i) {
+        const LbCommand& curCommand = loadBalancer->commands[i-bankBeginId];
+        if (!curCommand.empty()) {
+            zinfo->commModules[level-1][i]->executeLoadBalance(curCommand, i, outInfo);
         }
     }
     this->loadBalancer->assignLbTarget(outInfo);   
 }
 
-void CommModule::executeLoadBalance(uint32_t command, 
+void CommModule::executeLoadBalance(
+        const LbCommand& command, uint32_t targetBankId, 
         std::vector<DataHotness>& outInfo) {
-    // info("%s execute load balance", this->getName());
-    this->loadBalancer->generateCommandFromUpper(command);
+
     uint64_t curOutSize = outInfo.size();
-    for (uint32_t i = this->childBeginId; i < this->childEndId; ++i) { 
-        uint32_t curCommand = loadBalancer->commands[i-childBeginId];
-        if (curCommand > 0) {
-            zinfo->commModules[level-1][i]->executeLoadBalance(curCommand, outInfo);
-        }
-    }
+    uint32_t childCommId = zinfo->commMapping->getCommId(level-1, targetBankId);
+    zinfo->commModules[level-1][childCommId]
+        ->executeLoadBalance(command, targetBankId, outInfo);
+
     for (uint64_t i = curOutSize; i < outInfo.size(); ++i) {
         this->newAddrLend(outInfo[i].addr);
     }
@@ -119,26 +115,6 @@ bool CommModule::isEmpty() {
         if (!pb.empty()) { return false; }
     }
     return true;
-}
-
-uint64_t CommModule::stateReadyLength() {
-    uint64_t res = 0;
-    for (uint32_t i = childBeginId; i < childEndId; ++i) {
-        res += this->childQueueReadyLength[i-childBeginId];
-    }
-    return res;
-}
-
-uint64_t CommModule::stateAllLength() {
-    uint64_t res = 0;
-    for (uint32_t i = childBeginId; i < childEndId; ++i) {
-        res += this->childQueueLength[i-childBeginId];
-    }
-    return res;
-}
-
-uint64_t CommModule::stateTopItemLength() {
-    return 0; 
 }
 
 void CommModule::handleInPacket(CommPacket* packet) {
@@ -205,7 +181,8 @@ uint64_t CommModule::gather(uint64_t curCycle) {
         this->receivePackets(src, packetSize, readyCycle, numPackets, totalSize);
         this->sv_GatherPackets.atomicInc(i-childBeginId, numPackets);
         this->s_GatherPackets.atomicInc(numPackets);
-        zinfo->gatherProfiler->record(this->level, this->commId, i-childBeginId, totalSize);
+        zinfo->gatherProfiler->record(this->level, this->commId, 
+            i-childBeginId, totalSize);
     }
 
 
@@ -240,41 +217,42 @@ uint64_t CommModule::scatter(uint64_t curCycle) {
 }
 
 void CommModule::gatherState() {
+    DEBUG_GATHER_STATE_O("module %s gather state", this->getName());
+    for (uint32_t i = bankBeginId; i < bankEndId; ++i) {
+        uint32_t id = i - bankBeginId;
+        this->bankQueueLength[id] = 
+            zinfo->taskUnits[i]->getCurUnit()->getAllTaskQueueSize();
+        this->bankQueueReadyLength[id] = 
+            zinfo->taskUnits[i]->getCurUnit()->getReadyTaskQueueSize();
+        DEBUG_GATHER_STATE_O("bank %u queueLength %lu readyLength %lu", 
+            i, bankQueueLength[id] ,bankQueueReadyLength[id])
+    }
+    this->executeSpeed = 0;
     for (uint32_t i = childBeginId; i < childEndId; ++i) {
         CommModuleBase* child = zinfo->commModules[level-1][i];
-        uint32_t id = i - childBeginId;
-
-        uint64_t newChildLength = child->stateAllLength();
-        uint64_t newChildReadyLength = child->stateReadyLength();
-
-        this->childQueueLength[id] = newChildLength;
-        this->childQueueReadyLength[id] = newChildReadyLength;
-        this->childTransferSize[id] = child->stateTransferRegionSize();
-        this->childTopItemLength[id] = child->stateTopItemLength();
-
-#ifdef DEBUG_GATHER_STATE
-        info("module %s length: %lu readyLength: %lu notReadyLength: %lu, transferLength: %lu", 
-            child->getName(), newChildLength, newChildReadyLength, 
-            newChildLength-newChildReadyLength,
-            childTransferSize[id]);
-#endif
+        this->executeSpeed += child->getExecuteSpeed();
+        this->childTransferSize[i - childBeginId] = child->stateTransferRegionSize();
+        DEBUG_GATHER_STATE_O("child %s transeferLength %lu", 
+            child->getName(), childTransferSize[i - childBeginId]);
     }
-    this->loadBalancer->updateChildStateForLB();
+
 }
 
 bool CommModule::shouldCommandLoadBalance() {
+    // TBY TODO: delete this function. add to commandLoadBalance directly
     if (!this->enableLoadBalance) {
         return false;
     }
-    bool hasIdle = false, hasNotIdle = false;
-    for (uint32_t i = childBeginId; i < childEndId; ++i) {
-        if (childQueueLength[i-childBeginId] < loadBalancer->IDLE_THRESHOLD) {
-            hasIdle = true;
-        } else if (childQueueReadyLength[i-childBeginId] >= 2 * loadBalancer->IDLE_THRESHOLD){
-            hasNotIdle = true;
-        }
-    }
-    return (hasIdle && hasNotIdle);
+    return true;
+    // bool hasIdle = false, hasNotIdle = false;
+    // for (uint32_t i = childBeginId; i < childEndId; ++i) {
+    //     if (childQueueLength[i-childBeginId] < loadBalancer->IDLE_THRESHOLD) {
+    //         hasIdle = true;
+    //     } else if (childQueueReadyLength[i-childBeginId] >= 2 * loadBalancer->IDLE_THRESHOLD){
+    //         hasNotIdle = true;
+    //     }
+    // }
+    // return (hasIdle && hasNotIdle);
 }
 
 void CommModule::initStats(AggregateStat* parentStat) {

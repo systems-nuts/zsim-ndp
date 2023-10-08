@@ -1,13 +1,12 @@
 #pragma once
 #include <cstdint>
 #include <vector>
+#include <deque>
 #include <unordered_map>
 #include "config.h"
 #include "memory_hierarchy.h"
 
 namespace pimbridge {
-
-// typedef std::pair<Address, uint32_t> DataHotness;
 
 class DataHotness {
 public:
@@ -22,33 +21,52 @@ public:
     }
 };
 
+/* Each LbCommand targets a single bank (taskUnit)
+ * The values in perStealerCommand refers to the number of tasks 
+   that should be stolen by each stealer. 
+ * For example, bank-1 and bank-2 needs to steal 5 tasks and 7 tasks from bank-0, 
+   then the LbCommand for bank-0 is (5, 7)
+ */
+class LbCommand {
+private:
+    std::vector<uint32_t> perStealerCommand;
+public:
+    LbCommand() {}
+    void reset() { this->perStealerCommand.clear(); }
+    void add(uint32_t c) { this->perStealerCommand.push_back(c); }
+    const std::vector<uint32_t>& get() const { return this->perStealerCommand; }
+    bool empty() const { return perStealerCommand.empty(); }
+};
+
 class CommModule;
 
 // The load balancer give commands for children to execute. 
 // The commands are integers, indicating the number of tasks that should be scheduled out.
 class LoadBalancer {
 public:
-    // static uint32_t IDLE_THRESHOLD;
     uint32_t IDLE_THRESHOLD;
 protected:
     uint32_t level;
     uint32_t commId;
     CommModule* commModule;
-    std::vector<uint32_t> commands;
-    // std::unordered_map<Address, uint32_t> assignTable;
-    std::vector<uint32_t> needs;
-    std::vector<uint32_t> bankLevelNeeds;
+
+    std::vector<LbCommand> commands; // commands for each bank
+    std::vector<bool> canDemand; // in this level, whether a bank can steal from any other banks
+
+    std::vector<uint32_t> demand;
+    std::vector<uint32_t> supply;
+    std::vector<uint32_t> demandIdxVec; // all demands, each is a pair<bankChildId, demandVal>
+    std::vector<uint32_t> supplyIdxVec; // all supplies, each is a pair<bankChildId, supplyVal>
+
+    std::vector<std::deque<std::pair<uint32_t, uint32_t>>> assignTable; // for each victim, which are its stealers and how much to steal
 public: 
     LoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
     virtual void generateCommand() = 0;
-    virtual void generateCommandFromUpper(uint32_t upperCommand) = 0;
-    virtual void assignLbTarget(const std::vector<DataHotness>& outInfo);
-    virtual void updateChildStateForLB() { return; }
+    virtual void assignLbTarget(const std::vector<DataHotness>& outInfo) = 0;
 protected:
     void assignOneAddr(Address addr, uint32_t target);
     void output();
     void reset();
-    void generateBankLevelNeeds();
 
     friend class CommModule;
 };
@@ -61,22 +79,15 @@ private:
 public:
     StealingLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
     void generateCommand() override;
-    void generateCommandFromUpper(uint32_t upperCommand) override;
-};
-
-// The AverageLoadBalancer schedule tasks from the tail of the task queue
-// Try to schedule the number of tasks of each queue to average
-class AverageLoadBalancer : public LoadBalancer {
-public:
-    AverageLoadBalancer(Config& config, uint32_t _level, uint32_t _commId)
-        : LoadBalancer(config, _level, _commId) {}
-    void generateCommand() override;
-    void generateCommandFromUpper(uint32_t upperCommand) override { panic("todo"); }
+    void assignLbTarget(const std::vector<DataHotness>& outInfo) override;
+protected:
+    virtual bool genDemand(uint32_t bankIdx); // how much to steal for each bank
+    virtual bool genSupply(uint32_t bankIdx); // how much can be stolen for each bank
 };
 
 class ReserveLbPimBridgeTaskUnit;
 
-class ReserveLoadBalancer : public LoadBalancer {
+class ReserveLoadBalancer : public StealingLoadBalancer {
 private:
     uint32_t CHUNK_SIZE;
     uint32_t HOT_DATA_NUMBER = 10;
@@ -84,9 +95,8 @@ private:
 public:
     ReserveLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
     void generateCommand() override;
-    void generateCommandFromUpper(uint32_t upperCommand) override;
-    void updateChildStateForLB() override;
-    void copyToParentState(std::vector<DataHotness>& parentHotnessInfo) const ;
+private: 
+    bool genSupply(uint32_t bankIdx) override;
 };
 
 

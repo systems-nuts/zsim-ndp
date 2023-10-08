@@ -26,9 +26,11 @@ public:
     void taskEnqueueKernel(TaskPtr t, int available) override;
     TaskPtr taskDequeueKernel() override;
     bool isEmpty() override;
-    uint64_t getTaskQueueSize() override;
+    uint64_t getReadyTaskQueueSize() override;
+    uint64_t getAllTaskQueueSize() override;
 
-    void executeLoadBalanceCommand(uint32_t command, 
+    void executeLoadBalanceCommand(
+        const LbCommand& command, 
         std::vector<DataHotness>& outInfo) override;
 
 protected:

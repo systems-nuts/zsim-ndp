@@ -27,7 +27,11 @@ bool CpuCommTaskUnitKernel::isEmpty() {
     return this->taskQueue.empty();
 }
 
-uint64_t CpuCommTaskUnitKernel::getTaskQueueSize() {
+uint64_t CpuCommTaskUnitKernel::getReadyTaskQueueSize() {
+    return this->taskQueue.size();
+}
+
+uint64_t CpuCommTaskUnitKernel::getAllTaskQueueSize() {
     return this->taskQueue.size();
 }
 

@@ -18,53 +18,77 @@ StealingLoadBalancer::StealingLoadBalancer(Config& config, uint32_t _level,
 
 void StealingLoadBalancer::generateCommand() {
     reset();
-    srand((unsigned)time(NULL));
-    std::vector<uint32_t> idleVec;
-    std::vector<uint32_t> notIdleVec;
-    uint32_t numChild = commModule->childEndId - commModule->childBeginId;
-    for (uint32_t i = 0; i < numChild; ++i) {
-        if (commModule->childQueueLength[i] < IDLE_THRESHOLD) {
-            idleVec.push_back(i);
-        } else if (commModule->childQueueReadyLength[i] >= 2 * IDLE_THRESHOLD) {
-            notIdleVec.push_back(i);
+    uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
+    for (uint32_t i = 0; i < numBanks; ++i) {
+        bool isStealer = genDemand(i);
+        bool isVictim = genSupply(i);
+        assert(!(isStealer && isVictim));
+    }
+    for (size_t i = 0; i < demandIdxVec.size(); ++i) {
+        uint32_t stealerIdx = demandIdxVec[i]; 
+        // choose victim & amount
+        uint32_t victimPos = rand() % supplyIdxVec.size();
+        uint32_t victimIdx = supplyIdxVec[victimPos];
+        uint32_t amount = std::max(demand[demandIdxVec[i]], supply[victimIdx]);
+        // update command & assignTable
+        this->commands[victimIdx].add(amount);
+        this->assignTable[victimIdx].push_back(std::make_pair(stealerIdx, amount));
+        // update supply
+        supply[victimIdx] -= amount;
+        if (supply[victimIdx] == 0) {
+            supplyIdxVec.erase(supplyIdxVec.begin() + victimPos);
         }
-    }
-    if (notIdleVec.size() == 0) {
-        return;
-    }
-    for (auto theifId : idleVec) {
-        this->needs[theifId] = CHUNK_SIZE;
-    }
-    for (size_t i = 0; i < idleVec.size(); ++i) {
-        uint32_t victimPos = rand() % notIdleVec.size();
-        uint32_t victimId = notIdleVec[victimPos];
-        assert(CHUNK_SIZE > 0);
-        this->commands[victimId] += CHUNK_SIZE;
-        if (commModule->childQueueReadyLength[victimId] - 
-                commands[victimId] < IDLE_THRESHOLD) {
-            notIdleVec.erase(notIdleVec.begin() + victimPos);
-        }
-        if (notIdleVec.size() == 0) {
+        if (supplyIdxVec.size() == 0) {
             break;
         }
     }
-    output();
 }
 
-void StealingLoadBalancer::generateCommandFromUpper(uint32_t upperCommand) {
-    reset();
-    std::vector<uint32_t> notIdleVec;
-    uint32_t numChild = commModule->childEndId - commModule->childBeginId;
-    for (uint32_t i = 0; i < numChild; ++i) {
-        if (commModule->childQueueReadyLength[i] >= IDLE_THRESHOLD) {
-            notIdleVec.push_back(i);
+bool StealingLoadBalancer::genDemand(uint32_t bankIdx) {
+    if (this->canDemand[bankIdx] && 
+            commModule->bankQueueLength[bankIdx] < IDLE_THRESHOLD) { 
+        this->demand[bankIdx] = CHUNK_SIZE;
+        this->demandIdxVec.push_back(bankIdx);
+        return true;
+    } else {
+        return false;
+    }
+}
+
+bool StealingLoadBalancer::genSupply(uint32_t bankIdx) {
+    // TBY TODO: generate supply according to speed.
+    if (commModule->bankQueueReadyLength[bankIdx] <  2 * IDLE_THRESHOLD) {
+        return false;
+    } else {
+        this->supply[bankIdx] =  commModule->bankQueueReadyLength[bankIdx] - 2 * IDLE_THRESHOLD;
+        this->supplyIdxVec.push_back(bankIdx);
+        return true;
+    }
+    // CommModuleBase* child = zinfo->commModules[this->level-1][i + commModule->childBeginId];
+    // uint64_t transferSize = commModule->childTransferSize[i];
+    // uint64_t queueLength = commModule->childQueueReadyLength[i];
+    // uint64_t transferTime = transferSize / child->getTransferSpeed();
+    // uint64_t executeTime = queueLength / child->getExecuteSpeed();
+    // if (executeTime > transferTime) {
+    //     uint32_t val = uint32_t((executeTime-transferTime) * child->getExecuteSpeed());
+    //     this->supplyVec.push_back(std::make_pair(i, val));
+    // }
+}
+
+void StealingLoadBalancer::assignLbTarget(const std::vector<DataHotness>& outInfo) {
+    for (uint32_t i = 0; i < outInfo.size(); ++i) {
+        auto curGive = outInfo[i];
+        std::deque<std::pair<uint32_t, uint32_t>>& stealerQueue = assignTable[curGive.srcBankId];
+        // TBY NOTICE: this is when lastInNeed happens in the old implementation
+        assert(!stealerQueue.empty());
+        auto& curReceive = stealerQueue.front();
+        uint32_t targetBankId = curReceive.first + commModule->bankBeginId;
+        this->assignOneAddr(curGive.addr, targetBankId);
+        zinfo->commModules[0][targetBankId]->addToSteal(curGive.cnt);
+        if (curGive.cnt > curReceive.second) {
+            stealerQueue.pop_front();
+        } else {
+            curReceive.second -= curGive.cnt;
         }
-    }
-    if (notIdleVec.size() == 0) {
-        return;
-    }
-    uint32_t perChildSize = std::min<uint32_t>(CHUNK_SIZE, upperCommand / notIdleVec.size());
-    for (auto id : notIdleVec) {
-        this->commands[id] = perChildSize;
     }
 }

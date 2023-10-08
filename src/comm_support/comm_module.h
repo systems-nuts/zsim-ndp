@@ -48,13 +48,15 @@ protected:
     Counter s_ScheduleOutTasks, s_ScheduleInTasks, s_ScheduleOutData, s_ScheduleInData;
     // Counter s_InAndOutData, s_OutAndInData;
 
+    double executeSpeed;
+
 public:
     // initialization
     CommModuleBase(uint32_t _level, uint32_t _commId, bool _enableInterflow);
     void initSiblings(uint32_t sibBegin, uint32_t sibEnd);
 
     virtual uint64_t communicate(uint64_t curCycle) = 0; 
-    virtual void gatherState() {}
+    virtual void gatherState() = 0;
     virtual bool isEmpty();
     void receivePackets(CommModuleBase* srcModule, 
                         uint32_t messageSize, uint64_t readyCycle, 
@@ -65,20 +67,14 @@ public:
 
     // load balance
     virtual void commandLoadBalance() = 0; 
-    virtual void executeLoadBalance(uint32_t command, 
-        std::vector<DataHotness>& outInfo) = 0;
+    virtual void executeLoadBalance(const LbCommand& command,  
+        uint32_t targetBankId, std::vector<DataHotness>& outInfo) = 0;
+        
     virtual void addToSteal(uint64_t val) { panic("?!"); }
     virtual uint64_t getToSteal() { panic("?!"); }
     virtual void clearToSteal() { panic("?!"); }
 
-    // update through the hierarchy
-    // void finishTask();
-    // void generateTask();
-
     // state that accessed by filtered command
-    virtual uint64_t stateReadyLength() = 0;
-    virtual uint64_t stateAllLength() = 0;
-    virtual uint64_t stateTopItemLength() = 0;
     uint64_t stateTransferRegionSize();
     
     // getters and setters
@@ -90,6 +86,8 @@ public:
     uint32_t getLevel() { return this->level; }
     uint32_t getCommId() { return this->commId; }
     LoadBalancer* getLoadBalancer() { return this->loadBalancer; }
+    double getExecuteSpeed() { return this->executeSpeed; } // #task per cycle
+    double getTransferSpeed() { return 0; } // TBY TODO: // #bytes per cycle
     void setLoadBalancer(LoadBalancer* lb) { this->loadBalancer = lb; }
 
     void newAddrLend(Address lbPageAddr);
@@ -121,16 +119,14 @@ public:
     PimBridgeTaskUnit* taskUnit;
     BottomCommModule(uint32_t _level, uint32_t _commId, 
                      bool _enableInterflow, PimBridgeTaskUnit* _taskUnit);
+    void gatherState() override;
     uint64_t communicate(uint64_t curCycle) override { return curCycle; }
     CommPacket* nextPacket(uint32_t fromLevel, uint32_t fromCommI, 
                            uint32_t sizeLimit) override;
     void commandLoadBalance() override { return; }
-    void executeLoadBalance(uint32_t command, 
-        std::vector<DataHotness>& outInfo) override;
+    void executeLoadBalance(const LbCommand& command, 
+        uint32_t targetBankId, std::vector<DataHotness>& outInfo) override;
 
-    uint64_t stateReadyLength() override;
-    uint64_t stateAllLength() override;
-    uint64_t stateTopItemLength() override;
     void addToSteal(uint64_t val) override {
         this->toStealSize += val;
         // info("module %s addToSteal: %lu, total: %lu", this->getName(), val, toStealSize);
@@ -171,10 +167,13 @@ private:
     // packet buffer
     std::vector<CommPacketQueue> scatterBuffer;
 
-    std::vector<uint64_t> childQueueLength;
+    // std::vector<uint64_t> childQueueLength;
     std::vector<uint64_t> childTransferSize;
-    std::vector<uint64_t> childQueueReadyLength;
-    std::vector<uint64_t> childTopItemLength;
+    // std::vector<uint64_t> childQueueReadyLength;
+    // std::vector<uint64_t> childTopItemLength;
+
+    std::vector<uint64_t> bankQueueLength;
+    std::vector<uint64_t> bankQueueReadyLength;
 
     bool enableLoadBalance;
 
@@ -189,13 +188,11 @@ public:
                            uint32_t sizeLimit) override;
     void gatherState() override; 
     void commandLoadBalance() override;
-    void executeLoadBalance(uint32_t command, 
-        std::vector<DataHotness>& outInfo);
+    void executeLoadBalance(const LbCommand& command, 
+        uint32_t targetBankId, std::vector<DataHotness>& outInfo);
+        
     bool isEmpty() override;
     
-    uint64_t stateReadyLength() override;
-    uint64_t stateAllLength() override;
-    uint64_t stateTopItemLength() override;
     // getters & setters
     uint64_t getLastGatherPhase() { return this->lastGatherPhase; }
     uint64_t getLastScatterPhase() { return this->lastScatterPhase; }
@@ -235,7 +232,6 @@ private:
     friend class pimbridge::LoadBalancer;
     friend class pimbridge::StealingLoadBalancer;
     friend class pimbridge::ReserveLoadBalancer;
-    friend class pimbridge::AverageLoadBalancer;
 };
 
     

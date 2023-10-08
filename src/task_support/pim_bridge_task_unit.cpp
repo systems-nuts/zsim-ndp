@@ -52,49 +52,57 @@ bool PimBridgeTaskUnitKernel::isEmpty() {
     return this->taskQueue.empty() && this->notReadyLbTasks.empty();
 }
 
-uint64_t PimBridgeTaskUnitKernel::getTaskQueueSize(){
+uint64_t PimBridgeTaskUnitKernel::getReadyTaskQueueSize(){
     return this->taskQueue.size();
 }
 
-void PimBridgeTaskUnitKernel::executeLoadBalanceCommand(uint32_t command, 
+uint64_t PimBridgeTaskUnitKernel::getAllTaskQueueSize(){
+    return this->taskQueue.size() + this->notReadyTaskNumber;
+}
+
+void PimBridgeTaskUnitKernel::executeLoadBalanceCommand(
+        const LbCommand& command,  
         std::vector<DataHotness>& outInfo) {
     uint64_t curCycle = zinfo->cores[taskUnitId]->getCurCycle();
     std::unordered_map<Address, uint32_t> info;
-    while (!this->taskQueue.empty()) {
-        TaskPtr t = this->taskQueue.top();
-        this->taskQueue.pop();
-        Address lbPageAddr = zinfo->numaMap->getLbPageAddress(t->hint->dataPtr);
-        int available = this->commModule->checkAvailable(lbPageAddr);
-        if (available == -2) {
-            newNotReadyTask(t);
-        } else if (available == -1) {
-            TaskCommPacket* p = new TaskCommPacket(curCycle, 0, this->taskUnitId, 1, -1, t, 3);
-            this->commModule->handleOutPacket(p);
-            this->commModule->s_ScheduleOutTasks.atomicInc(1);
-            if (--command == 0) {
-                break;
+    for (auto curCommand : command.get()) {
+        while (!this->taskQueue.empty()) {
+            TaskPtr t = this->taskQueue.top();
+            this->taskQueue.pop();
+            Address lbPageAddr = zinfo->numaMap->getLbPageAddress(t->hint->dataPtr);
+            int available = this->commModule->checkAvailable(lbPageAddr);
+            if (available == -2) {
+                newNotReadyTask(t);
+            } else if (available == -1) {
+                TaskCommPacket* p = new TaskCommPacket(curCycle, 0, this->taskUnitId, 1, -1, t, 3);
+                this->commModule->handleOutPacket(p);
+                this->commModule->s_ScheduleOutTasks.atomicInc(1);
+                if (--curCommand == 0) {
+                    break;
+                }
+            } else if (available >= 0) {
+                TaskCommPacket* p = new TaskCommPacket(curCycle, 0, this->taskUnitId, 1, -1, t, 2);
+                // DEBUG_LB_O("unit %u sched task out: addr: %lu, sig: %lu", taskUnitId, p->getAddr(), p->getSignature());
+                this->commModule->handleOutPacket(p);
+                if (info.count(lbPageAddr) == 0) {
+                    info.insert(std::make_pair(lbPageAddr, 0));
+                }
+                info[lbPageAddr] += 1;
+                this->commModule->s_ScheduleOutTasks.atomicInc(1);
+                if (--curCommand == 0) {
+                    break;
+                }
+            } else {
+                panic("invalid available value");
             }
-        } else if (available >= 0) {
-            TaskCommPacket* p = new TaskCommPacket(curCycle, 0, this->taskUnitId, 1, -1, t, 2);
-            // info("unit %u sched task out: addr: %lu, sig: %lu", taskUnitId, p->getAddr(), p->getSignature());
-            this->commModule->handleOutPacket(p);
-            if (info.count(lbPageAddr) == 0) {
-                info.insert(std::make_pair(lbPageAddr, 0));
-            }
-            info[lbPageAddr] += 1;
-            this->commModule->s_ScheduleOutTasks.atomicInc(1);
-            if (--command == 0) {
-                break;
-            }
-        } else {
-            panic("invalid available value");
         }
     }
     for (auto it = info.begin(); it != info.end(); ++it) {
-        // info("unit %u execute lb: addr: %lu, cnt: %u", taskUnitId, it->first, it->second);
+        DEBUG_LB_O("unit %u execute lb: addr: %lu, cnt: %u", taskUnitId, it->first, it->second);
         outInfo.push_back(DataHotness(it->first, this->taskUnitId, it->second));
-        DataLendCommPacket* p = new DataLendCommPacket(curCycle, 0, this->taskUnitId, 1, -1, it->first, zinfo->lbPageSize);
-        assert(this->commModule->checkAvailable(it->first) != -2);
+        this->commModule->newAddrLend(it->first);
+        DataLendCommPacket* p = new DataLendCommPacket(curCycle, 0, this->taskUnitId,
+            1, -1, it->first, zinfo->lbPageSize);
         this->commModule->handleOutPacket(p);
     }
 }

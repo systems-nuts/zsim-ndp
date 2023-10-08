@@ -74,7 +74,7 @@ bool ReserveLbPimBridgeTaskUnitKernel::isEmpty() {
         && this->reserveRegion.empty();
 }
 
-uint64_t ReserveLbPimBridgeTaskUnitKernel::getTaskQueueSize() {
+uint64_t ReserveLbPimBridgeTaskUnitKernel::getReadyTaskQueueSize() {
     return this->taskQueue.size() + this->reserveRegionSize;
 }
 
@@ -92,9 +92,55 @@ void ReserveLbPimBridgeTaskUnitKernel::prepareState() {
     this->sketch.prepareForAccess();
 }
 
-void ReserveLbPimBridgeTaskUnitKernel::executeLoadBalanceCommand(uint32_t command, 
+void ReserveLbPimBridgeTaskUnitKernel::executeLoadBalanceCommand(
+        const LbCommand& command,  
         std::vector<DataHotness>& outInfo) {
     uint64_t curCycle = zinfo->cores[taskUnitId]->getCurCycle();
+    std::unordered_map<Address, uint32_t> info;
+    for (auto curCommand : command.get()) {
+        bool noHot = false;
+        while(true) {
+            DataHotness item = this->sketch.fetchHotItem();
+            if (item.cnt == 0) {
+                info("no hot data!");
+                noHot = true;
+                break;
+            }
+            assert(reserveRegion.count(item.addr) != 0 && !reserveRegion[item.addr].empty());
+            auto& q = reserveRegion[item.addr];
+            int available = this->commModule->checkAvailable(item.addr);
+            if (available >= 0) {
+                // because of different timestamps
+                info.insert(std::make_pair(item.addr, q.size()));
+            }
+            while(!q.empty()) {
+                TaskPtr t = q.top();
+                q.pop();
+#ifdef DEBUG_CHECK_CORRECTNESS
+                Address lbPageAddr = zinfo->numaMap->getLbPageAddress(t->hint->dataPtr);
+                assert(lbPageAddr == item.addr);
+#endif
+                this->reserveRegionSize--;
+                TaskCommPacket* p = new TaskCommPacket(curCycle, 0, this->taskUnitId, 1, -1, t, 2);
+                this->commModule->handleOutPacket(p);
+                this->commModule->s_ScheduleOutTasks.atomicInc(1);
+                if (curCommand > 0) {
+                    curCommand--;
+                }
+            }
+            reserveRegion.erase(item.addr);
+        }
+        if (noHot) { break; }
+    }
+    for (auto it = info.begin(); it != info.end(); ++it) {
+        DEBUG_LB_O("unit %u execute lb: addr: %lu, cnt: %u", taskUnitId, it->first, it->second);
+        outInfo.push_back(DataHotness(it->first, this->taskUnitId, it->second));
+        this->commModule->newAddrLend(it->first);
+        DataLendCommPacket* p = new DataLendCommPacket(curCycle, 0, this->taskUnitId,
+            1, -1, it->first, zinfo->lbPageSize);
+        this->commModule->handleOutPacket(p);
+    }
+    /*
     while(true) {
         DataHotness item = this->sketch.fetchHotItem();
         if (item.cnt == 0) {
@@ -132,7 +178,7 @@ void ReserveLbPimBridgeTaskUnitKernel::executeLoadBalanceCommand(uint32_t comman
         if (command == 0) {
             break;
         }
-    }
+    }*/
 }
 
 bool ReserveLbPimBridgeTaskUnitKernel::shouldReserve(TaskPtr t) {
@@ -145,9 +191,11 @@ TaskPtr ReserveLbPimBridgeTaskUnitKernel::reservedTaskDequeue() {
     TaskPtr ret = this->reserveRegion.begin()->second.top();
     this->reserveRegion.begin()->second.pop();
     this->reserveRegionSize--;
-    Address pageAddr = zinfo->numaMap->getLbPageAddress(ret->hint->dataPtr);
-    DEBUG_SKETCH_O("reserved task %lu dequeue, addr: %lu, size: %lu",
-        ret->taskId, pageAddr, this->reserveRegion[pageAddr].size());
+    
+    // Address pageAddr = zinfo->numaMap->getLbPageAddress(ret->hint->dataPtr);
+    // DEBUG_SKETCH_O("reserved task %lu dequeue, addr: %lu, size: %lu",
+    //     ret->taskId, pageAddr, this->reserveRegion[pageAddr].size());
+
     if (this->reserveRegion.begin()->second.empty()) {
         this->reserveRegion.erase(this->reserveRegion.begin()->first);
     }

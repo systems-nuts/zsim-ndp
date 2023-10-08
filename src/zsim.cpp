@@ -548,16 +548,13 @@ VOID EndOfPhaseActions() {
             && allCommModuleEmpty(true)) {
         zinfo->taskUnitManager->finishTimeStamp();
     }
-
     if (!zinfo->IS_PIMBRIDGE) {
         return;
     }
 
     if (zinfo->BEGIN_TASK_EXECUTION && !zinfo->END_TASK_EXECUTION) {
         uint64_t curCycle = zinfo->globPhaseCycles + zinfo->phaseLength;
-#ifdef DEBUG_PHASE
-        info("--- new phase ---");
-#endif
+        DEBUG_PHASE_O("--- new phase ---");
         zinfo->commModuleManager->clearStaleToSteal();
         for (auto tu : zinfo->taskUnits) {
             tu->getCurUnit()->prepareState();
@@ -587,7 +584,8 @@ VOID EndOfPhaseActions() {
         for (auto l : zinfo->commModules) {
             for (auto c : l) {
                 // info("module %s communicate", c->getName());
-                uint64_t curFinishCycle = c->communicate(curCycle);
+                // uint64_t curFinishCycle = c->communicate(curCycle);
+                c->communicate(curCycle);
                 // if (c->getLevel() == 1) {
                 //     info("curCycle: %lu, curFinishCycle: %lu of %s", curCycle, curFinishCycle, c->getName());
                 // }
@@ -597,7 +595,7 @@ VOID EndOfPhaseActions() {
             }
             // curCycle = levelFinishCycle;
         }
-#ifdef DEBUG_LB_OUTPUT
+#ifdef DEBUG_LB
         info("after communicate state");
         for (auto l : zinfo->commModules) {
             for (auto c : l) {
@@ -1316,8 +1314,8 @@ VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
     uint32_t coreId = getCid(tid);
     TaskUnit* curTaskUnit = zinfo->taskUnits[coreId];
     if (curThread->curTask != nullptr && !curThread->curTask->isEndTask) {
-        // info("++ FINISH: tid: %d    uid: %d    taskPtrId: %lu   timestamp: %d", 
-        //     tid, coreId, curThread->curTask->taskId, curThread->curTask->timeStamp);
+        DEBUG_TASK_BEHAVIOR_O("++ FINISH: tid: %d    uid: %d    taskPtrId: %lu   timestamp: %lu", 
+            tid, coreId, curThread->curTask->taskId, curThread->curTask->timeStamp);
         curThread->curTask->state = Task::TaskState::COMPLETED;
         allFinishTask++;
         curTaskUnit->taskFinish(curThread->curTask);
@@ -1354,9 +1352,8 @@ VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
             return;
         }
     }
-    // info("-- DEQUEUE: tid: %d    uid: %d    taskPtrId: %lu    timestamp: %lu, query: %u", 
-    //         tid, coreId, taskPtr->taskId, taskPtr->timeStamp, *((uint8_t*)&taskPtr->args[1]));
-
+    DEBUG_TASK_BEHAVIOR_O("-- DEQUEUE: tid: %d    uid: %d    taskPtrId: %lu    timestamp: %lu", 
+            tid, coreId, taskPtr->taskId, taskPtr->timeStamp);
 
     zinfo->cores[coreId]->fetchTask(taskPtr, zinfo->numaMap->getNodeOfCore(coreId));
 
@@ -1421,10 +1418,11 @@ VOID HandleTaskEnqueueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
             args.push_back(regVal);
         }
         t = new Task(taskId, taskFn, ts, args, false, hintPtr, curCycle); 
-        uint32_t uid = getCid(tid);
-        TaskUnit* tu = zinfo->taskUnits[uid];
+        TaskUnit* tu = zinfo->taskUnits[cid];
         tu->assignNewTask(t, hintPtr);
     }
+    DEBUG_TASK_BEHAVIOR_O("-- ENQUEUE: tid: %d    uid: %d    taskPtrId: %lu    timestamp: %lu", 
+        tid, cid, t->taskId, t->timeStamp);
 }
 
 
@@ -1493,6 +1491,7 @@ VOID HandleMagicOp(THREADID tid, ADDRINT op) {
         case 1033:
             return;
         case ZSIM_MAGIC_OP_BEGIN_TASK_RUN:
+            info("MAGIC OP: BEGIN RUN!");
             return;
         default:
             panic("Thread %d issued unknown magic op %ld!", tid, op);

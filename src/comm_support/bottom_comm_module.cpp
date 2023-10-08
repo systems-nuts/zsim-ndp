@@ -24,6 +24,11 @@ BottomCommModule::BottomCommModule(uint32_t _level, uint32_t _commId,
     this->toStealSize = 0;
 }
 
+void BottomCommModule::gatherState() {
+    this->taskUnit->computeExecuteSpeed();
+    this->executeSpeed = this->taskUnit->executeSpeed;
+}
+
 CommPacket* BottomCommModule::nextPacket(uint32_t fromLevel, uint32_t fromCommId, 
                                          uint32_t sizeLimit) {
     CommPacketQueue* cpd;
@@ -42,30 +47,20 @@ CommPacket* BottomCommModule::nextPacket(uint32_t fromLevel, uint32_t fromCommId
     return nullptr;
 }
 
-void BottomCommModule::executeLoadBalance(uint32_t command, 
+void BottomCommModule::executeLoadBalance(
+        const LbCommand& command, uint32_t targetBankId, 
         std::vector<DataHotness>& outInfo) {
-    // info("%s execute load balance", this->getName());
-    uint64_t curOutSize = outInfo.size();
+    DEBUG_LB_O("%s execute load balance", this->getName());
+    assert(targetBankId == this->commId);
     this->taskUnit->getCurUnit()->executeLoadBalanceCommand(command, outInfo);
-    for (size_t i = curOutSize; i < outInfo.size(); ++i) {
-        this->newAddrLend(outInfo[i].addr);
-    }
 }
 
-uint64_t BottomCommModule::stateReadyLength() {
-    return this->taskUnit->getCurUnit()->getTaskQueueSize();
-}
 
-uint64_t BottomCommModule::stateAllLength() {
-    return this->taskUnit->getCurUnit()->getTaskQueueSize() + 
-        this->toStealSize + 
-        ((PimBridgeTaskUnitKernel*)this->taskUnit->getCurUnit())->notReadyTaskNumber;
-}
-
-uint64_t BottomCommModule::stateTopItemLength() {
-    // return 0;
-    return this->taskUnit->getCurUnit()->getTopItemLength();
-}
+// uint64_t BottomCommModule::stateAllLength() {
+//     return this->taskUnit->getCurUnit()->getReadyTaskQueueSize() + 
+//         this->toStealSize + 
+//         ((PimBridgeTaskUnitKernel*)this->taskUnit->getCurUnit())->notReadyTaskNumber;
+// }
 
 void BottomCommModule::handleInPacket(CommPacket* packet) {
     assert_msg(packet->fromLevel == 1 && packet->toLevel == 0, "fromLevel: %u, toLevel: %u", 

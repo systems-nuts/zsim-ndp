@@ -2,6 +2,8 @@
 #include "numa_map.h"
 #include "log.h"
 #include "zsim.h"
+#include "core.h"
+#include "task_support/task_timing_core.h"
 
 using namespace task_support;
 
@@ -139,4 +141,10 @@ void TaskUnit::initStats(AggregateStat* parentStat) {
     tuStat->append(&s_FinishTasks);
 
     parentStat->append(tuStat);
+}
+
+void TaskUnit::computeExecuteSpeed() {
+    uint64_t numTask = this->s_FinishTasks.get();
+    uint64_t numCycle = ((TaskTimingCore*)zinfo->cores[taskUnitId])->getCurWorkCycle();
+    this->executeSpeed = (double)numTask / numCycle;
 }

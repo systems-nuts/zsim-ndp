@@ -22,6 +22,7 @@ CommModuleBase::CommModuleBase(uint32_t _level, uint32_t _commId,
     futex_init(&commLock); 
     this->parentId = (uint32_t)-1;
     this->addrRemapTable = new AddressRemapTable(level, commId);
+    this->executeSpeed = 0;
 }
 
 void CommModuleBase::initSiblings(uint32_t sibBegin, uint32_t sibEnd) {

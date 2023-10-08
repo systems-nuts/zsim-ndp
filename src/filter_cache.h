@@ -134,7 +134,6 @@ class FilterCache : public Cache {
             futex_lock(&filterLock);
             uint32_t numaNodeId = zinfo->numaMap->getNodeOfCore(srcId);
             assert(numaNodeId == memId);
-            // TBY TODO: check is numaNodeId == memId should always hold? 
             MemReq req = {addressKey, isLoad? GETS : PUTX, numaNodeId, 
                           &dummyState, curCycle, &filterLock, dummyState, 
                           srcId, reqFlags};

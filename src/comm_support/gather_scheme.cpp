@@ -57,19 +57,22 @@ bool DynamicGather::enoughTransferPacket() {
 }
 
 bool DynamicGather::isDangerous() {
-    uint64_t idleUnit = 0;
-    for (size_t i = commModule->childBeginId; i < commModule->childEndId; ++i) {
-        uint64_t curSize = commModule->childQueueReadyLength[i-commModule->childBeginId];
-        if (curSize <= 2) {
-            idleUnit += 1;
-        }
-    }
-    return (idleUnit > 1);
+    // TBY LATER TODO
+    return (!isSafe());
+    // uint64_t idleUnit = 0;
+    // for (size_t i = commModule->childBeginId; i < commModule->childEndId; ++i) {
+    //     uint64_t curSize = commModule->childQueueReadyLength[i-commModule->childBeginId];
+    //     if (curSize <= 2) {
+    //         idleUnit += 1;
+    //     }
+    // }
+    // return (idleUnit > 1);
 }
 
 bool DynamicGather::isSafe() {
-    for (size_t i = commModule->childBeginId; i < commModule->childEndId; ++i) {
-        uint64_t curSize = commModule->childQueueReadyLength[i-commModule->childBeginId];
+    // TBY LATER TO CHECK
+    for (uint32_t i = 0; i < commModule->bankEndId - commModule->bankBeginId; ++i) {
+        uint64_t curSize = commModule->bankQueueReadyLength[i];
         if (curSize <= safeThreshold) {
             return false;
         }
@@ -85,19 +88,21 @@ bool DynamicIntervalGather::shouldTrigger() {
 }
 
 bool DynamicOnDemandGather::shouldTrigger() {
-    if (this->enoughTransferPacket()) {
-        return true;
-    }
-    uint32_t curThreshold = this->isDangerous() ? lowThreshold : highThreshold;
-    for (uint32_t i = commModule->childBeginId; i < commModule->childEndId; ++i) {
-        if (commModule->childTransferSize[i-commModule->childBeginId] >= curThreshold) {
-            return true;
-        }
-    }
-    if (zinfo->numPhases - commModule->getLastGatherPhase() >= this->maxInterval) {
-        return true;
-    }
-    return false;
+    // TBY LATER TODO
+    return this->enoughTransferPacket();
+    // if (this->enoughTransferPacket()) {
+    //     return true;
+    // }
+    // uint32_t curThreshold = this->isDangerous() ? lowThreshold : highThreshold;
+    // for (uint32_t i = commModule->childBeginId; i < commModule->childEndId; ++i) {
+    //     if (commModule->childTransferSize[i-commModule->childBeginId] >= curThreshold) {
+    //         return true;
+    //     }
+    // }
+    // if (zinfo->numPhases - commModule->getLastGatherPhase() >= this->maxInterval) {
+    //     return true;
+    // }
+    // return false;
 }
 
 

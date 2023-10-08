@@ -29,6 +29,9 @@ public:
     bool canSimEvent() override;
     uint64_t getCurCycle() override;
 
+    // for computing execute speed
+    uint64_t getCurWorkCycle(); 
+
  private:
     inline void loadAndRecord(Address addr);
     inline void storeAndRecord(Address addr);

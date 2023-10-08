@@ -27,8 +27,10 @@ public:
     virtual void taskEnqueueKernel(TaskPtr t, int available) = 0;
     virtual TaskPtr taskDequeueKernel() = 0;
     virtual bool isEmpty() = 0;
-    virtual uint64_t getTaskQueueSize() = 0;
-    virtual void executeLoadBalanceCommand(uint32_t command, 
+    virtual uint64_t getReadyTaskQueueSize() = 0;
+    virtual uint64_t getAllTaskQueueSize() = 0;
+    virtual void executeLoadBalanceCommand(
+        const pimbridge::LbCommand& command, 
         std::vector<pimbridge::DataHotness>& outInfo) {}
 
     // for ReserveBased;
@@ -54,6 +56,8 @@ protected:
     TaskUnitKernel* curTaskUnit;
     TaskUnitKernel* nxtTaskUnit;
 
+    double executeSpeed;
+
 public:
     TaskUnit(const std::string& _name, uint32_t _tuId, TaskUnitManager* _tum);
     virtual ~TaskUnit();
@@ -73,6 +77,8 @@ public:
     uint64_t getMinTimeStamp() { return this->minTimeStamp; }
 
     void initStats(AggregateStat* parentStat);
+
+    void computeExecuteSpeed();
 
 protected:
     void switchUnit();
