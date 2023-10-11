@@ -127,6 +127,9 @@ uint64_t H3HashFamily::hash(uint32_t id, uint64_t val) {
 
 #define WITH_SHA1 1
 #include "mbedtls/sha1.h"
+#if MBEDTLS_VERSION_MAJOR >= 3
+#define mbedtls_sha1_ret mbedtls_sha1
+#endif
 void sha1(const unsigned char* input, size_t len, unsigned char output[20]) {
     assert(mbedtls_sha1_ret(input, len, output) == 0);
 }
