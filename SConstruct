@@ -47,6 +47,8 @@ def buildSim(cppFlags, dir, type, pgo=None):
         pinCrtLibDir = joinpath(PINPATH, "intel64/runtime/pincrt")
         assert os.path.exists(pinCrtDir)
         assert os.path.exists(pinCrtLibDir)
+    # Pin 3.24 starts to support most C++11
+    withPinCrtCXX11 = os.path.exists(joinpath(PINPATH, "extras/cxx"))
 
     ROOT = Dir('.').abspath
 
@@ -66,8 +68,11 @@ def buildSim(cppFlags, dir, type, pgo=None):
         env["CPPFLAGS"] += " -D__PIN__=1 -DPIN_CRT=1"
         env["CPPFLAGS"] += " -fno-exceptions -fno-rtti -funwind-tables -fasynchronous-unwind-tables"
         env["CPPFLAGS"] += " -Ddynamic_cast=static_cast"
-        env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/stlport/include")
-        env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/libstdc++/include")
+        if withPinCrtCXX11:
+            env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/cxx/include")
+        else:
+            env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/stlport/include")
+            env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/libstdc++/include")
         env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/libunwind/include")
         env["CPPFLAGS"] += " -isystem " + joinpath(pinCrtDir, "include")
         env["CPPFLAGS"] += " -isystem " + joinpath(pinCrtDir, "include/arch-x86_64")
@@ -130,6 +135,7 @@ def buildSim(cppFlags, dir, type, pgo=None):
 
     # Pin 2.14 uses unambiguous libpindwarf
     # Pin 3 uses libpin3dwarf
+    # Pin 3.25 changes back to libpindwarf and changes its path
     pindwarfPath = joinpath(PINPATH, "intel64/lib-ext/libdwarf.a")
     pindwarfLib = File(pindwarfPath)
     if not os.path.exists(pindwarfPath):
@@ -138,7 +144,10 @@ def buildSim(cppFlags, dir, type, pgo=None):
         if not os.path.exists(pindwarfPath):
             pindwarfPath = joinpath(PINPATH, "intel64/lib-ext/libpin3dwarf.so")
             pindwarfLib = "pin3dwarf"
-            assert os.path.exists(pindwarfPath)
+            if not os.path.exists(pindwarfPath):
+                pindwarfPath = joinpath(PINPATH, "intel64/lib/libpindwarf.so")
+                pindwarfLib = "pindwarf"
+                assert os.path.exists(pindwarfPath)
 
     env["PINLIBS"] = ["pin", "xed", pindwarfLib]
 
@@ -209,7 +218,10 @@ def buildSim(cppFlags, dir, type, pgo=None):
             env["LIBS"] += ["pincrtpatch"]
         env["LINKFLAGS"] += " -nostdlib -Wl,-R" + pinCrtLibDir
         env["LIBPATH"] += [pinCrtLibDir]
-        env["LIBS"] += ["dl-dynamic", "stlport-dynamic", "m-dynamic", "c-dynamic", "unwind-dynamic"]
+        if withPinCrtCXX11:
+            env["LIBS"] += ["dl-dynamic", "m-dynamic", "c-dynamic", "c++", "c++abi", "unwind-dynamic"]
+        else:
+            env["LIBS"] += ["dl-dynamic", "stlport-dynamic", "m-dynamic", "c-dynamic", "unwind-dynamic"]
         env["CRTBEGIN"] = [joinpath(pinCrtLibDir, "crtbegin.o")]
         env["CRTEND"] = [joinpath(pinCrtLibDir, "crtend.o")]
         env["CRTBEGINS"] = [joinpath(pinCrtLibDir, "crtbeginS.o")]
