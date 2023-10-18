@@ -1,7 +1,6 @@
 
 #include <algorithm>
 #include "load_balancing/load_balancer.h"
-#include "load_balancing/reserve_lb_task_unit.h"
 #include "comm_support/comm_module.h"
 #include "numa_map.h"
 #include "config.h"
@@ -24,12 +23,17 @@ void StealingLoadBalancer::generateCommand() {
         bool isVictim = genSupply(i);
         assert(!(isStealer && isVictim));
     }
+    if (demandIdxVec.empty() || supplyIdxVec.empty()) {
+        return;
+    }
+    DEBUG_LB_O("comm %s command lb", this->commModule->getName());
+    outputDemandSupply();
     for (size_t i = 0; i < demandIdxVec.size(); ++i) {
         uint32_t stealerIdx = demandIdxVec[i]; 
         // choose victim & amount
         uint32_t victimPos = rand() % supplyIdxVec.size();
         uint32_t victimIdx = supplyIdxVec[victimPos];
-        uint32_t amount = std::max(demand[demandIdxVec[i]], supply[victimIdx]);
+        uint32_t amount = std::min(demand[demandIdxVec[i]], supply[victimIdx]);
         // update command & assignTable
         this->commands[victimIdx].add(amount);
         this->assignTable[victimIdx].push_back(std::make_pair(stealerIdx, amount));
@@ -42,11 +46,12 @@ void StealingLoadBalancer::generateCommand() {
             break;
         }
     }
+    outputCommand();
 }
 
 bool StealingLoadBalancer::genDemand(uint32_t bankIdx) {
     if (this->canDemand[bankIdx] && 
-            commModule->bankQueueLength[bankIdx] < IDLE_THRESHOLD) { 
+            commModule->bankQueueLength[bankIdx] < STEALER_THRESHOLD) { 
         this->demand[bankIdx] = CHUNK_SIZE;
         this->demandIdxVec.push_back(bankIdx);
         return true;
@@ -57,10 +62,10 @@ bool StealingLoadBalancer::genDemand(uint32_t bankIdx) {
 
 bool StealingLoadBalancer::genSupply(uint32_t bankIdx) {
     // TBY TODO: generate supply according to speed.
-    if (commModule->bankQueueReadyLength[bankIdx] <  2 * IDLE_THRESHOLD) {
+    if (commModule->bankQueueReadyLength[bankIdx] <=  VICTIM_THRESHOLD) {
         return false;
     } else {
-        this->supply[bankIdx] =  commModule->bankQueueReadyLength[bankIdx] - 2 * IDLE_THRESHOLD;
+        this->supply[bankIdx] =  commModule->bankQueueReadyLength[bankIdx] - VICTIM_THRESHOLD;
         this->supplyIdxVec.push_back(bankIdx);
         return true;
     }
@@ -76,19 +81,29 @@ bool StealingLoadBalancer::genSupply(uint32_t bankIdx) {
 }
 
 void StealingLoadBalancer::assignLbTarget(const std::vector<DataHotness>& outInfo) {
+    if (outInfo.empty()) {return;}
+    DEBUG_LB_O("comm %s assign target", this->commModule->getName());
+    uint32_t lastStealerBankId = ((uint32_t)-1);
     for (uint32_t i = 0; i < outInfo.size(); ++i) {
         auto curGive = outInfo[i];
-        std::deque<std::pair<uint32_t, uint32_t>>& stealerQueue = assignTable[curGive.srcBankId];
-        // TBY NOTICE: this is when lastInNeed happens in the old implementation
-        assert(!stealerQueue.empty());
-        auto& curReceive = stealerQueue.front();
-        uint32_t targetBankId = curReceive.first + commModule->bankBeginId;
-        this->assignOneAddr(curGive.addr, targetBankId);
-        zinfo->commModules[0][targetBankId]->addToSteal(curGive.cnt);
-        if (curGive.cnt > curReceive.second) {
-            stealerQueue.pop_front();
+        uint32_t victimBankIdx = curGive.srcBankId - commModule->bankBeginId;
+        std::deque<std::pair<uint32_t, uint32_t>>& stealerQueue = assignTable[victimBankIdx];
+        // assert(!stealerQueue.empty());
+        if (!stealerQueue.empty()) {
+            auto& curReceive = stealerQueue.front();
+            uint32_t stealerBankId = curReceive.first + commModule->bankBeginId;
+            this->assignOneAddr(curGive.addr, stealerBankId);
+            zinfo->commModules[0][stealerBankId]->addToSteal(curGive.cnt);
+            if (curGive.cnt > curReceive.second) {
+                stealerQueue.pop_front();
+            } else {
+                curReceive.second -= curGive.cnt;
+            }
+            lastStealerBankId = stealerBankId;
         } else {
-            curReceive.second -= curGive.cnt;
+            assert(lastStealerBankId != ((uint32_t)-1));
+            this->assignOneAddr(curGive.addr, lastStealerBankId);
+            zinfo->commModules[0][lastStealerBankId]->addToSteal(curGive.cnt);
         }
     }
 }

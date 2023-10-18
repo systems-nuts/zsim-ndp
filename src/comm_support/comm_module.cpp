@@ -96,7 +96,7 @@ void CommModule::commandLoadBalance() {
 void CommModule::executeLoadBalance(
         const LbCommand& command, uint32_t targetBankId, 
         std::vector<DataHotness>& outInfo) {
-
+    DEBUG_LB_O("comm %s execute lb", this->getName());
     uint64_t curOutSize = outInfo.size();
     uint32_t childCommId = zinfo->commMapping->getCommId(level-1, targetBankId);
     zinfo->commModules[level-1][childCommId]
@@ -111,8 +111,8 @@ bool CommModule::isEmpty() {
     if (!CommModuleBase::isEmpty()) {
         return false;
     }
-    for (auto pb : this->scatterBuffer) {
-        if (!pb.empty()) { return false; }
+    for (auto pq : this->scatterBuffer) {
+        if (!pq.empty()) { return false; }
     }
     return true;
 }
@@ -224,15 +224,17 @@ void CommModule::gatherState() {
             zinfo->taskUnits[i]->getCurUnit()->getAllTaskQueueSize();
         this->bankQueueReadyLength[id] = 
             zinfo->taskUnits[i]->getCurUnit()->getReadyTaskQueueSize();
-        DEBUG_GATHER_STATE_O("bank %u queueLength %lu readyLength %lu", 
-            i, bankQueueLength[id] ,bankQueueReadyLength[id])
+        if (this->level == zinfo->commModules.size()-1) {
+            DEBUG_GATHER_STATE_O("bank %u queueLength %lu readyLength %lu", 
+                i, bankQueueLength[id] ,bankQueueReadyLength[id])
+        }
     }
     this->executeSpeed = 0;
     for (uint32_t i = childBeginId; i < childEndId; ++i) {
         CommModuleBase* child = zinfo->commModules[level-1][i];
         this->executeSpeed += child->getExecuteSpeed();
         this->childTransferSize[i - childBeginId] = child->stateTransferRegionSize();
-        DEBUG_GATHER_STATE_O("child %s transeferLength %lu", 
+        DEBUG_GATHER_STATE_O("child %s transferLength %lu", 
             child->getName(), childTransferSize[i - childBeginId]);
     }
 
@@ -244,15 +246,6 @@ bool CommModule::shouldCommandLoadBalance() {
         return false;
     }
     return true;
-    // bool hasIdle = false, hasNotIdle = false;
-    // for (uint32_t i = childBeginId; i < childEndId; ++i) {
-    //     if (childQueueLength[i-childBeginId] < loadBalancer->IDLE_THRESHOLD) {
-    //         hasIdle = true;
-    //     } else if (childQueueReadyLength[i-childBeginId] >= 2 * loadBalancer->IDLE_THRESHOLD){
-    //         hasNotIdle = true;
-    //     }
-    // }
-    // return (hasIdle && hasNotIdle);
 }
 
 void CommModule::initStats(AggregateStat* parentStat) {

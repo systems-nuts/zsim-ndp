@@ -3,12 +3,11 @@
 // #define DEBUG_PHASE 1
 // #define DEBUG_GATHER_STATE 1
 // #define DEBUG_LB 1
-// #define DEBUG_GATHER_STATE 1
-// #define DEBUG_TASK_BEHAVIOR 1
-// #define DEBUG_UNIT_BEHAVIOR 1
+// #define DEBUG_TASK_BEHAVIOR 1 // for task enqueue, dequeue, finish
+// #define DEBUG_UNIT_BEHAVIOR 1 // for timestamp change, finish, restart
 // #define DEBUG_SKETCH 1
 // #define DEBUG_SCHED_META 1
-#define DEBUG_UBUNTU 1
+// #define DEBUG_UBUNTU 1
 
 // #define DEBUG_CHECK_CORRECT 1
 

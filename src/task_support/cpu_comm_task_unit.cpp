@@ -6,8 +6,8 @@
 
 using namespace task_support;
 
-CpuCommTaskUnitKernel::CpuCommTaskUnitKernel(uint32_t _tuId) 
-    : TaskUnitKernel(_tuId) {}
+CpuCommTaskUnitKernel::CpuCommTaskUnitKernel(uint32_t _tuId, uint32_t _kernelId) 
+    : TaskUnitKernel(_tuId, _kernelId) {}
 
 void CpuCommTaskUnitKernel::taskEnqueueKernel(TaskPtr t, int available) {
     this->taskQueue.push_back(t);
@@ -37,8 +37,9 @@ uint64_t CpuCommTaskUnitKernel::getAllTaskQueueSize() {
 
 CpuCommTaskUnit::CpuCommTaskUnit(const std::string& _name, uint32_t _tuId, TaskUnitManager* _tum)
     : TaskUnit(_name, _tuId, _tum) {
-    this->taskUnit1 = new CpuCommTaskUnitKernel(_tuId);
-    this->taskUnit2 = new CpuCommTaskUnitKernel(_tuId);
+    this->taskUnit1 = new CpuCommTaskUnitKernel(_tuId, 1001);
+    this->taskUnit2 = new CpuCommTaskUnitKernel(_tuId, 1002);
+    this->useQ1 = false;
     this->curTaskUnit = this->taskUnit2;
     this->nxtTaskUnit = this->taskUnit1; ;   
 }

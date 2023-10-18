@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <iostream>
 #include <vector>
 #include <deque>
 #include <unordered_map>
@@ -36,6 +37,15 @@ public:
     void add(uint32_t c) { this->perStealerCommand.push_back(c); }
     const std::vector<uint32_t>& get() const { return this->perStealerCommand; }
     bool empty() const { return perStealerCommand.empty(); }
+    std::string output() { 
+        if (perStealerCommand.empty()) { return "None"; }
+        std::stringstream ss;
+        for (uint32_t c : perStealerCommand) {
+            ss << c << " "; 
+        }
+        std::string res = ss.str();
+        return res;
+    }
 };
 
 class CommModule;
@@ -44,7 +54,8 @@ class CommModule;
 // The commands are integers, indicating the number of tasks that should be scheduled out.
 class LoadBalancer {
 public:
-    uint32_t IDLE_THRESHOLD;
+    uint32_t STEALER_THRESHOLD;
+    uint32_t VICTIM_THRESHOLD;
 protected:
     uint32_t level;
     uint32_t commId;
@@ -65,8 +76,9 @@ public:
     virtual void assignLbTarget(const std::vector<DataHotness>& outInfo) = 0;
 protected:
     void assignOneAddr(Address addr, uint32_t target);
-    void output();
     void reset();
+    void outputCommand();
+    void outputDemandSupply();
 
     friend class CommModule;
 };
@@ -74,7 +86,7 @@ protected:
 // The StealingLoadBalancer schedule tasks from the tail of the task queue
 // The commands generation is the same to behaviors of work stealing
 class StealingLoadBalancer : public LoadBalancer {
-private:
+protected:
     uint32_t CHUNK_SIZE;
 public:
     StealingLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
@@ -85,11 +97,18 @@ protected:
     virtual bool genSupply(uint32_t bankIdx); // how much can be stolen for each bank
 };
 
+class MultiVictimStealingLoadBalancer : public StealingLoadBalancer {
+private:
+    uint32_t victimNumber;
+public:
+    MultiVictimStealingLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
+    void generateCommand() override;
+};
+
 class ReserveLbPimBridgeTaskUnit;
 
 class ReserveLoadBalancer : public StealingLoadBalancer {
 private:
-    uint32_t CHUNK_SIZE;
     uint32_t HOT_DATA_NUMBER = 10;
     std::vector<DataHotness> childDataHotness;
 public:
@@ -97,6 +116,8 @@ public:
     void generateCommand() override;
 private: 
     bool genSupply(uint32_t bankIdx) override;
+    void generateCommandByHotness();
+    void generateCommandHybrid();
 };
 
 

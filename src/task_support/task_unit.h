@@ -19,9 +19,12 @@ class TaskUnitManager;
 class TaskUnitKernel {
 protected:
     const uint32_t taskUnitId; 
+    const uint32_t kernelId;
     TaskPtr endTask; // when calling taskDequeue when the unit is empty, endTask will be returned
+    uint64_t curTs;
 public:
-    TaskUnitKernel(uint32_t _tuId) : taskUnitId(_tuId) {}
+    TaskUnitKernel(uint32_t _tuId, uint32_t _kernelId) 
+        : taskUnitId(_tuId),  kernelId(_kernelId), curTs(0) {}
     virtual ~TaskUnitKernel() {}
     
     virtual void taskEnqueueKernel(TaskPtr t, int available) = 0;
@@ -34,8 +37,9 @@ public:
         std::vector<pimbridge::DataHotness>& outInfo) {}
 
     // for ReserveBased;
-    virtual uint64_t getTopItemLength() { return 0; }
     virtual void prepareState() {}
+
+    void setCurTs(uint64_t ts) { this->curTs = ts; }
 
     friend class TaskUnit;
 };
@@ -66,7 +70,7 @@ public:
     void taskEnqueue(TaskPtr t, int available);
     TaskPtr taskDequeue();
     void taskFinish(TaskPtr t);
-    void beginRun(uint64_t newTs);
+    void beginNewTimeStamp(uint64_t newTs);
 
     // Getters and setters
     TaskUnitKernel* getCurUnit() { return curTaskUnit; }
@@ -81,7 +85,6 @@ public:
     void computeExecuteSpeed();
 
 protected:
-    void switchUnit();
     void checkTimeStampChange(uint64_t newTs);
 
     Counter s_EnqueueTasks, s_DequeueTasks, s_FinishTasks;
@@ -98,7 +101,7 @@ protected:
     uint64_t allowedTimeStamp;
 
 public:
-    TaskUnitManager() : finishUnitNumber(0) {
+    TaskUnitManager() : finishUnitNumber(0),readyForNewTimeStamp(true),allowedTimeStamp(0) {
         futex_init(&tumLock);
     }
     ~TaskUnitManager() {}

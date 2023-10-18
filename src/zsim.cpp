@@ -486,9 +486,6 @@ VOID CheckForTermination() {
     }
 }
 
-/* This is called by the scheduler at the end of a phase. At that point, zinfo->numPhases
- * has not incremented, so it denotes the END of the current phase
- */
 static bool allCommModuleEmpty(bool output) {
     if (!zinfo->IS_PIMBRIDGE) {
         return true;
@@ -506,6 +503,9 @@ static bool allCommModuleEmpty(bool output) {
     return true;
 }
 
+/* This is called by the scheduler at the end of a phase. At that point, zinfo->numPhases
+ * has not incremented, so it denotes the END of the current phase
+ */
 VOID EndOfPhaseActions() {
     zinfo->profSimTime->transition(PROF_WEAVE);
     if (zinfo->globalPauseFlag) {
@@ -595,15 +595,6 @@ VOID EndOfPhaseActions() {
             }
             // curCycle = levelFinishCycle;
         }
-#ifdef DEBUG_LB
-        info("after communicate state");
-        for (auto l : zinfo->commModules) {
-            for (auto c : l) {
-                c->gatherState();
-            }
-        }
-        info("after comm state end\n\n");
-#endif
     }
 }
 

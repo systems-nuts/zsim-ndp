@@ -32,16 +32,17 @@ void TaskUnitManager::finishTimeStamp() {
     this->readyForNewTimeStamp = false;
     this->allowedTimeStamp++;
     for (auto tu : taskUnits) {
-        tu->beginRun(this->allowedTimeStamp);
+        tu->beginNewTimeStamp(this->allowedTimeStamp);
     }
 }
 
 void TaskUnitManager::beginRun() {
     assert(this->allowedTimeStamp == 0);
-    this->allowedTimeStamp = 1;
-    for (auto tu : taskUnits) {
-        tu->beginRun(1);
-    }
+    this->finishTimeStamp();
+    // this->allowedTimeStamp = 1;
+    // for (auto tu : taskUnits) {
+    //     tu->beginRun(1);
+    // }
 }
 
 void TaskUnitManager::reportChangeAllowedTimestamp(uint32_t taskUnitId) {

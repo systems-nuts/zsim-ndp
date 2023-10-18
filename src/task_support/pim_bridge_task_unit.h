@@ -22,7 +22,8 @@ protected:
     std::unordered_map<Address, std::deque<TaskPtr>> notReadyLbTasks;
     std::priority_queue<TaskPtr, std::deque<TaskPtr>, cmp> taskQueue;
 public:
-    PimBridgeTaskUnitKernel(uint32_t _tuId) : TaskUnitKernel(_tuId), notReadyTaskNumber(0) {}
+    PimBridgeTaskUnitKernel(uint32_t _tuId, uint32_t _kernelId) 
+        : TaskUnitKernel(_tuId, _kernelId), notReadyTaskNumber(0) {}
     void taskEnqueueKernel(TaskPtr t, int available) override;
     TaskPtr taskDequeueKernel() override;
     bool isEmpty() override;

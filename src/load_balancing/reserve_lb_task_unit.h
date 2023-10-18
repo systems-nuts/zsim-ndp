@@ -22,18 +22,19 @@ private:
     std::unordered_map<Address, 
         std::priority_queue<TaskPtr, std::deque<TaskPtr>, cmp>> reserveRegion;
 public:
-    ReserveLbPimBridgeTaskUnitKernel(uint32_t _tuId, uint32_t numBucket, uint32_t bucketSize);
+    ReserveLbPimBridgeTaskUnitKernel(uint32_t _tuId, uint32_t _kernelId, 
+        uint32_t numBucket, uint32_t bucketSize);
 
     void taskEnqueueKernel(TaskPtr t, int available) override;
     TaskPtr taskDequeueKernel() override;
     bool isEmpty() override;
     uint64_t getReadyTaskQueueSize() override;
+    uint64_t getAllTaskQueueSize() override;
 
      void executeLoadBalanceCommand(
         const LbCommand& command, 
         std::vector<DataHotness>& outInfo) override;
         
-    uint64_t getTopItemLength() override;
     void prepareState() override;
 
     void exitReserveState(Address lbPageAddr);

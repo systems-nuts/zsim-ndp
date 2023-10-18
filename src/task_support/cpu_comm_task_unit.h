@@ -8,7 +8,7 @@ class CpuCommTaskUnitKernel : public TaskUnitKernel {
 private:
     std::deque<TaskPtr> taskQueue;
 public:
-    CpuCommTaskUnitKernel(uint32_t _tuId);
+    CpuCommTaskUnitKernel(uint32_t _tuId, uint32_t _kernelId);
     ~CpuCommTaskUnitKernel() {}
 
     void taskEnqueueKernel(TaskPtr t, int available) override;

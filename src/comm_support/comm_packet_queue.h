@@ -7,10 +7,11 @@ namespace pimbridge {
 
 struct packetCmp {
     bool operator()(const CommPacket* p1, const CommPacket* p2) {
-        if (p1->priority != p2->priority) {
+        if (p1->timeStamp != p2->timeStamp) {
+            return p1->timeStamp > p2->timeStamp;
+        } else if (p1->priority != p2->priority) {
             return p1->priority < p2->priority; // normal task first
-        } 
-        if (p1->readyCycle != p2->readyCycle) {
+        } else if (p1->readyCycle != p2->readyCycle) {
             return p1->readyCycle > p2->readyCycle;
         } /*else if (p1->priority != p2->priority) {
             return p1->priority > p2->priority; // normal task last

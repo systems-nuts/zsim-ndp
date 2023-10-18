@@ -231,6 +231,7 @@ private:
 
     friend class pimbridge::LoadBalancer;
     friend class pimbridge::StealingLoadBalancer;
+    friend class pimbridge::MultiVictimStealingLoadBalancer;
     friend class pimbridge::ReserveLoadBalancer;
 };
 

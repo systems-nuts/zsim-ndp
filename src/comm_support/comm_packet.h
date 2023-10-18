@@ -14,6 +14,7 @@ public:
         Sub
     };
     PacketType type;
+    uint64_t timeStamp;
     uint64_t readyCycle;
     uint32_t fromLevel;
     uint32_t fromCommId;
@@ -21,11 +22,11 @@ public:
     int toCommId; 
     uint32_t priority;
     
-    CommPacket(PacketType _type, uint64_t _readyCycle, 
+    CommPacket(PacketType _type, uint32_t _timeStamp, uint64_t _readyCycle, 
                uint32_t _fromLevel, uint32_t _fromCommId, 
                uint32_t _toLevel, int _toCommId, 
                uint32_t _priority) 
-        : type(_type), readyCycle(_readyCycle), 
+        : type(_type), timeStamp(_timeStamp), readyCycle(_readyCycle), 
           fromLevel(_fromLevel), fromCommId(_fromCommId), 
           toLevel(_toLevel), toCommId(_toCommId), priority(_priority) {}
 
@@ -46,12 +47,13 @@ public:
     task_support::TaskPtr task;
     // priority = 3 means this is a normal transfer packet
     // priority = 2 means this is a packet for load balance
-    TaskCommPacket(uint64_t _readyCycle,
+    TaskCommPacket(uint32_t _timeStamp, uint64_t _readyCycle,
                    uint32_t _fromLevel, uint32_t _fromCommId, 
                    uint32_t _toLevel, int _toCommId,
                    task_support::TaskPtr _task, uint32_t _priority = 3)
-        : CommPacket(PacketType::Task, _readyCycle, _fromLevel, _fromCommId,
-            _toLevel, _toCommId, _priority), task(_task) {}
+        : CommPacket(PacketType::Task, _timeStamp, _readyCycle, 
+          _fromLevel, _fromCommId, _toLevel, _toCommId, _priority), 
+          task(_task) {}
     
     uint64_t getSize() override {
         return this->task->taskSize;
@@ -69,11 +71,11 @@ class DataLendCommPacket : public CommPacket {
 public: 
     Address lbPageAddr;
     uint32_t dataSize;
-    DataLendCommPacket(uint64_t _readyCycle, 
+    DataLendCommPacket(uint32_t _timeStamp, uint64_t _readyCycle, 
                        uint32_t _fromLevel, uint32_t _fromCommId, 
                        uint32_t _toLevel, int _toCommId,
                        Address _lbPageAddr, uint32_t _dataSize)
-        : CommPacket(PacketType::DataLend, _readyCycle, 
+        : CommPacket(PacketType::DataLend, _timeStamp, _readyCycle, 
                     _fromLevel, _fromCommId, _toLevel, _toCommId, 2), 
           lbPageAddr(_lbPageAddr), dataSize(_dataSize){}
 
@@ -102,7 +104,7 @@ public:
     uint32_t idx; // start with 1;
     uint32_t total;
     SubCommPacket(CommPacket* _parent, uint32_t _idx, uint32_t _total) : 
-        CommPacket(PacketType::Sub, _parent->readyCycle, 
+        CommPacket(PacketType::Sub, _parent->timeStamp, _parent->readyCycle, 
                     _parent->fromLevel, _parent->fromCommId, 
                    _parent->toLevel, _parent->toCommId, _parent->priority), 
         parent(_parent), idx(_idx), total(_total) {}

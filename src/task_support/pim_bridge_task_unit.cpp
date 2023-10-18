@@ -13,6 +13,8 @@ using namespace task_support;
 using namespace pimbridge;
 
 void PimBridgeTaskUnitKernel::taskEnqueueKernel(TaskPtr t, int available) {
+    // assert((this->curTs == 0 && t->timeStamp == 1 && this->kernelId == 1001) 
+    //     || t->timeStamp == this->curTs);
     assert(available != -1);
     if (available == -2) {
         newNotReadyTask(t);
@@ -30,13 +32,16 @@ TaskPtr PimBridgeTaskUnitKernel::taskDequeueKernel() {
         ret = this->taskQueue.top();
         this->taskQueue.pop();
     }
+    assert_msg(ret->timeStamp == this->curTs, 
+        "%u-%u, task ts: %lu, curTs: %lu, taskId: %lu", 
+        taskUnitId, kernelId, ret->timeStamp, curTs, ret->taskId);
     int available = commModule->checkAvailable(
         zinfo->numaMap->getLbPageAddress(ret->hint->dataPtr));
     if (available >= 0) {
         return ret;
     } else if (available == -1) {
         uint64_t curCycle = zinfo->cores[taskUnitId]->getCurCycle();
-        TaskCommPacket* p = new TaskCommPacket(curCycle, 0, this->taskUnitId, 1, -1, ret);
+        TaskCommPacket* p = new TaskCommPacket(ret->timeStamp, curCycle, 0, this->taskUnitId, 1, -1, ret);
         this->commModule->handleOutPacket(p);
         return taskDequeueKernel();
     } else if (available == -2) {
@@ -57,7 +62,8 @@ uint64_t PimBridgeTaskUnitKernel::getReadyTaskQueueSize(){
 }
 
 uint64_t PimBridgeTaskUnitKernel::getAllTaskQueueSize(){
-    return this->taskQueue.size() + this->notReadyTaskNumber;
+    return this->taskQueue.size() + this->notReadyTaskNumber
+        + commModule->toStealSize;
 }
 
 void PimBridgeTaskUnitKernel::executeLoadBalanceCommand(
@@ -66,22 +72,21 @@ void PimBridgeTaskUnitKernel::executeLoadBalanceCommand(
     uint64_t curCycle = zinfo->cores[taskUnitId]->getCurCycle();
     std::unordered_map<Address, uint32_t> info;
     for (auto curCommand : command.get()) {
-        while (!this->taskQueue.empty()) {
+        while (curCommand > 0 && !this->taskQueue.empty()) {
             TaskPtr t = this->taskQueue.top();
+            assert(t->timeStamp == this->curTs);
             this->taskQueue.pop();
             Address lbPageAddr = zinfo->numaMap->getLbPageAddress(t->hint->dataPtr);
             int available = this->commModule->checkAvailable(lbPageAddr);
             if (available == -2) {
                 newNotReadyTask(t);
             } else if (available == -1) {
-                TaskCommPacket* p = new TaskCommPacket(curCycle, 0, this->taskUnitId, 1, -1, t, 3);
+                TaskCommPacket* p = new TaskCommPacket(t->timeStamp, curCycle, 0, this->taskUnitId, 1, -1, t, 3);
                 this->commModule->handleOutPacket(p);
                 this->commModule->s_ScheduleOutTasks.atomicInc(1);
-                if (--curCommand == 0) {
-                    break;
-                }
+                --curCommand;
             } else if (available >= 0) {
-                TaskCommPacket* p = new TaskCommPacket(curCycle, 0, this->taskUnitId, 1, -1, t, 2);
+                TaskCommPacket* p = new TaskCommPacket(t->timeStamp, curCycle, 0, this->taskUnitId, 1, -1, t, 2);
                 // DEBUG_LB_O("unit %u sched task out: addr: %lu, sig: %lu", taskUnitId, p->getAddr(), p->getSignature());
                 this->commModule->handleOutPacket(p);
                 if (info.count(lbPageAddr) == 0) {
@@ -89,9 +94,7 @@ void PimBridgeTaskUnitKernel::executeLoadBalanceCommand(
                 }
                 info[lbPageAddr] += 1;
                 this->commModule->s_ScheduleOutTasks.atomicInc(1);
-                if (--curCommand == 0) {
-                    break;
-                }
+                --curCommand;
             } else {
                 panic("invalid available value");
             }
@@ -101,7 +104,7 @@ void PimBridgeTaskUnitKernel::executeLoadBalanceCommand(
         DEBUG_LB_O("unit %u execute lb: addr: %lu, cnt: %u", taskUnitId, it->first, it->second);
         outInfo.push_back(DataHotness(it->first, this->taskUnitId, it->second));
         this->commModule->newAddrLend(it->first);
-        DataLendCommPacket* p = new DataLendCommPacket(curCycle, 0, this->taskUnitId,
+        DataLendCommPacket* p = new DataLendCommPacket(this->curTs, curCycle, 0, this->taskUnitId,
             1, -1, it->first, zinfo->lbPageSize);
         this->commModule->handleOutPacket(p);
     }
@@ -138,14 +141,15 @@ PimBridgeTaskUnit::PimBridgeTaskUnit(const std::string& _name, uint32_t _tuId,
     std::string taskUnitType = 
         config.get<const char*>("sys.taskSupport.taskUnitType");
     if (taskUnitType == "PimBridge") {
-        this->taskUnit1 = new PimBridgeTaskUnitKernel(_tuId);
-        this->taskUnit2 = new PimBridgeTaskUnitKernel(_tuId);
+        this->taskUnit1 = new PimBridgeTaskUnitKernel(_tuId, 1001);
+        this->taskUnit2 = new PimBridgeTaskUnitKernel(_tuId, 1002);
     } else if (taskUnitType == "ReserveLbPimBridge") {
         uint32_t numBucket = config.get<uint32_t>("sys.taskSupport.sketchBucketNum");
         uint32_t bucketSize = config.get<uint32_t>("sys.taskSupport.sketchBucketSize");
-        this->taskUnit1 = new ReserveLbPimBridgeTaskUnitKernel(_tuId, numBucket, bucketSize);
-        this->taskUnit2 = new ReserveLbPimBridgeTaskUnitKernel(_tuId, numBucket, bucketSize);
+        this->taskUnit1 = new ReserveLbPimBridgeTaskUnitKernel(_tuId, 1001, numBucket, bucketSize);
+        this->taskUnit2 = new ReserveLbPimBridgeTaskUnitKernel(_tuId, 1002, numBucket, bucketSize);
     }
+    this->useQ1 = false;
     this->curTaskUnit = this->taskUnit2;
     this->nxtTaskUnit = this->taskUnit1;  
 }
@@ -160,10 +164,11 @@ void PimBridgeTaskUnit::assignNewTask(TaskPtr t, Hint* hint) {
         zinfo->taskUnits[nodeId]->taskEnqueue(t, 0);
     } else {
         int avail = commModule->checkAvailable(zinfo->numaMap->getLbPageAddress(hint->dataPtr));
+        // info("avail: %d, unit id: %u", avail, taskUnitId);
         if (avail >= 0) {
             zinfo->taskUnits[taskUnitId]->taskEnqueue(t, 0);
         } else {
-            CommPacket* p = new TaskCommPacket(t->readyCycle, 0, this->taskUnitId, 1, -1, t);
+            CommPacket* p = new TaskCommPacket(t->timeStamp, t->readyCycle, 0, this->taskUnitId, 1, -1, t);
             this->commModule->handleOutPacket(p);
         }
         this->commModule->s_GenTasks.atomicInc(1);

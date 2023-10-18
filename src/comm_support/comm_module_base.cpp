@@ -72,6 +72,7 @@ void CommModuleBase::receivePackets(CommModuleBase* src,
 }
 
 void CommModuleBase::handleOutPacket(CommPacket* packet) {
+    // info("handle out packet");
     packet->fromCommId = this->commId;
     packet->fromLevel = this->level;
     if (enableInterflow && this->isSibling(packet->toCommId)) {

@@ -1527,6 +1527,8 @@ static void buildLoadBalancer(Config& config) {
             LoadBalancer* lb = nullptr;
             if (lbType == "Stealing") {    
                 lb = new StealingLoadBalancer(config, level, commId);
+            } else if (lbType == "MultiVictimStealing") {    
+                lb = new MultiVictimStealingLoadBalancer(config, level, commId);
             } else if (lbType == "Reserve") {
                 std::string taskUnitType = config.get<const char*>("sys.taskSupport.taskUnitType");
                 assert(taskUnitType == "ReserveLbPimBridge");

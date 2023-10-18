@@ -8,7 +8,8 @@
 using namespace task_support;
 
 TaskUnit::TaskUnit(const std::string& _name, uint32_t _tuId, TaskUnitManager* _tum)
-    : name(_name), taskUnitId(_tuId), tum(_tum), endTask(nullptr), isFinished(false) {
+    : name(_name), taskUnitId(_tuId), tum(_tum), endTask(nullptr), 
+      isFinished(false), minTimeStamp(0) {
     futex_init(&tuLock);
 };
 
@@ -76,19 +77,14 @@ void TaskUnit::taskFinish(TaskPtr t) {
     this->s_FinishTasks.atomicInc(1);
 }
 
-
-void TaskUnit::beginRun(uint64_t newTs) {
+void TaskUnit::beginNewTimeStamp(uint64_t newTs) {
+    futex_lock(&tuLock);
     if (newTs == 1) {
         assert(this->minTimeStamp == 0);
         this->minTimeStamp = newTs;
     } else {
         assert((int)this->minTimeStamp == -1 || this->minTimeStamp == newTs);
     }
-    this->switchUnit();
-}
-
-void TaskUnit::switchUnit() {
-     futex_lock(&tuLock);
     if (useQ1) {
         curTaskUnit = taskUnit2;
         nxtTaskUnit = taskUnit1;
@@ -98,8 +94,11 @@ void TaskUnit::switchUnit() {
         nxtTaskUnit = taskUnit2;
         useQ1 = true;
     }
+    curTaskUnit->setCurTs(newTs);
+    nxtTaskUnit->setCurTs(newTs+1);
     futex_unlock(&tuLock);
 }
+
 
 
 void TaskUnit::checkTimeStampChange(uint64_t newTs) {
