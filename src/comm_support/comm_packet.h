@@ -14,6 +14,7 @@ public:
         Sub
     };
     PacketType type;
+    PacketType innerType;
     uint64_t timeStamp;
     uint64_t readyCycle;
     uint32_t fromLevel;
@@ -21,8 +22,13 @@ public:
     uint32_t toLevel;
     int toCommId; 
     uint32_t priority;
+
+    uint64_t size;
+    Address addr;
+    uint64_t signature;
     
-    CommPacket(PacketType _type, uint32_t _timeStamp, uint64_t _readyCycle, 
+    CommPacket(PacketType _type, PacketType _innerType,
+               uint32_t _timeStamp, uint64_t _readyCycle, 
                uint32_t _fromLevel, uint32_t _fromCommId, 
                uint32_t _toLevel, int _toCommId, 
                uint32_t _priority) 
@@ -31,14 +37,20 @@ public:
           toLevel(_toLevel), toCommId(_toCommId), priority(_priority) {}
 
     virtual ~CommPacket() {}
-    virtual uint64_t getSize() = 0;
-    virtual Address getAddr() const = 0;
+    uint64_t getSize() const {
+        return size;
+    }
+    Address getAddr() const {
+        return addr;
+    }
     virtual uint32_t getIdx() const {
         return 0;
     }
-    virtual uint64_t getSignature() const = 0;
-    virtual PacketType getInnerType() const {
-        return this->type;
+    uint64_t getSignature() const {
+        return signature;
+    }
+    PacketType getInnerType() const {
+        return this->innerType;
     }
 };
 
@@ -50,43 +62,24 @@ public:
     TaskCommPacket(uint32_t _timeStamp, uint64_t _readyCycle,
                    uint32_t _fromLevel, uint32_t _fromCommId, 
                    uint32_t _toLevel, int _toCommId,
-                   task_support::TaskPtr _task, uint32_t _priority = 3)
-        : CommPacket(PacketType::Task, _timeStamp, _readyCycle, 
-          _fromLevel, _fromCommId, _toLevel, _toCommId, _priority), 
-          task(_task) {}
-    
-    uint64_t getSize() override {
-        return this->task->taskSize;
-    }
-    Address getAddr() const override;
-    uint64_t getSignature() const override {
-        return task->taskId;
-    }
-    bool forLb() {
-        return (this->priority == 2);
+                   task_support::TaskPtr _task, uint32_t _priority = 3);
+    bool forLb() const {
+        return this->priority == 2;
     }
 };
 
 class DataLendCommPacket : public CommPacket {
 public: 
-    Address lbPageAddr;
-    uint32_t dataSize;
     DataLendCommPacket(uint32_t _timeStamp, uint64_t _readyCycle, 
                        uint32_t _fromLevel, uint32_t _fromCommId, 
                        uint32_t _toLevel, int _toCommId,
                        Address _lbPageAddr, uint32_t _dataSize)
-        : CommPacket(PacketType::DataLend, _timeStamp, _readyCycle, 
-                    _fromLevel, _fromCommId, _toLevel, _toCommId, 2), 
-          lbPageAddr(_lbPageAddr), dataSize(_dataSize){}
-
-    uint64_t getSize() override {
-        return dataSize;
-    }
-    Address getAddr() const override {
-        return this->lbPageAddr;
-    }
-    uint64_t getSignature() const override {
-        return lbPageAddr;
+        : CommPacket(PacketType::DataLend, PacketType::DataLend, 
+                    _timeStamp, _readyCycle, 
+                    _fromLevel, _fromCommId, _toLevel, _toCommId, 2) {
+        this->size = _dataSize;
+        this->addr = _lbPageAddr;
+        this->signature = _lbPageAddr;
     }
 };
 
@@ -103,26 +96,18 @@ public:
     CommPacket* parent;
     uint32_t idx; // start with 1;
     uint32_t total;
-    SubCommPacket(CommPacket* _parent, uint32_t _idx, uint32_t _total) : 
-        CommPacket(PacketType::Sub, _parent->timeStamp, _parent->readyCycle, 
-                    _parent->fromLevel, _parent->fromCommId, 
-                   _parent->toLevel, _parent->toCommId, _parent->priority), 
-        parent(_parent), idx(_idx), total(_total) {}
-    
-    uint64_t getSize() override {
-        return CommPacket::MAX_SIZE;
-    }
-    Address getAddr() const override {
-        return this->parent->getAddr();
-    }
-    uint64_t getSignature() const override {
-        return parent->getSignature();
+    SubCommPacket(CommPacket* _parent, uint32_t _idx, uint32_t _total) 
+        : CommPacket(PacketType::Sub, _parent->type,
+                     _parent->timeStamp, _parent->readyCycle, 
+                     _parent->fromLevel, _parent->fromCommId, 
+                     _parent->toLevel, _parent->toCommId, _parent->priority), 
+          parent(_parent), idx(_idx), total(_total) {
+        this->size = CommPacket::MAX_SIZE;
+        this->addr = this->parent->getAddr();
+        this->signature = this->parent->getSignature();
     }
     uint32_t getIdx() const override {
         return idx;
-    }
-    PacketType getInnerType() const override {
-        return parent->getInnerType();
     }
     bool isLast() {
         return (idx == total);
