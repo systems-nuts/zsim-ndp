@@ -10,9 +10,7 @@ using namespace pimbridge;
 
 StealingLoadBalancer::StealingLoadBalancer(Config& config, uint32_t _level, 
         uint32_t _commId) : LoadBalancer(config, _level, _commId) {
-    uint32_t oneChunkSize = config.get<uint32_t>("sys.pimBridge.loadBalancer.chunkSize");
-    CommModuleBase* child = zinfo->commModules[level-1][commModule->childBeginId];
-    this->CHUNK_SIZE = oneChunkSize * child->getNumBanks();
+    this->CHUNK_SIZE = config.get<uint32_t>("sys.pimBridge.loadBalancer.chunkSize");
 }
 
 void StealingLoadBalancer::generateCommand() {
@@ -23,11 +21,11 @@ void StealingLoadBalancer::generateCommand() {
         bool isVictim = genSupply(i);
         assert(!(isStealer && isVictim));
     }
+    outputDemandSupply();
     if (demandIdxVec.empty() || supplyIdxVec.empty()) {
         return;
     }
-    DEBUG_LB_O("comm %s command lb", this->commModule->getName());
-    outputDemandSupply();
+    DEBUG_LB_O("comm %s really command lb", this->commModule->getName());
     for (size_t i = 0; i < demandIdxVec.size(); ++i) {
         uint32_t stealerIdx = demandIdxVec[i]; 
         // choose victim & amount
@@ -62,7 +60,7 @@ bool StealingLoadBalancer::genDemand(uint32_t bankIdx) {
 
 bool StealingLoadBalancer::genSupply(uint32_t bankIdx) {
     // TBY TODO: generate supply according to speed.
-    if (commModule->bankQueueReadyLength[bankIdx] <=  VICTIM_THRESHOLD) {
+    if (commModule->bankQueueReadyLength[bankIdx] <= VICTIM_THRESHOLD) {
         return false;
     } else {
         this->supply[bankIdx] =  commModule->bankQueueReadyLength[bankIdx] - VICTIM_THRESHOLD;
@@ -88,7 +86,6 @@ void StealingLoadBalancer::assignLbTarget(const std::vector<DataHotness>& outInf
         auto curGive = outInfo[i];
         uint32_t victimBankIdx = curGive.srcBankId - commModule->bankBeginId;
         std::deque<std::pair<uint32_t, uint32_t>>& stealerQueue = assignTable[victimBankIdx];
-        // assert(!stealerQueue.empty());
         if (!stealerQueue.empty()) {
             auto& curReceive = stealerQueue.front();
             uint32_t stealerBankId = curReceive.first + commModule->bankBeginId;

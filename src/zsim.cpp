@@ -486,15 +486,17 @@ VOID CheckForTermination() {
     }
 }
 
-static bool allCommModuleEmpty(bool output) {
+static bool allCommModuleEmpty(bool output, bool forCurTs) {
     if (!zinfo->IS_PIMBRIDGE) {
         return true;
     }
+    uint32_t targetTs = forCurTs ? zinfo->taskUnitManager->getAllowedTimeStamp() : 0;
+    // uint32_t targetTs = 0;
     for (auto l : zinfo->commModules) {
         for (auto c : l) {
-            if (!c->isEmpty()) { 
+            if (!c->isEmpty(targetTs)) { 
                 if (output) {
-                    info("commModule %s not empty", c->getName());
+                    info("commModule %s not empty, targetTs: %u", c->getName(), targetTs);
                 }
                 return false; 
             }
@@ -545,7 +547,7 @@ VOID EndOfPhaseActions() {
     }
 
     if (zinfo->taskUnitManager->getReadyForNewTimeStamp() 
-            && allCommModuleEmpty(true)) {
+            && allCommModuleEmpty(true, true)) {
         zinfo->taskUnitManager->finishTimeStamp();
     }
     if (!zinfo->IS_PIMBRIDGE) {
@@ -1329,7 +1331,7 @@ VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
     
     if (taskPtr->isEndTask) {
         bool finish = zinfo->taskUnitManager->allFinish();
-        bool emptyComm = allCommModuleEmpty(finish);
+        bool emptyComm = allCommModuleEmpty(finish, false);
         if (finish && emptyComm) { 
             endTaskExecution(tid, ctxt, curThread);
             return;

@@ -38,7 +38,6 @@ struct packetCmp {
 class CommPacketQueue {
 private:    
     uint64_t size;
-    // std::deque<CommPacket*> pdq;
     std::priority_queue<CommPacket*, std::deque<CommPacket*>, packetCmp> pdq;
 public:
     CommPacketQueue() : size(0) {}
@@ -50,7 +49,7 @@ public:
     }
     void push(CommPacket* p) {
         if (p->getSize() > CommPacket::MAX_SIZE) {
-            // use (a+b-1)/b to get ceil(a/b)
+            // tby: use (a+b-1)/b to get ceil(a/b)
             uint32_t total = (p->getSize() + CommPacket::MAX_SIZE - 1) / CommPacket::MAX_SIZE;
             for (uint32_t i = 0; i < total; ++i) {
                 SubCommPacket* sp = new SubCommPacket(p, i+1, total);
@@ -67,6 +66,15 @@ public:
             return nullptr;
         }
         return this->pdq.top();
+    }
+    bool empty(uint64_t ts) {
+        if (this->empty()) {
+            return true;
+        }
+        if (ts != 0 && this->front()->timeStamp > ts) {
+            return true;
+        } 
+        return false;
     }
     bool empty() {
         return pdq.empty();

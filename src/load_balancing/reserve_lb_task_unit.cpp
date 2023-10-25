@@ -165,6 +165,9 @@ void ReserveLbPimBridgeTaskUnitKernel::executeLoadBalanceCommand(
             1, -1, it->first, zinfo->lbPageSize);
         this->commModule->handleOutPacket(p);
     }
+    if (!zinfo->taskUnits[taskUnitId]->getHasBeenVictim()) {
+        zinfo->taskUnits[taskUnitId]->setHasBeenVictim(true);
+    }
     /*
     while(true) {
         DataHotness item = this->sketch.fetchHotItem();

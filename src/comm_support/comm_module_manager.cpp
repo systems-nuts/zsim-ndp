@@ -10,7 +10,6 @@ CommModuleManager::CommModuleManager(Config& config) {
     uint32_t size = zinfo->commModules[0].size();
     this->lastReady.resize(size);
     this->lastToSteal.resize(size);
-    // this->CLEAN_STEAL_INTERVAL = 10;
     this->CLEAN_STEAL_INTERVAL = config.get<uint32_t>("sys.pimBridge.cleanStealInterval", 0);
 }
 
@@ -22,10 +21,14 @@ void CommModuleManager::clearStaleToSteal() {
         uint32_t curReady = zinfo->taskUnits[i]->getCurUnit()->getReadyTaskQueueSize();
         uint32_t curToSteal = zinfo->taskUnits[i]->getCurUnit()->getAllTaskQueueSize() - curReady; 
         if (curReady == 0 && lastReady[i] == 0 
-            && curToSteal != 0 && curToSteal == lastToSteal[i]) {
-            info("Stale toStealSize, clear it!")
+                && curToSteal != 0 && curToSteal == lastToSteal[i]
+                && zinfo->taskUnits[i]->getHasBeenVictim()
+                && !zinfo->taskUnits[i]->getHasReceiveLbTask()) {
+            info("unit %lu Stale toStealSize, clear it!", i);
             zinfo->commModules[0][i]->clearToSteal();
         }
+        zinfo->taskUnits[i]->setHasBeenVictim(false);
+        zinfo->taskUnits[i]->setHasReceiveLbTask(false);
         lastToSteal[i] = curToSteal;
         lastReady[i] = curReady;
     }

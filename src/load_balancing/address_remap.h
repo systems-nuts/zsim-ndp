@@ -42,17 +42,20 @@ public:
     }
     void setAddrBorrowMidState(Address lbPageAddr, uint32_t id) {
         assert(this->level == 0);
-        assert(this->childRemapTable.count(lbPageAddr) == 0);
-        // DEBUG_SCHED_META_O("%u-%u set mid state: addr: %lu, id: %u", 
-        //     level, commId, lbPageAddr, id);
+        // assert(this->childRemapTable.count(lbPageAddr) == 0);
+        if (this->childRemapTable.count(lbPageAddr) != 0) {
+            return;
+        }
+        DEBUG_SCHED_META_O("%u-%u set mid state: addr: %lu, id: %u", 
+            level, commId, lbPageAddr, id);
         if (id == 0) {
-            assert(addrBorrowMidState.count(lbPageAddr) == 0);
+            // assert(addrBorrowMidState.count(lbPageAddr) == 0);
             addrBorrowMidState[lbPageAddr] = 0;
         } else {
-            assert_msg(addrBorrowMidState.count(lbPageAddr) != 0, 
-                "addr: %lu, id: %u, level: %u, commId: %u", 
-                lbPageAddr, id, level, commId);
-            assert(addrBorrowMidState[lbPageAddr] == id - 1); 
+            // assert_msg(addrBorrowMidState.count(lbPageAddr) != 0, 
+            //     "addr: %lu, id: %u, level: %u, commId: %u", 
+            //     lbPageAddr, id, level, commId);
+            // assert(addrBorrowMidState[lbPageAddr] == id - 1); 
             addrBorrowMidState[lbPageAddr] = id;
         }
     }

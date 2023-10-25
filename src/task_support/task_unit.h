@@ -60,6 +60,8 @@ protected:
     TaskUnitKernel* curTaskUnit;
     TaskUnitKernel* nxtTaskUnit;
 
+    bool hasBeenVictim;
+    bool hasReceiveLbTask;
     double executeSpeed;
 
 public:
@@ -79,6 +81,10 @@ public:
     const char* getName() { return name.c_str(); }
     uint32_t getTaskUnitId() { return this->taskUnitId; }
     uint64_t getMinTimeStamp() { return this->minTimeStamp; }
+    bool getHasBeenVictim() { return hasBeenVictim; }
+    void setHasBeenVictim(bool val) { this->hasBeenVictim = val; }
+    bool getHasReceiveLbTask() { return hasReceiveLbTask; }
+    void setHasReceiveLbTask(bool val) { this->hasReceiveLbTask = val; }
 
     void initStats(AggregateStat* parentStat);
 

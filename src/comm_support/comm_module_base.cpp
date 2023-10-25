@@ -32,13 +32,13 @@ void CommModuleBase::initSiblings(uint32_t sibBegin, uint32_t sibEnd) {
     this->siblingPackets.resize(sibEnd - sibBegin);
 }
 
-bool CommModuleBase::isEmpty() {
-    if (!this->parentPackets.empty()) {
+bool CommModuleBase::isEmpty(uint64_t ts) {
+    if (!this->parentPackets.empty(ts)) {
         return false;
     }
     if (this->enableInterflow) {
         for (auto pb : this->siblingPackets) {
-            if (!pb.empty()) { return false; }
+            if (!pb.empty(ts)) { return false; }
         }
     }
     return true;

@@ -108,6 +108,9 @@ void PimBridgeTaskUnitKernel::executeLoadBalanceCommand(
             1, -1, it->first, zinfo->lbPageSize);
         this->commModule->handleOutPacket(p);
     }
+    if (!zinfo->taskUnits[taskUnitId]->getHasBeenVictim()) {
+        zinfo->taskUnits[taskUnitId]->setHasBeenVictim(true);
+    }
 }
 
 void PimBridgeTaskUnitKernel::newAddrBorrowKernel(Address lbPageAddr) {

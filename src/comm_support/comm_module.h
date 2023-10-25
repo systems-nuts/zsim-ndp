@@ -57,7 +57,7 @@ public:
 
     virtual uint64_t communicate(uint64_t curCycle) = 0; 
     virtual void gatherState() = 0;
-    virtual bool isEmpty();
+    virtual bool isEmpty(uint64_t ts = 0); // pass ts = 0 means allEmpty
     void receivePackets(CommModuleBase* srcModule, 
                         uint32_t messageSize, uint64_t readyCycle, 
                         uint32_t& numPackets, uint32_t& totalSize);
@@ -174,6 +174,7 @@ private:
 
     std::vector<uint64_t> bankQueueLength;
     std::vector<uint64_t> bankQueueReadyLength;
+    std::vector<uint64_t> bankTransferSize;
 
     bool enableLoadBalance;
 
@@ -191,7 +192,7 @@ public:
     void executeLoadBalance(const LbCommand& command, 
         uint32_t targetBankId, std::vector<DataHotness>& outInfo);
         
-    bool isEmpty() override;
+    bool isEmpty(uint64_t ts = 0) override;
     
     // getters & setters
     uint64_t getLastGatherPhase() { return this->lastGatherPhase; }
@@ -233,6 +234,8 @@ private:
     friend class pimbridge::StealingLoadBalancer;
     friend class pimbridge::MultiVictimStealingLoadBalancer;
     friend class pimbridge::ReserveLoadBalancer;
+    friend class pimbridge::TryReserveLoadBalancer;
+    friend class pimbridge::FastArriveLoadBalancer;
 };
 
     

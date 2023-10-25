@@ -28,12 +28,14 @@ CommModule::CommModule(uint32_t _level, uint32_t _commId, bool _enableInterflow,
     this->bankEndId = zinfo->commModules[level-1][childEndId-1]->getBankEndId();
     zinfo->commMapping->setMapping(level, bankBeginId, bankEndId, commId);
     info("begin Id: %u, endId: %u", bankBeginId, bankEndId);
+    info("enable lb: %d", enableLoadBalance);
     this->scatterBuffer.resize(childEndId - childBeginId);
     gatherScheme->setCommModule(this);
     scatterScheme->setCommModule(this);
 
     this->bankQueueLength.resize(bankEndId - bankBeginId);
     this->bankQueueReadyLength.resize(bankEndId - bankBeginId);
+    this->bankTransferSize.resize(bankEndId - bankBeginId);
     this->childTransferSize.resize(childEndId - childBeginId);
 }
 
@@ -78,6 +80,7 @@ void CommModule::commandLoadBalance() {
     if (!this->shouldCommandLoadBalance()) {
         return;
     }
+    DEBUG_LB_O("module %s begin command lb", this->getName());
     this->loadBalancer->generateCommand();
     // The information of scheduled out data
     // write in executeLoadBalance (by lb executors)
@@ -86,8 +89,9 @@ void CommModule::commandLoadBalance() {
     outInfo.clear();
     for (uint32_t i = this->bankBeginId; i < bankEndId; ++i) {
         const LbCommand& curCommand = loadBalancer->commands[i-bankBeginId];
+        uint32_t childCommId = zinfo->commMapping->getCommId(level-1, i);
         if (!curCommand.empty()) {
-            zinfo->commModules[level-1][i]->executeLoadBalance(curCommand, i, outInfo);
+            zinfo->commModules[level-1][childCommId]->executeLoadBalance(curCommand, i, outInfo);
         }
     }
     this->loadBalancer->assignLbTarget(outInfo);   
@@ -101,18 +105,18 @@ void CommModule::executeLoadBalance(
     uint32_t childCommId = zinfo->commMapping->getCommId(level-1, targetBankId);
     zinfo->commModules[level-1][childCommId]
         ->executeLoadBalance(command, targetBankId, outInfo);
-
     for (uint64_t i = curOutSize; i < outInfo.size(); ++i) {
         this->newAddrLend(outInfo[i].addr);
     }
+    DEBUG_LB_O("comm %s end execute lb", this->getName());
 }
 
-bool CommModule::isEmpty() {
-    if (!CommModuleBase::isEmpty()) {
+bool CommModule::isEmpty(uint64_t ts) {
+    if (!CommModuleBase::isEmpty(ts)) {
         return false;
     }
     for (auto pq : this->scatterBuffer) {
-        if (!pq.empty()) { return false; }
+        if (!pq.empty(ts)) { return false; }
     }
     return true;
 }
@@ -224,6 +228,8 @@ void CommModule::gatherState() {
             zinfo->taskUnits[i]->getCurUnit()->getAllTaskQueueSize();
         this->bankQueueReadyLength[id] = 
             zinfo->taskUnits[i]->getCurUnit()->getReadyTaskQueueSize();
+        this->bankTransferSize[id] = 
+            zinfo->commModules[0][i]->stateTransferRegionSize();
         if (this->level == zinfo->commModules.size()-1) {
             DEBUG_GATHER_STATE_O("bank %u queueLength %lu readyLength %lu", 
                 i, bankQueueLength[id] ,bankQueueReadyLength[id])

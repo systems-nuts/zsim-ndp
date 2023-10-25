@@ -4,6 +4,7 @@
 #include <vector>
 #include <deque>
 #include <unordered_map>
+#include <queue>
 #include "config.h"
 #include "memory_hierarchy.h"
 
@@ -108,16 +109,44 @@ public:
 class ReserveLbPimBridgeTaskUnit;
 
 class ReserveLoadBalancer : public StealingLoadBalancer {
-private:
+protected:
     uint32_t HOT_DATA_NUMBER = 10;
     std::vector<DataHotness> childDataHotness;
 public:
     ReserveLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
     void generateCommand() override;
-private: 
+protected: 
     bool genSupply(uint32_t bankIdx) override;
     void generateCommandByHotness();
-    void generateCommandHybrid();
+};
+
+class TryReserveLoadBalancer : public ReserveLoadBalancer {
+public:
+    TryReserveLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
+    void generateCommand() override;
+};
+
+class FastArriveLoadBalancer : public StealingLoadBalancer {
+private:
+    class TransferLength {
+    public:
+        uint32_t bankIdx;
+        uint64_t transferLength;
+        TransferLength(uint32_t _bankIdx, uint64_t _transferLength)
+            : bankIdx(_bankIdx), transferLength(_transferLength) {}
+    };
+    struct cmp {
+        bool operator()(const TransferLength& t1, const TransferLength& t2) const {
+            return t1.transferLength > t2.transferLength;
+        }
+    };
+    std::priority_queue<TransferLength, std::deque<TransferLength>, cmp> transferLengthQueue;
+public:
+    FastArriveLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
+    void generateCommandOld();
+    void generateCommand() override;
+protected:
+    bool genSupply(uint32_t bankIdx) override; 
 };
 
 

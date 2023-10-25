@@ -88,6 +88,7 @@ void BottomCommModule::handleInPacket(CommPacket* packet) {
         } else {
             auto p = (TaskCommPacket*) packet;
             if (p->forLb()) {
+                this->taskUnit->setHasReceiveLbTask(true);
                 this->s_ScheduleInTasks.atomicInc(1); 
                 // info("module %s receive lb task, addr: %lu, toSteal: %lu, sig: %lu", 
                 //     this->getName(), p->getAddr(), this->toStealSize, p->getSignature());

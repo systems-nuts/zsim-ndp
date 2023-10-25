@@ -67,11 +67,12 @@ void LoadBalancer::reset() {
     this->demandIdxVec.clear();
     this->supplyIdxVec.clear();
     uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
-    if(this->level == 1) {
-        this->canDemand.assign(numBanks, true);
-    } else {
-        this->canDemand.assign(numBanks, false);
-    }
+    this->canDemand.assign(numBanks, true);
+    // if(this->level == 1) {
+    //     this->canDemand.assign(numBanks, true);
+    // } else {
+    //     this->canDemand.assign(numBanks, false);
+    // }
     this->demand.assign(numBanks, 0);
     this->supply.assign(numBanks, 0);
     for (auto& c : commands) {

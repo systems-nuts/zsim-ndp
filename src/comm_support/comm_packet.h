@@ -115,17 +115,17 @@ public:
     Address getAddr() const override {
         return this->parent->getAddr();
     }
-    bool isLast() {
-        return (idx == total);
+    uint64_t getSignature() const override {
+        return parent->getSignature();
     }
     uint32_t getIdx() const override {
         return idx;
     }
-    uint64_t getSignature() const override {
-        return parent->getSignature();
-    }
     PacketType getInnerType() const override {
         return parent->getInnerType();
+    }
+    bool isLast() {
+        return (idx == total);
     }
 };
 

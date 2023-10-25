@@ -1,4 +1,3 @@
-
 #include <algorithm>
 #include "load_balancing/load_balancer.h"
 #include "load_balancing/reserve_lb_task_unit.h"
@@ -9,29 +8,10 @@
 
 using namespace pimbridge;
 
-ReserveLoadBalancer::ReserveLoadBalancer(Config& config, uint32_t _level, 
-    uint32_t _commId) : StealingLoadBalancer(config, _level, _commId) {}
+TryReserveLoadBalancer::TryReserveLoadBalancer(Config& config, uint32_t _level, uint32_t _commId)
+    : ReserveLoadBalancer(config, _level, _commId) {}
 
-bool ReserveLoadBalancer::genSupply(uint32_t bankIdx) {
-    if (commModule->bankQueueReadyLength[bankIdx] <=  VICTIM_THRESHOLD) {
-        return false;
-    } else {
-        this->supply[bankIdx] =  commModule->bankQueueReadyLength[bankIdx] - VICTIM_THRESHOLD;
-        this->supplyIdxVec.push_back(bankIdx);
-        uint32_t bid = bankIdx + this->commModule->bankBeginId;
-        ReserveLbPimBridgeTaskUnitKernel* tu = (ReserveLbPimBridgeTaskUnitKernel*)
-        zinfo->taskUnits[bid]->getCurUnit();
-        tu->sketch.getHotItemInfo(this->childDataHotness);
-        return true;
-    }
-}
-
-void ReserveLoadBalancer::generateCommand() {
-    this->generateCommandByHotness();
-    // this->generateCommandHybrid();
-}
-
-void ReserveLoadBalancer::generateCommandByHotness() {
+void TryReserveLoadBalancer::generateCommand(){
     reset();
     this->childDataHotness.clear();
     uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
@@ -55,11 +35,11 @@ void ReserveLoadBalancer::generateCommandByHotness() {
             }
         });
     size_t hotnessIdx = 0;
-    for (size_t i = 0; i < demandIdxVec.size(); ++i) {
+    size_t i = 0;
+    for (i = 0; i < demandIdxVec.size(); ++i) {
         uint32_t stealerIdx = demandIdxVec[i];
-        uint32_t curDemand = demand[stealerIdx];
         // choose victim & amount
-        while (curDemand > 0) {
+        while (demand[stealerIdx] > 0) {
             while(hotnessIdx < childDataHotness.size()) {
                 auto& hotnessItem = childDataHotness[hotnessIdx];
                 uint32_t bankIdx = hotnessItem.srcBankId - commModule->bankBeginId;
@@ -79,11 +59,29 @@ void ReserveLoadBalancer::generateCommandByHotness() {
             this->commands[victimIdx].add(amount);
             this->assignTable[victimIdx].push_back(std::make_pair(stealerIdx, amount));
             // update supply
+            // supply[victimIdx] -= amount;
             supply[victimIdx] -= amount;
             // update curDemand
-            curDemand = curDemand > amount ? curDemand - amount : 0;
+            demand[stealerIdx] = demand[stealerIdx] > amount ? demand[stealerIdx] - amount : 0;
         }
         if (hotnessIdx == childDataHotness.size()) {
+            break;
+        }
+    }
+    for (; i < demandIdxVec.size(); ++i) {
+        uint32_t stealerIdx = demandIdxVec[i]; 
+        uint32_t victimPos = rand() % supplyIdxVec.size();
+        uint32_t victimIdx = supplyIdxVec[victimPos];
+        uint32_t amount = std::min(demand[demandIdxVec[i]], supply[victimIdx]);
+        // update command & assignTable
+        this->commands[victimIdx].add(amount);
+        this->assignTable[victimIdx].push_back(std::make_pair(stealerIdx, amount));
+        // update supply
+        supply[victimIdx] -= amount;
+        if (supply[victimIdx] == 0) {
+            supplyIdxVec.erase(supplyIdxVec.begin() + victimPos);
+        }
+        if (supplyIdxVec.size() == 0) {
             break;
         }
     }

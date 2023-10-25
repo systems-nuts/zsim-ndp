@@ -9,7 +9,8 @@ using namespace task_support;
 
 TaskUnit::TaskUnit(const std::string& _name, uint32_t _tuId, TaskUnitManager* _tum)
     : name(_name), taskUnitId(_tuId), tum(_tum), endTask(nullptr), 
-      isFinished(false), minTimeStamp(0) {
+      isFinished(false), minTimeStamp(0), 
+      hasBeenVictim(false), hasReceiveLbTask(false) {
     futex_init(&tuLock);
 };
 

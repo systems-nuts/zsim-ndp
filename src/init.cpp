@@ -1529,7 +1529,13 @@ static void buildLoadBalancer(Config& config) {
                 lb = new StealingLoadBalancer(config, level, commId);
             } else if (lbType == "MultiVictimStealing") {    
                 lb = new MultiVictimStealingLoadBalancer(config, level, commId);
-            } else if (lbType == "Reserve") {
+            } else if (lbType == "TryReserve") {    
+                std::string taskUnitType = config.get<const char*>("sys.taskSupport.taskUnitType");
+                assert(taskUnitType == "ReserveLbPimBridge");
+                lb = new TryReserveLoadBalancer(config, level, commId);
+            } else if (lbType == "FastArrive") {    
+                lb = new FastArriveLoadBalancer(config, level, commId);
+            }  else if (lbType == "Reserve") {
                 std::string taskUnitType = config.get<const char*>("sys.taskSupport.taskUnitType");
                 assert(taskUnitType == "ReserveLbPimBridge");
                 lb = new ReserveLoadBalancer(config, level, commId);
