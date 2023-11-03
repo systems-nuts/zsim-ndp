@@ -56,9 +56,9 @@ void CommModuleBase::receivePackets(CommModuleBase* src,
             break;
         }
         // if (zinfo->beginDebugOutput) {
-            // info("packet: type %u, fromLevel: %u, fromComm: %u, toLevel: %u, toComm: %d, priority: %u, sig: %lu, addr: %lu", 
-            //     p->type, p->fromLevel, p->fromCommId, p->toLevel, p->toCommId, 
-            //     p->priority, p->getSignature(), p->getAddr());
+        DEBUG_SCHED_META_O("receivePacket: %s type %u, fromLevel: %u, fromComm: %u, toLevel: %u, toComm: %d, priority: %u, sig: %lu, addr: %lu, idx: %u", 
+            this->getName(), p->type, p->fromLevel, p->fromCommId, p->toLevel, p->toCommId, 
+            p->priority, p->getSignature(), p->getAddr(), p->getIdx());
         // }
         p->readyCycle = readyCycle;
         totalSize += p->getSize();

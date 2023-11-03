@@ -32,7 +32,7 @@ public:
                uint32_t _fromLevel, uint32_t _fromCommId, 
                uint32_t _toLevel, int _toCommId, 
                uint32_t _priority) 
-        : type(_type), timeStamp(_timeStamp), readyCycle(_readyCycle), 
+        : type(_type), innerType(_innerType), timeStamp(_timeStamp), readyCycle(_readyCycle), 
           fromLevel(_fromLevel), fromCommId(_fromCommId), 
           toLevel(_toLevel), toCommId(_toCommId), priority(_priority) {}
 

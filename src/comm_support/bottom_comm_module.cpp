@@ -66,6 +66,9 @@ void BottomCommModule::handleInPacket(CommPacket* packet) {
     assert_msg(packet->fromLevel == 1 && packet->toLevel == 0, "fromLevel: %u, toLevel: %u", 
         packet->fromLevel, packet->toLevel);
     assert(packet->toCommId >= 0 && (uint32_t)packet->toCommId == this->commId);
+    DEBUG_SCHED_META_O("module %s handle in packet type: %u addr: %lu sig: %lu, idx: %u", 
+        this->getName(), packet->type, packet->getAddr(), 
+        packet->getSignature(), packet->getIdx());
     if (packet->type == CommPacket::PacketType::Sub) {
         auto p = (SubCommPacket*) packet; 
         if (p->parent->type == CommPacket::PacketType::DataLend) {

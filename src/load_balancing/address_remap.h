@@ -52,10 +52,10 @@ public:
             // assert(addrBorrowMidState.count(lbPageAddr) == 0);
             addrBorrowMidState[lbPageAddr] = 0;
         } else {
-            // assert_msg(addrBorrowMidState.count(lbPageAddr) != 0, 
+            // assert_msg(addrBorrowMidState.count(lbPageAddr) != 0 &&
+            //     addrBorrowMidState[lbPageAddr] == id - 1,
             //     "addr: %lu, id: %u, level: %u, commId: %u", 
             //     lbPageAddr, id, level, commId);
-            // assert(addrBorrowMidState[lbPageAddr] == id - 1); 
             addrBorrowMidState[lbPageAddr] = id;
         }
     }
