@@ -101,12 +101,15 @@ void PimBridgeTaskUnitKernel::executeLoadBalanceCommand(
         }
     }
     for (auto it = info.begin(); it != info.end(); ++it) {
-        DEBUG_LB_O("unit %u execute lb: addr: %lu, cnt: %u", taskUnitId, it->first, it->second);
-        outInfo.push_back(DataHotness(it->first, this->taskUnitId, it->second));
-        this->commModule->newAddrLend(it->first);
+        Address addr = it->first;
+        DEBUG_LB_O("unit %u execute lb: addr: %lu, cnt: %u", taskUnitId, addr, it->second);
+        outInfo.push_back(DataHotness(addr, this->taskUnitId, it->second));
+        this->commModule->newAddrLend(addr);
         DataLendCommPacket* p = new DataLendCommPacket(this->curTs, curCycle, 0, this->taskUnitId,
-            1, -1, it->first, zinfo->lbPageSize);
-        this->commModule->handleOutPacket(p);
+            1, -1, addr, zinfo->lbPageSize);
+        if (this->commModule->toLendMap.count(addr) == 0) {
+            this->commModule->toLendMap.insert(std::make_pair(addr, p));
+        }
     }
     if (!zinfo->taskUnits[taskUnitId]->getHasBeenVictim()) {
         zinfo->taskUnits[taskUnitId]->setHasBeenVictim(true);
@@ -124,6 +127,22 @@ void PimBridgeTaskUnitKernel::newAddrBorrowKernel(Address lbPageAddr) {
         dq.pop_front();
         this->taskEnqueueKernel(t, 0);
         assert(this->notReadyTaskNumber >= 1);
+        --this->notReadyTaskNumber;
+    }
+    notReadyLbTasks.erase(lbPageAddr);
+}
+
+void PimBridgeTaskUnitKernel::newAddrReturnKernel(Address lbPageAddr) {
+    if (notReadyLbTasks.count(lbPageAddr) == 0) {
+        return;
+    }
+    std::deque<TaskPtr>& dq = notReadyLbTasks[lbPageAddr];
+    uint64_t curCycle = zinfo->cores[taskUnitId]->getCurCycle();
+    while(!dq.empty()) {
+        TaskPtr t = dq.front();
+        dq.pop_front();
+        TaskCommPacket* p = new TaskCommPacket(t->timeStamp, curCycle, 0, this->taskUnitId, 1, -1, t, 3);
+        this->commModule->handleOutPacket(p);
         --this->notReadyTaskNumber;
     }
     notReadyLbTasks.erase(lbPageAddr);
@@ -181,6 +200,11 @@ void PimBridgeTaskUnit::assignNewTask(TaskPtr t, Hint* hint) {
 void PimBridgeTaskUnit::newAddrBorrow(Address lbPageAddr) {
     ((PimBridgeTaskUnitKernel*)this->curTaskUnit)->newAddrBorrowKernel(lbPageAddr);
     ((PimBridgeTaskUnitKernel*)this->nxtTaskUnit)->newAddrBorrowKernel(lbPageAddr);
+}
+
+void PimBridgeTaskUnit::newAddrReturn(Address lbPageAddr) {
+    ((PimBridgeTaskUnitKernel*)this->curTaskUnit)->newAddrReturnKernel(lbPageAddr);
+    ((PimBridgeTaskUnitKernel*)this->nxtTaskUnit)->newAddrReturnKernel(lbPageAddr);
 }
 
 void PimBridgeTaskUnit::setCommModule(BottomCommModule* _commModule) { 

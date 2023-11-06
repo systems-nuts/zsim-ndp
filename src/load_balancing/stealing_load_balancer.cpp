@@ -10,10 +10,21 @@ using namespace pimbridge;
 
 StealingLoadBalancer::StealingLoadBalancer(Config& config, uint32_t _level, 
         uint32_t _commId) : LoadBalancer(config, _level, _commId) {
-    this->CHUNK_SIZE = config.get<uint32_t>("sys.pimBridge.loadBalancer.chunkSize");
+    std::string scheme = config.get<const char*>("sys.pimBridge.loadBalancer.chunkScheme", "Static");
+    if (scheme == "Static") {
+        this->chunkScheme = ChunkScheme::Static;
+        this->CHUNK_SIZE = config.get<uint32_t>("sys.pimBridge.loadBalancer.chunkSize");
+    } else if (scheme == "Dynamic") {
+        this->chunkScheme = ChunkScheme::Dynamic;
+        this->CHUNK_SIZE = config.get<uint32_t>("sys.pimBridge.loadBalancer.chunkSize");
+    } else if (scheme == "HalfVictim") {
+        this->chunkScheme = ChunkScheme::HalfVictim;
+    } else {
+        panic("Unsupported scheme for chunk size!");
+    }
 }
 
-void StealingLoadBalancer::generateCommand() {
+void StealingLoadBalancer::generateCommand(bool* needParentLevelLb) {
     reset();
     uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
     for (uint32_t i = 0; i < numBanks; ++i) {
@@ -23,6 +34,9 @@ void StealingLoadBalancer::generateCommand() {
     }
     outputDemandSupply();
     if (demandIdxVec.empty() || supplyIdxVec.empty()) {
+        if (!demandIdxVec.empty() && supplyIdxVec.empty()) {
+            *needParentLevelLb = true;
+        }
         return;
     }
     DEBUG_LB_O("comm %s really command lb", this->commModule->getName());
@@ -31,7 +45,7 @@ void StealingLoadBalancer::generateCommand() {
         // choose victim & amount
         uint32_t victimPos = rand() % supplyIdxVec.size();
         uint32_t victimIdx = supplyIdxVec[victimPos];
-        uint32_t amount = std::min(demand[demandIdxVec[i]], supply[victimIdx]);
+        uint32_t amount = genScheduleAmount(stealerIdx, victimIdx);
         // update command & assignTable
         this->commands[victimIdx].add(amount);
         this->assignTable[victimIdx].push_back(std::make_pair(stealerIdx, amount));
@@ -76,6 +90,16 @@ bool StealingLoadBalancer::genSupply(uint32_t bankIdx) {
     //     uint32_t val = uint32_t((executeTime-transferTime) * child->getExecuteSpeed());
     //     this->supplyVec.push_back(std::make_pair(i, val));
     // }
+}
+
+uint32_t StealingLoadBalancer::genScheduleAmount(uint32_t stealerIdx, uint32_t victimIdx) {
+    if (this->chunkScheme == ChunkScheme::Static || this->chunkScheme == ChunkScheme::Dynamic) {
+        return std::min(demand[stealerIdx], supply[victimIdx]);
+    } else if (this->chunkScheme == ChunkScheme::HalfVictim) {
+        return supply[victimIdx] / 2;
+    } else {
+        panic("Unsupported scheme for chunk size!");
+    }
 }
 
 void StealingLoadBalancer::assignLbTarget(const std::vector<DataHotness>& outInfo) {

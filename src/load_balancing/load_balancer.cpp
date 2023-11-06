@@ -15,7 +15,7 @@ LoadBalancer::LoadBalancer(Config& config, uint32_t _level, uint32_t _commId)
     this->commModule = (CommModule*)zinfo->commModules[level][commId];
 
     // TBY TODO: set STEALER_THRESHOLD dynamically according to speed
-    // uint32_t oneIdleThreshold = config.get<uint32_t>("sys.pimBridge.loadBalancer.stealerThreshold");
+    this->DYNAMIC_THRESHOLD = config.get<bool>("sys.pimBridge.loadBalancer.dynamicThreshold", false);
     this->STEALER_THRESHOLD = config.get<uint32_t>("sys.pimBridge.loadBalancer.stealerThreshold");
     this->VICTIM_THRESHOLD = config.get<uint32_t>("sys.pimBridge.loadBalancer.victimThreshold");
 
@@ -33,7 +33,7 @@ void LoadBalancer::assignOneAddr(Address addr, uint32_t targetBankId) {
     uint32_t childLevelCommId = (uint32_t)-1;
     for (uint32_t l = this->level; l >= 1; --l) {
         childLevelCommId = zinfo->commMapping->getCommId(l-1, targetBankId);
-        zinfo->commModules[l][curCommId]->newAddrRemap(addr, childLevelCommId);
+        zinfo->commModules[l][curCommId]->newAddrRemap(addr, childLevelCommId, false);
         curCommId = childLevelCommId;
     }
     zinfo->commModules[0][targetBankId]->newAddrRemap(addr, 0, true);

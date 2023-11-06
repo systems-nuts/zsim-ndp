@@ -8,6 +8,7 @@
 // #define DEBUG_SKETCH 1
 // #define DEBUG_SCHED_META 1
 // #define DEBUG_UBUNTU 1
+// # define DEBUG_ADDR_RETURN 1
 
 // #define DEBUG_CHECK_CORRECT 1
 
@@ -57,6 +58,12 @@
 #define DEBUG_UBUNTU_O(args...) info(args)
 #else
 #define DEBUG_UBUNTU_O(args...) 
+#endif
+
+#ifdef DEBUG_ADDR_RETURN
+#define DEBUG_ADDR_RETURN_O(args...) info(args)
+#else
+#define DEBUG_ADDR_RETURN_O(args...) 
 #endif
 
 

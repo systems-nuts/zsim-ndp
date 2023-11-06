@@ -158,55 +158,20 @@ void ReserveLbPimBridgeTaskUnitKernel::executeLoadBalanceCommand(
         }
     }
     for (auto it = info.begin(); it != info.end(); ++it) {
-        DEBUG_LB_O("unit %u execute lb: addr: %lu, cnt: %u", taskUnitId, it->first, it->second);
-        outInfo.push_back(DataHotness(it->first, this->taskUnitId, it->second));
-        this->commModule->newAddrLend(it->first);
+        Address addr = it->first;
+        DEBUG_LB_O("unit %u execute lb: addr: %lu, cnt: %u", taskUnitId, addr, it->second);
+        outInfo.push_back(DataHotness(addr, this->taskUnitId, it->second));
+        this->commModule->newAddrLend(addr);
         DataLendCommPacket* p = new DataLendCommPacket(this->curTs, curCycle, 0, this->taskUnitId,
-            1, -1, it->first, zinfo->lbPageSize);
-        this->commModule->handleOutPacket(p);
+            1, -1, addr, zinfo->lbPageSize);
+        if (this->commModule->toLendMap.count(addr) == 0) {
+            this->commModule->toLendMap.insert(std::make_pair(addr, p));
+        }
+        // this->commModule->handleOutPacket(p);
     }
     if (!zinfo->taskUnits[taskUnitId]->getHasBeenVictim()) {
         zinfo->taskUnits[taskUnitId]->setHasBeenVictim(true);
     }
-    /*
-    while(true) {
-        DataHotness item = this->sketch.fetchHotItem();
-        if (item.cnt == 0) {
-            info("no hot data!");
-            break;
-        }
-        assert(reserveRegion.count(item.addr) != 0);
-        auto& q = reserveRegion[item.addr];
-        assert(!q.empty());
-        while(true) {
-            TaskPtr t = q.top();
-            q.pop();
-            this->reserveRegionSize--;
-            if (command > 0) {
-                command--;
-            }
-            TaskCommPacket* p = new TaskCommPacket(curCycle, 0, this->taskUnitId, 1, -1, t, 2);
-            this->commModule->handleOutPacket(p);
-            if (q.empty()) {
-                reserveRegion.erase(item.addr);
-                break;
-            }
-            this->commModule->s_ScheduleOutTasks.atomicInc(1);
-        }
-        int available = commModule->checkAvailable(item.addr);
-        if (available >= 0) {
-            // because of different timestamps
-            outInfo.push_back(DataHotness(item.addr, this->taskUnitId, q.size()));
-            DEBUG_SCHED_META_O("unit %u sched data out, avail: %d, addr: %lu", 
-                taskUnitId, available, item.addr);
-            DataLendCommPacket* p = new DataLendCommPacket(curCycle, 0, 
-                this->taskUnitId, 1, -1, item.addr, zinfo->lbPageSize);
-            this->commModule->handleOutPacket(p);
-        }
-        if (command == 0) {
-            break;
-        }
-    }*/
 }
 
 bool ReserveLbPimBridgeTaskUnitKernel::shouldReserve(TaskPtr t) {

@@ -1444,7 +1444,6 @@ static void buildCommModules(Config& config) {
 
         uint32_t numModules = config.get<uint32_t>(prefix + "numModules");
         info("Number of modules: %u", numModules);
-        bool enableInterflow = config.get<bool>(prefix + "enableInterflow");
 
         zinfo->commModules[curLevel].resize(numModules);
 
@@ -1455,8 +1454,8 @@ static void buildCommModules(Config& config) {
             assert(numModules == zinfo->numCores);
             assert(numModules == zinfo->numBanks);
             for (uint32_t i = 0; i < numModules; ++i) {
-                zinfo->commModules[curLevel][i] = new BottomCommModule(0, i, 
-                    enableInterflow, (PimBridgeTaskUnit*)zinfo->taskUnits[i]);
+                zinfo->commModules[curLevel][i] = new BottomCommModule(0, i,
+                    config, prefix,  (PimBridgeTaskUnit*)zinfo->taskUnits[i]);
                 zinfo->commModules[curLevel][i]->initStats(bottomCommStat);
             }
             zinfo->rootStat->append(bottomCommStat);
@@ -1470,7 +1469,8 @@ static void buildCommModules(Config& config) {
                 ScatterScheme* scatterScheme = buildScatterScheme(config, prefix + "scatterScheme.");
                 bool enableLoadBalance = config.get<bool>(prefix + "enableLoadBalance");
                 zinfo->commModules[curLevel][i] = 
-                    new CommModule(curLevel, i, enableInterflow, 
+                    new CommModule(curLevel, i, 
+                                   config, prefix, 
                                    i * childNum, (i+1)*childNum, 
                                    gatherScheme, scatterScheme, 
                                    enableLoadBalance);
@@ -1518,6 +1518,7 @@ static void buildProfilers(Config& config) {
 
 static void buildLoadBalancer(Config& config) {
     zinfo->ENABLE_LOAD_BALANCE = config.get<bool>("sys.pimBridge.loadBalancer.enable");
+    zinfo->HIERARCHY_AWARE_LOAD_BALANCE = config.get<bool>("sys.pimBridge.loadBalancer.hierarchyAware", false);
     zinfo->lbPageSize = config.get<uint32_t>("sys.pimBridge.loadBalancer.lbPageSize");
     std::string lbType = config.get<const char*>("sys.pimBridge.loadBalancer.type");
     zinfo->SCHEDULE_ALGO = lbType;

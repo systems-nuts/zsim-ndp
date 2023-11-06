@@ -54,10 +54,11 @@ class CommModule;
 // The load balancer give commands for children to execute. 
 // The commands are integers, indicating the number of tasks that should be scheduled out.
 class LoadBalancer {
-public:
+protected:
+    bool DYNAMIC_THRESHOLD;
     uint32_t STEALER_THRESHOLD;
     uint32_t VICTIM_THRESHOLD;
-protected:
+
     uint32_t level;
     uint32_t commId;
     CommModule* commModule;
@@ -73,7 +74,7 @@ protected:
     std::vector<std::deque<std::pair<uint32_t, uint32_t>>> assignTable; // for each victim, which are its stealers and how much to steal
 public: 
     LoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
-    virtual void generateCommand() = 0;
+    virtual void generateCommand(bool* needParentLevelLb) = 0;
     virtual void assignLbTarget(const std::vector<DataHotness>& outInfo) = 0;
 protected:
     void assignOneAddr(Address addr, uint32_t target);
@@ -88,14 +89,21 @@ protected:
 // The commands generation is the same to behaviors of work stealing
 class StealingLoadBalancer : public LoadBalancer {
 protected:
+    enum ChunkScheme {
+        Static, 
+        Dynamic, 
+        HalfVictim
+    };
+    ChunkScheme chunkScheme;
     uint32_t CHUNK_SIZE;
 public:
     StealingLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
-    void generateCommand() override;
+    void generateCommand(bool* needParentLevelLb) override;
     void assignLbTarget(const std::vector<DataHotness>& outInfo) override;
 protected:
     virtual bool genDemand(uint32_t bankIdx); // how much to steal for each bank
     virtual bool genSupply(uint32_t bankIdx); // how much can be stolen for each bank
+    uint32_t genScheduleAmount(uint32_t stealerIdx, uint32_t victimIdx);
 };
 
 class MultiVictimStealingLoadBalancer : public StealingLoadBalancer {
@@ -103,7 +111,7 @@ private:
     uint32_t victimNumber;
 public:
     MultiVictimStealingLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
-    void generateCommand() override;
+    void generateCommand(bool* needParentLevelLb) override;
 };
 
 class ReserveLbPimBridgeTaskUnit;
@@ -114,16 +122,15 @@ protected:
     std::vector<DataHotness> childDataHotness;
 public:
     ReserveLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
-    void generateCommand() override;
+    void generateCommand(bool* needParentLevelLb) override;
 protected: 
     bool genSupply(uint32_t bankIdx) override;
-    void generateCommandByHotness();
 };
 
 class TryReserveLoadBalancer : public ReserveLoadBalancer {
 public:
     TryReserveLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
-    void generateCommand() override;
+    void generateCommand(bool* needParentLevelLb) override;
 };
 
 class FastArriveLoadBalancer : public StealingLoadBalancer {
@@ -143,8 +150,8 @@ private:
     std::priority_queue<TransferLength, std::deque<TransferLength>, cmp> transferLengthQueue;
 public:
     FastArriveLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
-    void generateCommandOld();
-    void generateCommand() override;
+    void generateCommandOld(bool* needParentLevelLb);
+    void generateCommand(bool* needParentLevelLb) override;
 protected:
     bool genSupply(uint32_t bankIdx) override; 
 };

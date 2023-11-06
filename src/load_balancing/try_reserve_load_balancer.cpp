@@ -11,7 +11,7 @@ using namespace pimbridge;
 TryReserveLoadBalancer::TryReserveLoadBalancer(Config& config, uint32_t _level, uint32_t _commId)
     : ReserveLoadBalancer(config, _level, _commId) {}
 
-void TryReserveLoadBalancer::generateCommand(){
+void TryReserveLoadBalancer::generateCommand(bool* needParentLevelLb){
     reset();
     this->childDataHotness.clear();
     uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
@@ -21,6 +21,9 @@ void TryReserveLoadBalancer::generateCommand(){
         assert(!(isStealer && isVictim));
     }
     if (demandIdxVec.empty() || supplyIdxVec.empty()) {
+        if (!demandIdxVec.empty() && supplyIdxVec.empty()) {
+            *needParentLevelLb = true;
+        }
         return;
     }
     DEBUG_LB_O("comm %s command lb", this->commModule->getName());

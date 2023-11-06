@@ -37,6 +37,7 @@ public:
 protected:
     void newNotReadyTask(TaskPtr t);
     void newAddrBorrowKernel(Address lbPageAddr);
+    void newAddrReturnKernel(Address lbPageAddr);
 
     friend class pimbridge::PimBridgeTaskUnit;
     friend class pimbridge::BottomCommModule;
@@ -52,6 +53,7 @@ public:
     void setCommModule(BottomCommModule* _commModule);
 
     void newAddrBorrow(Address lbPageAddr);
+    void newAddrReturn(Address lbPageAddr);
 protected:
     friend class pimbridge::BottomCommModule;
 };

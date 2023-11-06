@@ -3,9 +3,11 @@
 #include <vector>
 #include <deque>
 #include <unordered_map>
+#include <unordered_set>
 #include "galloc.h"
 #include "stats.h"
 #include "locks.h"
+#include "config.h"
 #include "task_support/task.h"
 #include "comm_support/comm_packet.h"
 #include "comm_support/comm_packet_queue.h"
@@ -52,7 +54,8 @@ protected:
 
 public:
     // initialization
-    CommModuleBase(uint32_t _level, uint32_t _commId, bool _enableInterflow);
+    CommModuleBase(uint32_t _level, uint32_t _commId, 
+        Config& config, const std::string& prefix);
     void initSiblings(uint32_t sibBegin, uint32_t sibEnd);
 
     virtual uint64_t communicate(uint64_t curCycle) = 0; 
@@ -66,7 +69,7 @@ public:
     void handleOutPacket(CommPacket* packet);  
 
     // load balance
-    virtual void commandLoadBalance() = 0; 
+    virtual void commandLoadBalance(bool* needParentLevelLb) = 0;
     virtual void executeLoadBalance(const LbCommand& command,  
         uint32_t targetBankId, std::vector<DataHotness>& outInfo) = 0;
         
@@ -88,6 +91,7 @@ public:
     LoadBalancer* getLoadBalancer() { return this->loadBalancer; }
     double getExecuteSpeed() { return this->executeSpeed; } // #task per cycle
     double getTransferSpeed() { return 0; } // TBY TODO: // #bytes per cycle
+    AddressRemapTable* getRemapTable() { return this->addrRemapTable; }
     void setLoadBalancer(LoadBalancer* lb) { this->loadBalancer = lb; }
 
     void newAddrLend(Address lbPageAddr);
@@ -112,18 +116,21 @@ public:
 
 class PimBridgeTaskUnit;
 
-class BottomCommModule : public CommModuleBase{
+class BottomCommModule : public CommModuleBase {
 private:
     uint64_t toStealSize;
+
+    std::unordered_map<Address, DataLendCommPacket*> toLendMap;
 public:
     PimBridgeTaskUnit* taskUnit;
     BottomCommModule(uint32_t _level, uint32_t _commId, 
-                     bool _enableInterflow, PimBridgeTaskUnit* _taskUnit);
+                     Config& config, const std::string& prefix, 
+                     PimBridgeTaskUnit* _taskUnit);
     void gatherState() override;
     uint64_t communicate(uint64_t curCycle) override { return curCycle; }
     CommPacket* nextPacket(uint32_t fromLevel, uint32_t fromCommI, 
                            uint32_t sizeLimit) override;
-    void commandLoadBalance() override { return; }
+    void commandLoadBalance(bool* needParentLevelLb) override { return; }
     void executeLoadBalance(const LbCommand& command, 
         uint32_t targetBankId, std::vector<DataHotness>& outInfo) override;
 
@@ -137,6 +144,7 @@ public:
     void clearToSteal() override {
         this->toStealSize = 0;
     }
+    void pushDataLendPackets();
 private:
     void handleInPacket(CommPacket* packet) override;
     // 1 for available
@@ -179,7 +187,8 @@ private:
     bool enableLoadBalance;
 
 public:
-    CommModule(uint32_t _level, uint32_t _commId, bool _enableInterflow, 
+    CommModule(uint32_t _level, uint32_t _commId, 
+               Config& config, const std::string& prefix, 
                uint32_t _childBeginId, uint32_t _childEndId, 
                GatherScheme* _gatherScheme, ScatterScheme* _scatterScheme, 
                bool _enableLoadBalance);
@@ -188,7 +197,7 @@ public:
     CommPacket* nextPacket(uint32_t fromLevel, uint32_t fromCommId, 
                            uint32_t sizeLimit) override;
     void gatherState() override; 
-    void commandLoadBalance() override;
+    void commandLoadBalance(bool* needParentLevelLb) override;
     void executeLoadBalance(const LbCommand& command, 
         uint32_t targetBankId, std::vector<DataHotness>& outInfo);
         

@@ -3,25 +3,39 @@
 #include "core.h"
 #include "zsim.h"
 #include "numa_map.h"
+#include "config.h"
 #include "comm_support/comm_module.h"
 #include "comm_support/comm_mapping.h"
 #include "comm_support/comm_packet_queue.h"
 #include "gather_scheme.h"
 #include "scatter_scheme.h"
+#include "load_balancing/address_remap.h"
+#include "load_balancing/limited_address_remap.h"
 
 using namespace pimbridge;
 using namespace task_support;
 
 
 CommModuleBase::CommModuleBase(uint32_t _level, uint32_t _commId, 
-                               bool _enableInterflow)
-    : level(_level), commId(_commId), enableInterflow(_enableInterflow) {
+                               Config& config, const std::string& prefix)
+    : level(_level), commId(_commId) {
+    this->enableInterflow = config.get<bool>(prefix + "enableInterflow");
     std::stringstream ss; 
     ss << "comm-" << level << "-" << commId;
     this->name = std::string(ss.str());
     futex_init(&commLock); 
     this->parentId = (uint32_t)-1;
-    this->addrRemapTable = new AddressRemapTable(level, commId);
+
+    std::string remapTableType = config.get<const char*>(prefix + "remapTableType");
+    if (remapTableType == "Unlimited") {
+        this->addrRemapTable = new AddressRemapTable(level, commId);
+    } else if (remapTableType == "Limited") {
+        uint32_t remapTableSet = config.get<uint32_t>(prefix + "remapTableSet");
+        uint32_t remapTableAssoc = config.get<uint32_t>(prefix + "remapTableAssoc");
+        this->addrRemapTable = new LimitedAddressRemapTable(level, commId, remapTableSet, remapTableAssoc);
+    } else {
+        panic("Unsupported addressRemapTable type!");
+    }
     this->executeSpeed = 0;
 }
 
@@ -112,6 +126,7 @@ void CommModuleBase::newAddrLend(Address lbPageAddr) {
 }
 
 void CommModuleBase::newAddrRemap(Address lbPageAddr, uint32_t dst, bool isMidState) {
+    // tby: only BottomCommModules have mid state, other levels only need to setAddrBorrow
     DEBUG_SCHED_META_O("module %s receive data %lu commId: %u: isMid: %u", 
         this->getName(), lbPageAddr, this->commId, isMidState);
     Address pageAddr = zinfo->numaMap->getPageAddressFromLbPageAddress(lbPageAddr);

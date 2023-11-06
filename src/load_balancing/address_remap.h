@@ -11,7 +11,7 @@ namespace pimbridge {
 // Each CommModuleBase holds an AddressRemapTable, 
 // But in BottomCommModule, childRemapTable should be empty, since it has no children.
 class AddressRemapTable {
-private:
+protected:
     uint32_t level;
     uint32_t commId;
     // Used to maintain whether an address is lent out of this commModule
@@ -40,7 +40,8 @@ public:
     bool getAddrLend(Address lbPageAddr) {
         return (addrLend.count(lbPageAddr) != 0);
     }
-    void setAddrBorrowMidState(Address lbPageAddr, uint32_t id) {
+
+    virtual void setAddrBorrowMidState(Address lbPageAddr, uint32_t id) {
         assert(this->level == 0);
         // assert(this->childRemapTable.count(lbPageAddr) == 0);
         if (this->childRemapTable.count(lbPageAddr) != 0) {
@@ -59,13 +60,13 @@ public:
             addrBorrowMidState[lbPageAddr] = id;
         }
     }
-    void eraseAddrBorrowMidState(Address lbPageAddr) {
+    virtual void eraseAddrBorrowMidState(Address lbPageAddr) {
         this->addrBorrowMidState.erase(lbPageAddr);
     }
-    bool getAddrBorrowMidState(Address lbPageAddr) {
+    virtual bool getAddrBorrowMidState(Address lbPageAddr) {
         return (addrBorrowMidState.count(lbPageAddr) != 0);
     }
-    void setChildRemap(Address lbPageAddr, int dst) {
+    virtual void setChildRemap(Address lbPageAddr, int dst) {
         DEBUG_SCHED_META_O("%u-%u set childRemap: addr: %lu, val: %d", level, commId, lbPageAddr, dst);
         if (dst == -1) {
             childRemapTable.erase(lbPageAddr);
@@ -74,13 +75,14 @@ public:
         }
     }
     // -1 means lbPageAddr is not remapped.
-    int getChildRemap(Address lbPageAddr) {
+    virtual int getChildRemap(Address lbPageAddr) {
         if (childRemapTable.count(lbPageAddr) == 0) {
             return -1;
         } else {
             return childRemapTable[lbPageAddr];
         }
     }
+    virtual void updateLru(Address lbPageAddr) {}
 };
 
 

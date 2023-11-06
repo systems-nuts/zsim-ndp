@@ -3,6 +3,7 @@
 #include "core.h"
 #include "zsim.h"
 #include "numa_map.h"
+#include "config.h"
 #include "comm_support/comm_module.h"
 #include "comm_support/comm_mapping.h"
 #include "gather_scheme.h"
@@ -13,8 +14,9 @@ using namespace pimbridge;
 using namespace task_support;
 
 BottomCommModule::BottomCommModule(uint32_t _level, uint32_t _commId, 
-                                   bool _enableInterflow, PimBridgeTaskUnit* _taskUnit)
-    : CommModuleBase(_level, _commId, _enableInterflow), taskUnit(_taskUnit) {
+                                   Config& config, const std::string& prefix, 
+                                   PimBridgeTaskUnit* _taskUnit)
+    : CommModuleBase(_level, _commId, config, prefix), taskUnit(_taskUnit) {
     bankBeginId = commId;
     bankEndId = commId + 1;
     info("begin Id: %u, endId: %u", bankBeginId, bankEndId);
@@ -69,6 +71,14 @@ void BottomCommModule::handleInPacket(CommPacket* packet) {
     DEBUG_SCHED_META_O("module %s handle in packet type: %u addr: %lu sig: %lu, idx: %u", 
         this->getName(), packet->type, packet->getAddr(), 
         packet->getSignature(), packet->getIdx());
+    if (packet->getInnerType() == CommPacket::PacketType::DataLend) {
+        int avail = this->checkAvailable(packet->getAddr());
+        if (avail == -1) { 
+            delete packet;
+            s_RecvPackets.atomicInc(1);
+            return;
+        }
+    }
     if (packet->type == CommPacket::PacketType::Sub) {
         auto p = (SubCommPacket*) packet; 
         if (p->parent->type == CommPacket::PacketType::DataLend) {
@@ -104,7 +114,7 @@ void BottomCommModule::handleInPacket(CommPacket* packet) {
         }
     } else if (packet->type == CommPacket::PacketType::DataLend) {
         auto p = (DataLendCommPacket*) packet;
-        this->newAddrRemap(p->getAddr(), 0);
+        this->newAddrRemap(p->getAddr(), 0, false);
         this->taskUnit->newAddrBorrow(p->getAddr());
     } else {
         panic("Invalid packet type %u for BottomCommModule!", packet->type);
@@ -127,6 +137,13 @@ int BottomCommModule::checkAvailable(Address lbPageAddr) {
     } else {
         return -1;
     }
+}
+
+void BottomCommModule::pushDataLendPackets() {
+    for (auto item : toLendMap) {
+        this->handleOutPacket(item.second);
+    }
+    this->toLendMap.clear();
 }
 
 void BottomCommModule::initStats(AggregateStat* parentStat) {

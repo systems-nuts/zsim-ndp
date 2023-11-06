@@ -16,6 +16,11 @@ private:
 public:
     CommModuleManager(Config& config);
     void clearStaleToSteal(); 
+    void returnReplacedAddr(Address lbPageAddr, uint32_t replaceLevel,
+                            uint32_t replaceCommId);
+private:
+    void returnReplacedAddrFromLevel(Address lbPageAddr, uint32_t replaceLevel,
+                                     uint32_t replaceCommId);
 };
 
 

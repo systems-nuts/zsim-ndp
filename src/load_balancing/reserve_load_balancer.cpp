@@ -26,12 +26,7 @@ bool ReserveLoadBalancer::genSupply(uint32_t bankIdx) {
     }
 }
 
-void ReserveLoadBalancer::generateCommand() {
-    this->generateCommandByHotness();
-    // this->generateCommandHybrid();
-}
-
-void ReserveLoadBalancer::generateCommandByHotness() {
+void ReserveLoadBalancer::generateCommand(bool* needParentLevelLb) {
     reset();
     this->childDataHotness.clear();
     uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
@@ -41,6 +36,9 @@ void ReserveLoadBalancer::generateCommandByHotness() {
         assert(!(isStealer && isVictim));
     }
     if (demandIdxVec.empty() || supplyIdxVec.empty()) {
+        if (!demandIdxVec.empty() && supplyIdxVec.empty()) {
+            *needParentLevelLb = true;
+        }
         return;
     }
     DEBUG_LB_O("comm %s command lb", this->commModule->getName());

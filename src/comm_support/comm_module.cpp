@@ -1,6 +1,7 @@
 #include <deque>
 #include "stats.h"
 #include "core.h"
+#include "config.h"
 #include "zsim.h"
 #include "comm_support/comm_module.h"
 #include "comm_support/comm_mapping.h"
@@ -12,12 +13,13 @@ using namespace pimbridge;
 using namespace task_support;
 
 
-CommModule::CommModule(uint32_t _level, uint32_t _commId, bool _enableInterflow, 
+CommModule::CommModule(uint32_t _level, uint32_t _commId, 
+                       Config& config, const std::string& prefix, 
                        uint32_t _childBeginId, uint32_t _childEndId, 
                        GatherScheme* _gatherScheme, 
                        ScatterScheme* _scatterScheme, 
                        bool _enableLoadBalance) 
-    : CommModuleBase(_level, _commId, _enableInterflow), 
+    : CommModuleBase(_level, _commId, config, prefix), 
       childBeginId(_childBeginId), childEndId(_childEndId), 
       gatherScheme(_gatherScheme),scatterScheme(_scatterScheme), 
       lastGatherPhase(0), lastScatterPhase(0), 
@@ -76,12 +78,12 @@ CommPacket* CommModule::nextPacket(uint32_t fromLevel, uint32_t fromCommId,
     return nullptr;
 }
 
-void CommModule::commandLoadBalance() {
+void CommModule::commandLoadBalance(bool* needParentLevelLb) {
     if (!this->shouldCommandLoadBalance()) {
         return;
     }
     DEBUG_LB_O("module %s begin command lb", this->getName());
-    this->loadBalancer->generateCommand();
+    this->loadBalancer->generateCommand(needParentLevelLb);
     // The information of scheduled out data
     // write in executeLoadBalance (by lb executors)
     // read in assignLbTarget (by lb commanders)
@@ -122,10 +124,8 @@ bool CommModule::isEmpty(uint64_t ts) {
 }
 
 void CommModule::handleInPacket(CommPacket* packet) {
-    // if (packet->getInnerType() == CommPacket::DataLend && packet->from == 4) {
-    //     info("addr: %lu, orig packet to: %d", packet->getAddr(), packet->to);
-    // }
     assert(packet->toLevel == this->level);
+    s_RecvPackets.atomicInc(1);
     int avail = this->checkAvailable(packet->getAddr());
     if (avail == -1) {
         this->handleOutPacket(packet);
@@ -134,7 +134,6 @@ void CommModule::handleInPacket(CommPacket* packet) {
         uint32_t availLoc = (uint32_t)avail;
         this->handleToChildPacket(packet, availLoc);
     }
-    s_RecvPackets.atomicInc(1);
 }
 
 void CommModule::handleToChildPacket(CommPacket* packet, uint32_t childCommId) {

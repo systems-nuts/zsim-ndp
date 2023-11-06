@@ -2,6 +2,9 @@
 #include "comm_support/comm_module_manager.h"
 #include "zsim.h"
 #include "config.h"
+#include "numa_map.h"
+#include "debug_output.h"
+#include "task_support/pim_bridge_task_unit.h"
 
 using namespace task_support;
 using namespace pimbridge;
@@ -31,5 +34,63 @@ void CommModuleManager::clearStaleToSteal() {
         zinfo->taskUnits[i]->setHasReceiveLbTask(false);
         lastToSteal[i] = curToSteal;
         lastReady[i] = curReady;
+    }
+}
+
+void CommModuleManager::returnReplacedAddr(Address lbPageAddr, uint32_t replaceLevel,
+                                           uint32_t replaceCommId) {
+    assert(zinfo->commModules[2].size() == 1);
+#ifdef DEBUG_CHECK_CORRECT
+    assert(replaceLevel >= 0 && replaceLevel <= 2);
+#endif
+    if (replaceLevel == 2) {
+        returnReplacedAddrFromLevel(lbPageAddr, 2, 0);
+    } else {
+        Address pageAddr = zinfo->numaMap->getPageAddressFromLbPageAddress(lbPageAddr);
+        uint32_t originBankId = zinfo->numaMap->getNodeOfPage(pageAddr);
+        uint32_t originLevel1CommId = zinfo->commMapping->getCommId(1, originBankId);
+        uint32_t curLevel1CommId = replaceLevel == 1 ? 
+            replaceCommId : zinfo->commMapping->getCommId(1, replaceCommId);
+        if (curLevel1CommId == originLevel1CommId) {
+            returnReplacedAddrFromLevel(lbPageAddr, 1, curLevel1CommId);
+        } else {
+            returnReplacedAddrFromLevel(lbPageAddr, 2, 0);
+        }
+    } 
+}
+
+void CommModuleManager::returnReplacedAddrFromLevel(
+        Address lbPageAddr, uint32_t replaceLevel, uint32_t replaceCommId) {
+    uint32_t originBankId = zinfo->numaMap->getNodeOfPage(
+        zinfo->numaMap->getPageAddressFromLbPageAddress(lbPageAddr)
+    );
+    DEBUG_ADDR_RETURN_O("returnReplacedAddrFromLevel: level: %u, comm: %u, addr: %lu, originBank: %u", 
+        replaceLevel, replaceCommId, lbPageAddr, originBankId);
+    uint32_t curLevel = 0;
+    uint32_t curCommId = originBankId; 
+    // process addrLend
+    while(true) {
+        CommModuleBase* cm = zinfo->commModules[curLevel][curCommId];
+        cm->getRemapTable()->setAddrLend(lbPageAddr, false);
+        ++curLevel;
+        if (curLevel == replaceLevel) {
+            break;
+        }
+        curCommId = zinfo->commMapping->getCommId(curLevel, originBankId);
+    }
+    // process childRemap
+    curLevel = replaceLevel;
+    curCommId = replaceCommId; 
+    while(true) {
+        CommModuleBase* cm = zinfo->commModules[curLevel][curCommId];
+        curCommId = cm->getRemapTable()->getChildRemap(lbPageAddr);
+        assert(curCommId >= 0);
+        cm->getRemapTable()->setChildRemap(lbPageAddr, -1);
+        cm->getRemapTable()->eraseAddrBorrowMidState(lbPageAddr);
+        if (curLevel == 0) {
+            ((BottomCommModule*)cm)->taskUnit->newAddrReturn(lbPageAddr);
+            break;
+        }
+        --curLevel;
     }
 }

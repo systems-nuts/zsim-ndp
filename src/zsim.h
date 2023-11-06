@@ -232,6 +232,7 @@ struct GlobSimInfo {
 
     // Load Balance;
     bool ENABLE_LOAD_BALANCE;
+    bool HIERARCHY_AWARE_LOAD_BALANCE;
     uint32_t lbPageSize;
 
     // Profiling

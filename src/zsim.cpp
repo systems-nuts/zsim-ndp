@@ -569,10 +569,26 @@ VOID EndOfPhaseActions() {
         }
 
         if (zinfo->ENABLE_LOAD_BALANCE) {
-            for (size_t i = zinfo->commModules.size() - 1; i > 0; i--) {
-                for (auto c : zinfo->commModules[i]) {
-                    c->commandLoadBalance();
+            if (zinfo->HIERARCHY_AWARE_LOAD_BALANCE) {
+                for (size_t i = 1; i < zinfo->commModules.size(); ++i) {
+                    bool parentLevelLb = false;
+                    for (auto c : zinfo->commModules[i]) {
+                        c->commandLoadBalance(&parentLevelLb);
+                    }
+                    if (!parentLevelLb) {
+                        break;
+                    }
                 }
+            } else {
+                for (size_t i = zinfo->commModules.size() - 1; i > 0; i--) {
+                    bool parentLevelLb = false; // useless 
+                    for (auto c : zinfo->commModules[i]) {
+                        c->commandLoadBalance(&parentLevelLb);
+                    }
+                }
+            }
+            for (auto c : zinfo->commModules[0]) {
+                ((BottomCommModule*)c)->pushDataLendPackets();
             }
         }
         zinfo->CAN_SIM_COMM_EVENT = true;

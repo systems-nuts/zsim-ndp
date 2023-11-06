@@ -13,7 +13,7 @@ MultiVictimStealingLoadBalancer::MultiVictimStealingLoadBalancer (Config& config
     this->victimNumber = config.get<uint32_t>("sys.pimBridge.loadBalancer.victimNumber");
 }
 
-void MultiVictimStealingLoadBalancer::generateCommand() {
+void MultiVictimStealingLoadBalancer::generateCommand(bool* needParentLevelLb) {
     reset();
     uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
     for (uint32_t i = 0; i < numBanks; ++i) {
@@ -22,6 +22,9 @@ void MultiVictimStealingLoadBalancer::generateCommand() {
         assert(!(isStealer && isVictim));
     }
     if (demandIdxVec.empty() || supplyIdxVec.empty()) {
+        if (!demandIdxVec.empty() && supplyIdxVec.empty()) {
+            *needParentLevelLb = true;
+        }
         return;
     }
     DEBUG_LB_O("comm %s command lb", this->commModule->getName());

@@ -25,7 +25,7 @@ bool FastArriveLoadBalancer::genSupply(uint32_t bankIdx) {
     }
 }
 
-void FastArriveLoadBalancer::generateCommand() {
+void FastArriveLoadBalancer::generateCommand(bool* needParentLevelLb) {
     reset();
     uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
     for (uint32_t i = 0; i < numBanks; ++i) {
@@ -35,6 +35,9 @@ void FastArriveLoadBalancer::generateCommand() {
     }
     outputDemandSupply();
     if (demandIdxVec.empty() || supplyIdxVec.empty()) {
+        if (!demandIdxVec.empty() && supplyIdxVec.empty()) {
+            *needParentLevelLb = true;
+        }
         return;
     }
     DEBUG_LB_O("comm %s really command lb", this->commModule->getName());
@@ -60,7 +63,7 @@ void FastArriveLoadBalancer::generateCommand() {
 }
 
 
-void FastArriveLoadBalancer::generateCommandOld() {
+void FastArriveLoadBalancer::generateCommandOld(bool* needParentLevelLb) {
     reset();
     this->transferLengthQueue = std::priority_queue<TransferLength, std::deque<TransferLength>, cmp>();
     uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
@@ -75,6 +78,9 @@ void FastArriveLoadBalancer::generateCommandOld() {
     }
     outputDemandSupply();
     if (demandIdxVec.empty() || supplyIdxVec.empty()) {
+        if (!demandIdxVec.empty() && supplyIdxVec.empty()) {
+            *needParentLevelLb = true;
+        }
         return;
     }
     DEBUG_LB_O("comm %s really command lb", this->commModule->getName());
