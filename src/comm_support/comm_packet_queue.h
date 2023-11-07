@@ -8,6 +8,7 @@ namespace pimbridge {
 
 struct packetCmp {
     bool operator()(const CommPacket* p1, const CommPacket* p2) {
+        /*
         if (p1->timeStamp != p2->timeStamp) {
             return p1->timeStamp > p2->timeStamp;
         } else if (p1->readyCycle != p2->readyCycle) {
@@ -18,6 +19,33 @@ struct packetCmp {
             return p1->getSignature() > p2->getSignature();
         } else if (p1->getInnerType() != p2->getInnerType()) {
             return p1->getInnerType() < p2->getInnerType(); // data first, then task
+        } else if (p1->getIdx() != p2->getIdx()) {
+            return  p1->getIdx() > p2->getIdx();
+        } else {
+            assert_msg(false, "Two totally same packet! sig: %lu, addr: %lu, %lu \n"\
+                "p1: type: %u, from: %u-%u, to: %u-%u, prio: %u, idx: %u, innertype: %u\n"\
+                "p2: type: %u, from: %u-%u, to: %u-%u, prio: %u, idx: %u, innertype: %u\n"\
+                "p1 addr: %lu, p2 addr: %lu\n",
+                p1->getSignature(),p1->getAddr(),p2->getAddr(), 
+                p1->type, p1->fromLevel, p1->fromCommId, 
+                p1->toLevel, p1->toCommId, p1->priority, p1->getIdx(), p1->getInnerType(),
+                p2->type, p2->fromLevel, p2->fromCommId, 
+                p2->toLevel, p2->toCommId, p2->priority, p2->getIdx(), p2->getInnerType(), 
+                (uint64_t)p1, (uint64_t)p2);
+        }*/
+
+        if (p1->timeStamp != p2->timeStamp) {
+            return p1->timeStamp > p2->timeStamp;
+        } else if (p1->readyCycle != p2->readyCycle) {
+            return p1->readyCycle > p2->readyCycle;
+        } else if (p1->priority != p2->priority) {
+            return p1->priority < p2->priority; // normal task first
+        } else if (p1->getAddr() != p2->getAddr()) {
+            return p1->getAddr() > p2->getAddr();
+        } else if (p1->getInnerType() != p2->getInnerType()) {
+            return p1->getInnerType() < p2->getInnerType();
+        } else if (p1->getSignature() != p2->getSignature()) {
+            return p1->getSignature() > p2->getSignature();
         } else if (p1->getIdx() != p2->getIdx()) {
             return  p1->getIdx() > p2->getIdx();
         } else {
