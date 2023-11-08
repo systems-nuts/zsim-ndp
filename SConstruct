@@ -47,6 +47,8 @@ def buildSim(cppFlags, dir, type, pgo=None):
         pinCrtLibDir = joinpath(PINPATH, "intel64/runtime/pincrt")
         assert os.path.exists(pinCrtDir)
         assert os.path.exists(pinCrtLibDir)
+    # Pin 3.24 starts to support most C++11
+    withPinCrtCXX11 = os.path.exists(joinpath(PINPATH, "extras/cxx"))
 
     ROOT = Dir('.').abspath
 
@@ -55,16 +57,21 @@ def buildSim(cppFlags, dir, type, pgo=None):
     # NOTE: Original Pin flags included -fno-strict-aliasing, but zsim does not do type punning
     # NOTE (dsm 16 Apr 2015): Update flags code to support Pin 2.14 while retaining backwards compatibility
     # NOTE (gaomy May 2019): Set ABI version
-    env["CPPFLAGS"] += " -g -std=c++11 -Wall -Wno-unknown-pragmas -Wno-unused-function -fomit-frame-pointer -fno-stack-protector"
+    env["CPPFLAGS"] += " -g -std=c++0x -Wall -Wno-unknown-pragmas -Wno-unused-function -fomit-frame-pointer -fno-stack-protector"
     env["CPPFLAGS"] += " -MMD -DBIGARRAY_MULTIPLIER=1 -DUSING_XED -DTARGET_IA32E -DHOST_IA32E -fPIC -DTARGET_LINUX"
     env["CPPFLAGS"] += " -fabi-version=2"
+    env["CPPFLAGS"] += " -Wno-unused-function"
 
     # Add more flags and system paths for pintool if with PinCRT.
     if withPinCrt:
         env["CPPFLAGS"] += " -D__PIN__=1 -DPIN_CRT=1"
         env["CPPFLAGS"] += " -fno-exceptions -fno-rtti -funwind-tables -fasynchronous-unwind-tables"
-        env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/stlport/include")
-        env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/libstdc++/include")
+        env["CPPFLAGS"] += " -Ddynamic_cast=static_cast"
+        if withPinCrtCXX11:
+            env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/cxx/include")
+        else:
+            env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/stlport/include")
+            env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/libstdc++/include")
         env["CPPFLAGS"] += " -isystem " + joinpath(PINPATH, "extras/libunwind/include")
         env["CPPFLAGS"] += " -isystem " + joinpath(pinCrtDir, "include")
         env["CPPFLAGS"] += " -isystem " + joinpath(pinCrtDir, "include/arch-x86_64")
@@ -127,6 +134,7 @@ def buildSim(cppFlags, dir, type, pgo=None):
 
     # Pin 2.14 uses unambiguous libpindwarf
     # Pin 3 uses libpin3dwarf
+    # Pin 3.25 changes back to libpindwarf and changes its path
     pindwarfPath = joinpath(PINPATH, "intel64/lib-ext/libdwarf.a")
     pindwarfLib = File(pindwarfPath)
     if not os.path.exists(pindwarfPath):
@@ -135,7 +143,10 @@ def buildSim(cppFlags, dir, type, pgo=None):
         if not os.path.exists(pindwarfPath):
             pindwarfPath = joinpath(PINPATH, "intel64/lib-ext/libpin3dwarf.so")
             pindwarfLib = "pin3dwarf"
-            assert os.path.exists(pindwarfPath)
+            if not os.path.exists(pindwarfPath):
+                pindwarfPath = joinpath(PINPATH, "intel64/lib/libpindwarf.so")
+                pindwarfLib = "pindwarf"
+                assert os.path.exists(pindwarfPath)
 
     env["PINLIBS"] = ["pin", "xed", pindwarfLib]
 
@@ -198,9 +209,18 @@ def buildSim(cppFlags, dir, type, pgo=None):
 
     # PinCRT libs. These libs are needed by both the shared lib pintool and the utilities.
     if withPinCrt:
+        # PinCRT has issues, and we allow to apply our patches to it.
+        if "PINCRTPATCHPATH" in os.environ:
+            PINCRTPATCHPATH = os.environ["PINCRTPATCHPATH"]
+            env["LINKFLAGS"] += " -Wl,-R" + PINCRTPATCHPATH + " -Wl,--no-as-needed"
+            env["LIBPATH"] += [PINCRTPATCHPATH]
+            env["LIBS"] += ["pincrtpatch"]
         env["LINKFLAGS"] += " -nostdlib -Wl,-R" + pinCrtLibDir
         env["LIBPATH"] += [pinCrtLibDir]
-        env["LIBS"] += ["dl-dynamic", "stlport-dynamic", "m-dynamic", "c-dynamic", "unwind-dynamic"]
+        if withPinCrtCXX11:
+            env["LIBS"] += ["dl-dynamic", "m-dynamic", "c-dynamic", "c++", "c++abi", "unwind-dynamic"]
+        else:
+            env["LIBS"] += ["dl-dynamic", "stlport-dynamic", "m-dynamic", "c-dynamic", "unwind-dynamic"]
         env["CRTBEGIN"] = [joinpath(pinCrtLibDir, "crtbegin.o")]
         env["CRTEND"] = [joinpath(pinCrtLibDir, "crtend.o")]
         env["CRTBEGINS"] = [joinpath(pinCrtLibDir, "crtbeginS.o")]
@@ -214,6 +234,8 @@ def buildSim(cppFlags, dir, type, pgo=None):
     env["CPPFLAGS"] += ' -DLDLIB_PATH="' + ":".join(env["LIBPATH"] + env["PINLIBPATH"]) + '" '
     if withPinCrt:
         env["CPPFLAGS"] += ' -DPIN_CRT_TZDATA="' + joinpath(PINPATH, "extras/crt/tzdata") + '" '
+        # PinCRT header <functional> misses NULL declaration
+        env["CPPFLAGS"] += ' -DNULL=0 '
 
     # Do PGO?
     if pgo == "generate":

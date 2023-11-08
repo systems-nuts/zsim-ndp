@@ -1727,7 +1727,7 @@ static EXCEPT_HANDLING_RESULT InternalExceptionHandler(THREADID tid, EXCEPTION_I
 #ifdef ADDR2LINEBIN
             QUOTED(ADDR2LINEBIN);
 #else
-            "adr2line";
+            "addr2line";
 #endif
         std::string cmd = exe + " -f -C -e " + libzsimFile + " -j .text " + relInstrAddrStr + " 2>/dev/null";
         FILE* f = popen(cmd.c_str(), "r");
