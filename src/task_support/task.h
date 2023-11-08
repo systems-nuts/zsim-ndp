@@ -32,7 +32,7 @@ public:
          uint64_t _readyCycle) 
         : taskId(_taskId), taskFn(_func), timeStamp(_ts), 
           args(_args), isEndTask(_isEnd), hint(_hint), readyCycle(_readyCycle) {
-        taskSize = 8;
+        taskSize = 20 + args.size() * 8;
     }
         
     ~Task() {}

@@ -83,8 +83,7 @@ void CommModuleManager::returnReplacedAddrFromLevel(
     curCommId = replaceCommId; 
     while(true) {
         CommModuleBase* cm = zinfo->commModules[curLevel][curCommId];
-        curCommId = cm->getRemapTable()->getChildRemap(lbPageAddr);
-        assert(curCommId >= 0);
+        int remap = cm->getRemapTable()->getChildRemap(lbPageAddr);
         cm->getRemapTable()->setChildRemap(lbPageAddr, -1);
         cm->getRemapTable()->eraseAddrBorrowMidState(lbPageAddr);
         if (curLevel == 0) {
@@ -92,5 +91,11 @@ void CommModuleManager::returnReplacedAddrFromLevel(
             break;
         }
         --curLevel;
+        if (remap < 0) {
+            // this happens when level == 0;
+            info("remap = -1; curLevel: %u, curCommId: %u", curLevel, curCommId);
+            break;
+        }
+        curCommId = (uint32_t)remap;
     }
 }

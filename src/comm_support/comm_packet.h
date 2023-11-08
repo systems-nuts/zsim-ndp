@@ -7,7 +7,7 @@ namespace pimbridge {
 
 class CommPacket {
 public:
-    const static uint32_t MAX_SIZE = 8;
+    const static uint32_t MAX_SIZE = 64;
     enum PacketType {
         Task, 
         DataLend, 
