@@ -561,16 +561,20 @@ VOID EndOfPhaseActions() {
         for (auto tu : zinfo->taskUnits) {
             tu->getCurUnit()->prepareState();
         }
-
         for (auto l : zinfo->commModules) {
             for (auto c : l) {
                 c->gatherState();
             }
         }
-
         if (zinfo->ENABLE_LOAD_BALANCE) {
+            zinfo->commModuleManager->setDynamicLbConfig();
             if (zinfo->HIERARCHY_AWARE_LOAD_BALANCE) {
                 for (size_t i = 1; i < zinfo->commModules.size(); ++i) {
+                    for (auto l : zinfo->commModules) {
+                        for (auto c : l) {
+                            c->gatherState();
+                        }
+                    }
                     bool parentLevelLb = false;
                     for (auto c : zinfo->commModules[i]) {
                         c->commandLoadBalance(&parentLevelLb);
@@ -580,17 +584,27 @@ VOID EndOfPhaseActions() {
                     }
                 }
             } else {
-                for (size_t i = zinfo->commModules.size() - 1; i > 0; i--) {
-                    bool parentLevelLb = false; // useless 
-                    for (auto c : zinfo->commModules[i]) {
-                        c->commandLoadBalance(&parentLevelLb);
+                for (auto l : zinfo->commModules) {
+                    for (auto c : l) {
+                        c->gatherState();
                     }
                 }
+                for (auto c : zinfo->commModules[zinfo->commModules.size() - 1]) {
+                    bool parentLevelLb = false; // useless 
+                    c->commandLoadBalance(&parentLevelLb);
+                }
+                // for (size_t i = zinfo->commModules.size() - 1; i > 0; i--) {
+                //     bool parentLevelLb = false; // useless 
+                //     for (auto c : zinfo->commModules[i]) {
+                //         c->commandLoadBalance(&parentLevelLb);
+                //     }
+                // }
             }
             for (auto c : zinfo->commModules[0]) {
                 ((BottomCommModule*)c)->pushDataLendPackets();
             }
         }
+        
         zinfo->CAN_SIM_COMM_EVENT = true;
         for (uint32_t i = 0; i < zinfo->numCores; ++i) {
             if (!zinfo->cores[i]->canSimEvent()) {
@@ -601,17 +615,10 @@ VOID EndOfPhaseActions() {
         }
         for (auto l : zinfo->commModules) {
             for (auto c : l) {
-                // info("module %s communicate", c->getName());
-                // uint64_t curFinishCycle = c->communicate(curCycle);
+                // c->gather(curCycle);
+                // c->scatter(curCycle);
                 c->communicate(curCycle);
-                // if (c->getLevel() == 1) {
-                //     info("curCycle: %lu, curFinishCycle: %lu of %s", curCycle, curFinishCycle, c->getName());
-                // }
-                // levelFinishCycle = curFinishCycle > levelFinishCycle ? 
-                //     curFinishCycle : levelFinishCycle;
-                // info("module %s finish communicate", c->getName());
             }
-            // curCycle = levelFinishCycle;
         }
     }
 }

@@ -1431,7 +1431,7 @@ static void buildCommModules(Config& config) {
     uint32_t curLevel = 0;
     uint32_t lastNumModules = 0;
     zinfo->commModules.resize(commModuleNames.size());
-    zinfo->commMapping = new CommMapping(commModuleNames.size(), zinfo->numBanks);
+    zinfo->commMapping = new CommMapping(commModuleNames.size(), zinfo->numCores);
 
     // AggregateStat* commStat = new AggregateStat(true);
     // commStat->init("commModule", "Communication module stats");
@@ -1452,7 +1452,6 @@ static void buildCommModules(Config& config) {
             bottomCommStat->init("bottomCommModule", "Bottom communication module stats");
 
             assert(numModules == zinfo->numCores);
-            assert(numModules == zinfo->numBanks);
             for (uint32_t i = 0; i < numModules; ++i) {
                 zinfo->commModules[curLevel][i] = new BottomCommModule(0, i,
                     config, prefix,  (PimBridgeTaskUnit*)zinfo->taskUnits[i]);
@@ -1549,9 +1548,6 @@ static void buildLoadBalancer(Config& config) {
 }
 
 static void InitPimBridge(Config& config) {
-    zinfo->numBanks = config.get<uint32_t>("sys.pimBridge.numBanks", 0);
-    zinfo->numRanks = config.get<uint32_t>("sys.pimBridge.numRanks", 0);
-    zinfo->numDimms = config.get<uint32_t>("sys.pimBridge.numDimms", 0);
     zinfo->SIM_COMM_EVENT = config.get<bool>("sys.pimBridge.simCommEvent", true);
     zinfo->CAN_SIM_COMM_EVENT = true;
     buildCommModules(config);

@@ -10,18 +10,6 @@ using namespace pimbridge;
 
 StealingLoadBalancer::StealingLoadBalancer(Config& config, uint32_t _level, 
         uint32_t _commId) : LoadBalancer(config, _level, _commId) {
-    std::string scheme = config.get<const char*>("sys.pimBridge.loadBalancer.chunkScheme", "Static");
-    if (scheme == "Static") {
-        this->chunkScheme = ChunkScheme::Static;
-        this->CHUNK_SIZE = config.get<uint32_t>("sys.pimBridge.loadBalancer.chunkSize");
-    } else if (scheme == "Dynamic") {
-        this->chunkScheme = ChunkScheme::Dynamic;
-        this->CHUNK_SIZE = config.get<uint32_t>("sys.pimBridge.loadBalancer.chunkSize");
-    } else if (scheme == "HalfVictim") {
-        this->chunkScheme = ChunkScheme::HalfVictim;
-    } else {
-        panic("Unsupported scheme for chunk size!");
-    }
 }
 
 void StealingLoadBalancer::generateCommand(bool* needParentLevelLb) {
@@ -63,8 +51,10 @@ void StealingLoadBalancer::generateCommand(bool* needParentLevelLb) {
 
 bool StealingLoadBalancer::genDemand(uint32_t bankIdx) {
     if (this->canDemand[bankIdx] && 
-            commModule->bankQueueLength[bankIdx] < STEALER_THRESHOLD) { 
-        this->demand[bankIdx] = CHUNK_SIZE;
+            commModule->bankQueueLength[bankIdx] < STEALER_THRESHOLD) {
+        if (this->chunkScheme == ChunkScheme::Dynamic || this->chunkScheme == ChunkScheme::Static) {
+            this->demand[bankIdx] = CHUNK_SIZE;
+        }
         this->demandIdxVec.push_back(bankIdx);
         return true;
     } else {
@@ -96,6 +86,7 @@ uint32_t StealingLoadBalancer::genScheduleAmount(uint32_t stealerIdx, uint32_t v
     if (this->chunkScheme == ChunkScheme::Static || this->chunkScheme == ChunkScheme::Dynamic) {
         return std::min(demand[stealerIdx], supply[victimIdx]);
     } else if (this->chunkScheme == ChunkScheme::HalfVictim) {
+        this->demand[stealerIdx] = supply[victimIdx] / 2;
         return supply[victimIdx] / 2;
     } else {
         panic("Unsupported scheme for chunk size!");

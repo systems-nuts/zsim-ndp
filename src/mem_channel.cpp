@@ -216,6 +216,7 @@ uint64_t MemChannel::access(MemReq& req, bool isCritical, uint32_t data_size) {
         return req.cycle; // zero latency
     } else {
         bool isWrite = (req.type == PUTX);
+        // TBY TODO: memory access size
         uint64_t respCycle = req.cycle + (isWrite? minWrDelay : minRdDelay)/*  + memToSysCycle(data_size - 8) */;
         // uint64_t respCycle = req.cycle + getMinDelay(isWrite, data_size);
         EventRecorder* eventRec = zinfo->eventRecorders[req.srcId];

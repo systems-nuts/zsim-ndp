@@ -39,7 +39,6 @@ void CommModuleManager::clearStaleToSteal() {
 
 void CommModuleManager::returnReplacedAddr(Address lbPageAddr, uint32_t replaceLevel,
                                            uint32_t replaceCommId) {
-    assert(zinfo->commModules[2].size() == 1);
 #ifdef DEBUG_CHECK_CORRECT
     assert(replaceLevel >= 0 && replaceLevel <= 2);
 #endif
@@ -97,5 +96,22 @@ void CommModuleManager::returnReplacedAddrFromLevel(
             break;
         }
         curCommId = (uint32_t)remap;
+    }
+}
+
+void CommModuleManager::setDynamicLbConfig() {
+    double speed = 0;
+    for (size_t i = 0; i < zinfo->taskUnits.size(); ++i) {
+        double perSpeed = zinfo->taskUnits[i]->getExecuteSpeed();
+        speed = speed < perSpeed ? perSpeed : speed;
+    }
+    // speed = 3.2768 * speed * 10000;
+    speed = speed * 2048;
+    uint32_t finalSpeed = (uint32_t)speed;
+    DEBUG_DYNAMIC_LB_CONFIG_O("Speed: %u", finalSpeed);
+    for (size_t i = 1; i < zinfo->commModules.size(); ++i) {
+        for (auto c : zinfo->commModules[i]) {
+            c->getLoadBalancer()->setDynamicLbConfig(finalSpeed);
+        }
     }
 }

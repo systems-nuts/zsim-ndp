@@ -43,6 +43,9 @@ CommModule::CommModule(uint32_t _level, uint32_t _commId,
 
 uint64_t CommModule::communicate(uint64_t curCycle) {
     uint64_t respCycle = curCycle;
+    respCycle = gather(respCycle);
+    respCycle = scatter(respCycle);
+    /*
     // info("resp before gather: %lu", respCycle);
     if (this->gatherScheme->shouldTrigger()) {
         respCycle = gather(respCycle);
@@ -52,6 +55,7 @@ uint64_t CommModule::communicate(uint64_t curCycle) {
         respCycle = scatter(respCycle);
     }
     // info("resp after scatter: %lu", respCycle);
+    */
     return respCycle;
 }
 
@@ -163,6 +167,9 @@ int CommModule::checkAvailable(Address lbPageAddr) {
 
 uint64_t CommModule::gather(uint64_t curCycle) {
     // info("gather: %u-%u", level, commId);
+    if (!gatherScheme->shouldTrigger()) {
+        return curCycle;
+    }
     uint64_t readyCycle = curCycle;
     if (this->level == 1) {
         for (uint32_t i = childBeginId; i < childEndId; ++i) {
@@ -188,16 +195,15 @@ uint64_t CommModule::gather(uint64_t curCycle) {
             i-childBeginId, totalSize);
     }
 
-
     this->lastGatherPhase = zinfo->numPhases;
     this->s_GatherTimes.atomicInc(1);
     return readyCycle;
 }
 
 uint64_t CommModule::scatter(uint64_t curCycle) {
-    // if(zinfo->beginDebugOutput) {
-        // info("scatter: %u-%u", level, commId);
-    // }
+    if (!scatterScheme->shouldTrigger()) {
+        return curCycle;
+    }
     uint64_t readyCycle = curCycle;
     if (this->level == 1) {
         for (uint32_t i = childBeginId; i < childEndId; ++i) {
@@ -242,7 +248,18 @@ void CommModule::gatherState() {
         DEBUG_GATHER_STATE_O("child %s transferLength %lu", 
             child->getName(), childTransferSize[i - childBeginId]);
     }
+}
 
+void CommModule::gatherTransferState() {
+    DEBUG_GATHER_STATE_O("module %s gather transfer state", this->getName());
+    for (uint32_t i = bankBeginId; i < bankEndId; ++i) {
+        this->bankTransferSize[i - bankBeginId] = 
+            zinfo->commModules[0][i]->stateTransferRegionSize();
+    }
+    for (uint32_t i = childBeginId; i < childEndId; ++i) {
+        CommModuleBase* child = zinfo->commModules[level-1][i];
+        this->childTransferSize[i - childBeginId] = child->stateTransferRegionSize();
+    }
 }
 
 bool CommModule::shouldCommandLoadBalance() {

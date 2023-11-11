@@ -89,6 +89,7 @@ public:
     void initStats(AggregateStat* parentStat);
 
     void computeExecuteSpeed();
+    double getExecuteSpeed() {return this->executeSpeed;}
 
 protected:
     void checkTimeStampChange(uint64_t newTs);

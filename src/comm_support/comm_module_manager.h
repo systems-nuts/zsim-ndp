@@ -18,6 +18,7 @@ public:
     void clearStaleToSteal(); 
     void returnReplacedAddr(Address lbPageAddr, uint32_t replaceLevel,
                             uint32_t replaceCommId);
+    void setDynamicLbConfig();
 private:
     void returnReplacedAddrFromLevel(Address lbPageAddr, uint32_t replaceLevel,
                                      uint32_t replaceCommId);

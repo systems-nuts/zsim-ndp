@@ -58,6 +58,13 @@ protected:
     bool DYNAMIC_THRESHOLD;
     uint32_t STEALER_THRESHOLD;
     uint32_t VICTIM_THRESHOLD;
+    enum ChunkScheme {
+        Static, 
+        Dynamic, 
+        HalfVictim
+    };
+    ChunkScheme chunkScheme;
+    uint32_t CHUNK_SIZE;
 
     uint32_t level;
     uint32_t commId;
@@ -76,6 +83,7 @@ public:
     LoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
     virtual void generateCommand(bool* needParentLevelLb) = 0;
     virtual void assignLbTarget(const std::vector<DataHotness>& outInfo) = 0;
+    void setDynamicLbConfig(uint32_t avgSpeed);
 protected:
     void assignOneAddr(Address addr, uint32_t target);
     void reset();
@@ -88,14 +96,6 @@ protected:
 // The StealingLoadBalancer schedule tasks from the tail of the task queue
 // The commands generation is the same to behaviors of work stealing
 class StealingLoadBalancer : public LoadBalancer {
-protected:
-    enum ChunkScheme {
-        Static, 
-        Dynamic, 
-        HalfVictim
-    };
-    ChunkScheme chunkScheme;
-    uint32_t CHUNK_SIZE;
 public:
     StealingLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
     void generateCommand(bool* needParentLevelLb) override;

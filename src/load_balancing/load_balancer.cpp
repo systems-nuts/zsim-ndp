@@ -19,6 +19,24 @@ LoadBalancer::LoadBalancer(Config& config, uint32_t _level, uint32_t _commId)
     this->STEALER_THRESHOLD = config.get<uint32_t>("sys.pimBridge.loadBalancer.stealerThreshold");
     this->VICTIM_THRESHOLD = config.get<uint32_t>("sys.pimBridge.loadBalancer.victimThreshold");
 
+    std::string scheme = config.get<const char*>("sys.pimBridge.loadBalancer.chunkScheme", "Static");
+    if (scheme == "Static") {
+        this->chunkScheme = ChunkScheme::Static;
+        this->CHUNK_SIZE = config.get<uint32_t>("sys.pimBridge.loadBalancer.chunkSize");
+    } else if (scheme == "Dynamic") {
+        this->chunkScheme = ChunkScheme::Dynamic;
+        this->CHUNK_SIZE = config.get<uint32_t>("sys.pimBridge.loadBalancer.chunkSize");
+    } else if (scheme == "HalfVictim") {
+        this->chunkScheme = ChunkScheme::HalfVictim;
+        this->CHUNK_SIZE = 0;
+    } else {
+        panic("Unsupported scheme for chunk size!");
+    }
+
+    if (DYNAMIC_THRESHOLD && this->chunkScheme == ChunkScheme::Dynamic) {
+        DEBUG_DYNAMIC_LB_CONFIG_O("all dynamic!");
+    }
+
     uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
     this->commands.resize(numBanks);
     this->demand.resize(numBanks);
@@ -68,11 +86,6 @@ void LoadBalancer::reset() {
     this->supplyIdxVec.clear();
     uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
     this->canDemand.assign(numBanks, true);
-    // if(this->level == 1) {
-    //     this->canDemand.assign(numBanks, true);
-    // } else {
-    //     this->canDemand.assign(numBanks, false);
-    // }
     this->demand.assign(numBanks, 0);
     this->supply.assign(numBanks, 0);
     for (auto& c : commands) {
@@ -80,6 +93,16 @@ void LoadBalancer::reset() {
     }
     for (auto& v : assignTable) {
         v.clear();
+    }
+}
+
+void LoadBalancer::setDynamicLbConfig(uint32_t avgSpeed) {
+    if (this->DYNAMIC_THRESHOLD) {
+        this->VICTIM_THRESHOLD = 2 * avgSpeed;
+        this->STEALER_THRESHOLD = avgSpeed;
+    }
+    if (this->chunkScheme == ChunkScheme::Dynamic) {
+        this->CHUNK_SIZE = avgSpeed;
     }
 }
 

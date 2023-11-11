@@ -59,7 +59,10 @@ public:
     void initSiblings(uint32_t sibBegin, uint32_t sibEnd);
 
     virtual uint64_t communicate(uint64_t curCycle) = 0; 
+    virtual uint64_t gather(uint64_t curCycle) { return curCycle; }
+    virtual uint64_t scatter(uint64_t curCycle) { return curCycle; }
     virtual void gatherState() = 0;
+    virtual void gatherTransferState() {}
     virtual bool isEmpty(uint64_t ts = 0); // pass ts = 0 means allEmpty
     void receivePackets(CommModuleBase* srcModule, 
                         uint32_t messageSize, uint64_t readyCycle, 
@@ -175,10 +178,7 @@ private:
     // packet buffer
     std::vector<CommPacketQueue> scatterBuffer;
 
-    // std::vector<uint64_t> childQueueLength;
     std::vector<uint64_t> childTransferSize;
-    // std::vector<uint64_t> childQueueReadyLength;
-    // std::vector<uint64_t> childTopItemLength;
 
     std::vector<uint64_t> bankQueueLength;
     std::vector<uint64_t> bankQueueReadyLength;
@@ -194,9 +194,14 @@ public:
                bool _enableLoadBalance);
     
     uint64_t communicate(uint64_t curCycle) override;
+
+    uint64_t gather(uint64_t curCycle) override;
+    uint64_t scatter(uint64_t curCycle) override;
+
     CommPacket* nextPacket(uint32_t fromLevel, uint32_t fromCommId, 
                            uint32_t sizeLimit) override;
     void gatherState() override; 
+    void gatherTransferState() override; 
     void commandLoadBalance(bool* needParentLevelLb) override;
     void executeLoadBalance(const LbCommand& command, 
         uint32_t targetBankId, std::vector<DataHotness>& outInfo);
@@ -215,8 +220,6 @@ private:
         return (id >= 0 && (uint32_t)id >= this->bankBeginId && 
             (uint32_t)id < this->bankEndId);
     }
-    uint64_t gather(uint64_t curCycle);
-    uint64_t scatter(uint64_t curCycle);
     bool shouldCommandLoadBalance();
 
 public:

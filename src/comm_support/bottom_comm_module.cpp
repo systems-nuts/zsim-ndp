@@ -28,7 +28,7 @@ BottomCommModule::BottomCommModule(uint32_t _level, uint32_t _commId,
 
 void BottomCommModule::gatherState() {
     this->taskUnit->computeExecuteSpeed();
-    this->executeSpeed = this->taskUnit->executeSpeed;
+    this->executeSpeed = this->taskUnit->getExecuteSpeed();
 }
 
 CommPacket* BottomCommModule::nextPacket(uint32_t fromLevel, uint32_t fromCommId, 

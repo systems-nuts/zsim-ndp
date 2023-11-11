@@ -225,9 +225,6 @@ struct GlobSimInfo {
     g_vector<g_vector<CommModuleBase*>> commModules;
     CommModuleManager* commModuleManager;
     CommMapping* commMapping;
-    uint32_t numBanks;
-    uint32_t numRanks;
-    uint32_t numDimms;
     g_vector<MemInterconnectInterface::Endpoint*> toMemEndpoints;
 
     // Load Balance;

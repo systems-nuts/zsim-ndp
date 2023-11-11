@@ -321,7 +321,8 @@ class PageMap : public GlobAlloc {
             }
 
             inline void safeInsertBefore(ChunkStorage::iterator& next, PageRange& e) {
-                auto it = chunk.insert(next /* hint */, std::make_pair<Address, PageRange>(e.pageAddrBegin, e));
+                // auto it = chunk.insert(next /* hint */, std::make_pair<Address, PageRange>(e.pageAddrBegin, e));
+                auto it = chunk.insert(next /* hint */, std::make_pair(e.pageAddrBegin, e));
                 e.pageAddrEnd = e.pageAddrBegin;  // clear the inserted range.
                 assert(it->second.count() > 0);  // not affected
                 if (next != chunk.end()) {

@@ -9,6 +9,7 @@
 // #define DEBUG_SCHED_META 1
 // #define DEBUG_UBUNTU 1
 // # define DEBUG_ADDR_RETURN 1
+// #define DEBUG_DYNAMIC_LB_CONFIG 1
 
 // #define DEBUG_CHECK_CORRECT 1
 
@@ -64,6 +65,12 @@
 #define DEBUG_ADDR_RETURN_O(args...) info(args)
 #else
 #define DEBUG_ADDR_RETURN_O(args...) 
+#endif
+
+#ifdef DEBUG_DYNAMIC_LB_CONFIG
+#define DEBUG_DYNAMIC_LB_CONFIG_O(args...) info(args)
+#else
+#define DEBUG_DYNAMIC_LB_CONFIG_O(args...) 
 #endif
 
 
