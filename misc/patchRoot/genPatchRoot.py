@@ -66,10 +66,10 @@ root = options.dir
 progDir = os.path.dirname(os.path.abspath(__file__)) + "/"
 nnodes = options.nnodes
 
-print "Will produce a tree for %d CPUs/cores with %d NUMA nodes in %s" % (ncpus, nnodes, root)
+print("Will produce a tree for %d CPUs/cores in %s" % (ncpus, root))
 
 if ncpus < 1:
-    print "ERROR: Need >= 1 cpus!"
+    print("ERROR: Need >= 1 cpus!")
     sys.exit(1)
 
 ncpusPerNode = ncpus / nnodes
@@ -78,16 +78,16 @@ if ncpus % nnodes != 0:
     sys.exit(1)
 
 if os.path.exists(root) and not options.force:
-    print "ERROR: Dir already exists, aborting"
+    print("ERROR: Dir already exists, aborting")
     sys.exit(1)
 
 if len(args):
-    print "ERROR: No positional arguments taken, aborting"
+    print("ERROR: No positional arguments taken, aborting")
     sys.exit(1)
 
 cmd("mkdir -p " + root)
 if not os.path.exists(root):
-    print "ERROR: Could not create %s, aborting" % root
+    print("ERROR: Could not create %s, aborting" % root)
     sys.exit(1)
 
 ## /proc
@@ -95,10 +95,9 @@ if not os.path.exists(root):
 # cpuinfo
 cpuinfoTemplate = XTemplate(open(progDir + "cpuinfo.template", "r").read())
 cmd("mkdir -p %s/proc" % root)
-f = open(root + "/proc/cpuinfo", "w")
-for cpu in range(ncpus):
-    print >>f, cpuinfoTemplate.substitute({"CPU" : str(cpu), "NCPUS" : ncpus}),
-f.close()
+with open(root + "/proc/cpuinfo", "w") as f:
+    for cpu in range(ncpus):
+        f.write(cpuinfoTemplate.substitute({"CPU" : str(cpu), "NCPUS" : ncpus}) + "\n")
 
 # stat
 cpuAct = [int(x) for x in "665084 119979939 9019834 399242499 472611 20 159543 0 0 0".split(" ")]
@@ -107,9 +106,8 @@ cpuStat = "cpu  " + " ".join([str(x) for x in totalAct])
 for cpu in range(ncpus):
     cpuStat += ("\ncpu%d " % cpu) + " ".join([str(x) for x in cpuAct])
 statTemplate = XTemplate(open(progDir + "stat.template", "r").read())
-f = open(root + "/proc/stat", "w")
-print >>f, statTemplate.substitute({"CPUSTAT" : cpuStat}),
-f.close()
+with open(root + "/proc/stat", "w") as f:
+    f.write(statTemplate.substitute({"CPUSTAT" : cpuStat}))
 
 # self/status
 cmd("mkdir -p %s/proc/self" % root)
@@ -144,6 +142,8 @@ for cpu in range(ncpus):
     d = cpuDir + "cpu" + str(cpu) + "/"
     td = d + "topology/"
     cmd("mkdir -p " + td)
+    if maxCpus > 255:
+        print("WARN: These many cpus have not been tested, x2APIC systems may be different...")
     cmd("echo %d > %s" % (cpu, td + "core_id"))
     cmd("echo %s > %s" % (cpuList, td + "core_siblings_list"))
     cmd("echo %d > %s" % (cpu, td + "thread_siblings_list"))

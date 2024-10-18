@@ -44,7 +44,7 @@ def sortIncludes(lines, fname):
     ll = [prefix(l) + l.strip() for l in lines if len(l.strip()) > 0]
     sl = [l[1:] for l in sorted(ll)]
     if lines[-1].strip() == "": sl += [""]
-    #print sl
+    #print(sl)
     return sl
 
 for src in srcs:
@@ -53,7 +53,7 @@ for src in srcs:
     f.close()
 
     bName = os.path.basename(src).split(".")[0]
-    print bName
+    print(bName)
 
     lines = [l for l in txt.split("\n")]
 
@@ -70,17 +70,17 @@ for src in srcs:
                 includeBlocks.append((blockStart, i))
                 blockStart = -1
 
-    print src, len(includeBlocks), "blocks"
+    print(src, len(includeBlocks), "blocks")
 
     newIncludes = [(s , e, sortIncludes(lines[s:e], bName)) for (s, e) in includeBlocks]
     for (s , e, ii) in newIncludes:
         # Print?
         if ii == lines[s:e]:
-            print "Block in lines %d-%d matches" % (s, e-1)
+            print("Block in lines %d-%d matches" % (s, e-1))
             continue
         for i in range(s, e):
-            print "%3d: %s%s | %s" % (i, lines[i], " "*(40 - len(lines[i][:39])), ii[i-s] if i-s < len(ii) else "")
-        print ""
+            print("%3d: %s%s | %s" % (i, lines[i], " "*(40 - len(lines[i][:39])), ii[i-s] if i-s < len(ii) else ""))
+        print("")
 
     prevIdx = 0
     newLines = []
@@ -95,4 +95,4 @@ for src in srcs:
         f.write(outTxt)
         f.close()
 
-print "Done!"
+print("Done!")
