@@ -79,7 +79,7 @@ From now on, we assume we are at the `NDP_PROJECT/` folder, which is referred to
         - `cd ../../`
     - Update environment variables:
         - `cd ../` (now at `$/zsim-env/`)
-        - `echo "export PINCRTPATHPATCH=$(pwd)/lib" >> ~/.bashrc`
+        - `echo "export PINCRTPATCHPATH=$(pwd)/lib" >> ~/.bashrc`
         - `echo "export LIBCONFIGPATH=$(pwd)/" >> ~/.bashrc`
         - `echo "export HDF5PATH=$(pwd)/" >> ~/.bashrc`
         - `echo "export MBEDTLSPATH=$(pwd)/" >> ~/.bashrc`
@@ -100,7 +100,7 @@ From now on, we assume we are at the `NDP_PROJECT/` folder, which is referred to
 - `cd zsim`
 - generate patchRoot
     - `mkdir myPatchRoot`
-    - `python ./misc/patchRoot/gen_hetero_patch_root.py ./myPatchRoot/128c128n --bn 128 --bc 128`
+    - `python3 ./misc/patchRoot/gen_hetero_patch_root.py ./myPatchRoot/128c128n --bn 128 --bc 128`
 - run zsim
     - modify the `process0.patchRoot` path in `./test/test_ndp1.cfg` to the path of `./myPatchRoot/128c/128n`
     - `./build/opt/zsim ./test/test_ndp1.cfg`
