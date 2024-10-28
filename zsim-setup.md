@@ -49,7 +49,7 @@ From now on, we assume we are at the `NDP_PROJECT/` folder, which is referred to
         - get the original hdf5 code
             - `wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.12/hdf5-1.12.0/src/hdf5-1.12.0.tar.gz`
             <!-- - `tar -xvf hdf5-1.10.5.tar.gz && mv hdf5-1.10.5/* ./ && rm -rf hdf5-1.10.5/` -->
-            - `tar -xvf hdf5-1.10.5.tar.gz && cd hdf5-1.10.5`
+            - `tar -xvf hdf5-1.12.0.tar.gz && cd hdf5-1.12.0`
         - `../run_configure.sh`
         - `make -j16 && make install`
         - `cd ../../`
@@ -64,9 +64,9 @@ From now on, we assume we are at the `NDP_PROJECT/` folder, which is referred to
     - **zlib**:
         - `cd zlib`
         - get the original zlib code
-            - `wget https://zlib.net/fossils/zlib-1.2.1.tar.gz`
-            - `tar -xvf zlib-1.2.1.tar.gz && cd zlib-1.2.1`
-        - `.../run_configure.sh`
+            - `wget https://zlib.net/fossils/zlib-1.2.13.tar.gz`
+            - `tar -xvf zlib-1.2.13.tar.gz && cd zlib-1.2.13`
+        - `../run_configure.sh`
         - `make && make install`
         - `cd ../../`
     - **mbedtls**:
@@ -77,6 +77,13 @@ From now on, we assume we are at the `NDP_PROJECT/` folder, which is referred to
         - `../run_make.sh -j16`
         - `make install`
         - `cd ../../`
+    - Update environment variables:
+        - `cd ../` (now at `$/zsim-env/`)
+        - `echo "export PINCRTPATHPATCH=$(pwd)/lib" >> ~/.bashrc`
+        - `echo "export LIBCONFIGPATH=$(pwd)/" >> ~/.bashrc`
+        - `echo "export HDF5PATH=$(pwd)/" >> ~/.bashrc`
+        - `echo "export MBEDTLSPATH=$(pwd)/" >> ~/.bashrc`
+        - `source ~/.bashrc`
 
 
 
@@ -93,13 +100,14 @@ From now on, we assume we are at the `NDP_PROJECT/` folder, which is referred to
 - `cd zsim`
 - generate patchRoot
     - `mkdir myPatchRoot`
-    - `python ./misc/patchRoot/gen_hetero_patch_root.py ./myPatchRoot/4c4n --bn 4 --bc 4`
+    - `python ./misc/patchRoot/gen_hetero_patch_root.py ./myPatchRoot/128c128n --bn 128 --bc 128`
 - run zsim
+    - modify the `process0.patchRoot` path in `./test/test_ndp1.cfg` to the path of `./myPatchRoot/128c/128n`
     - `./build/opt/zsim ./test/test_ndp1.cfg`
 
-## Possible Errors and Solutions
+<!-- ## Possible Errors and Solutions
 - **Error**: Undefined reference to `__addvdi3`: 
     - **Solution**: wrong version of hdf5. should use hdf5 1.10.5.
 - **Tip**: Do not include <bits/signum.h> directly; use <signal.h> instead.
 - **Error**: `./build/opt/zsim`: error while loading shared libraries: libm-dynamic.so: cannot open shared object file: No such file or director.
-    - **Solution**: `$/zsim/SConstruct`添加`env["LINKFLAGS"] = "-Wl,--no-as-needed"`
+    - **Solution**: `$/zsim/SConstruct`添加`env["LINKFLAGS"] = "-Wl,--no-as-needed"` -->
