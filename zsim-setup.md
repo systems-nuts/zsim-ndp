@@ -83,7 +83,7 @@ From now on, we assume we are at the `NDP_PROJECT/` folder, which is referred to
 ### Clone and Compile ZSim
 - `git clone git@github.com:CriusT/zsim.git`
 - `cd zsim`
-- `git checkout -b ndp-bank origin/ndp-bank`
+- `git checkout -b ndp origin/ndp`
 - `scons -j16`
 
 ### Running ZSim
