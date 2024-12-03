@@ -17,7 +17,7 @@ class ReserveLbPimBridgeTaskUnitKernel
     : public PimBridgeTaskUnitKernel {
 public:
     MemSketch sketch;
-private:
+protected:
     uint64_t reserveRegionSize;
     std::unordered_map<Address, 
         std::priority_queue<TaskPtr, std::deque<TaskPtr>, cmp>> reserveRegion;
@@ -31,18 +31,30 @@ public:
     uint64_t getReadyTaskQueueSize() override;
     uint64_t getAllTaskQueueSize() override;
 
-     void executeLoadBalanceCommand(
+    void executeLoadBalanceCommand(
         const LbCommand& command, 
         std::vector<DataHotness>& outInfo) override;
         
-    void prepareState() override;
+    void prepareLbState() override;
 
     void exitReserveState(Address lbPageAddr);
-private:
+protected:
     bool shouldReserve(TaskPtr t);
     TaskPtr reservedTaskDequeue();
     void reservedTaskEnqueue(TaskPtr t);
 
+    friend class ReserveLoadBalancer;
+};
+
+class LimitedReserveLbPimBridgeTaskUnitKernel 
+    : public ReserveLbPimBridgeTaskUnitKernel {
+public:
+    LimitedReserveLbPimBridgeTaskUnitKernel(uint32_t _tuId, uint32_t _kernelId, 
+        uint32_t numBucket, uint32_t bucketSize) 
+        : ReserveLbPimBridgeTaskUnitKernel(_tuId, _kernelId, numBucket, bucketSize){}
+    void executeLoadBalanceCommand(
+        const LbCommand& command, 
+        std::vector<DataHotness>& outInfo) override;
     friend class ReserveLoadBalancer;
 };
 

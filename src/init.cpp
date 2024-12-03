@@ -90,7 +90,7 @@
 #include "task_support/task_unit.h"
 #include "task_support/pim_bridge_task_unit.h"
 #include "task_support/task_timing_core.h"
-#include "task_support/cpu_comm_task_unit.h"
+#include "task_support/cpu_task_unit.h"
 #include "comm_support/comm_module.h"
 #include "comm_support/comm_module_manager.h"
 #include "comm_support/comm_mapping.h"
@@ -1337,13 +1337,14 @@ static GatherScheme* buildGatherScheme(Config& config, const std::string& prefix
     GatherScheme* gatherScheme;
     if (gatherTrigger == "Whenever") {
         gatherScheme = new WheneverGather(packetSize);
+    } if (gatherTrigger == "Never") {
+        gatherScheme = new NeverGather(packetSize);
     } else if (gatherTrigger == "Interval") {
         uint32_t interval = config.get<uint32_t>(prefix + "interval");
         gatherScheme = new IntervalGather(packetSize, interval);
     } else if (gatherTrigger == "DynamicInterval") {
         uint32_t interval = config.get<uint32_t>(prefix + "interval");
-        uint32_t safeThreshold = config.get<uint32_t>(prefix + "safeThreshold");
-        gatherScheme = new DynamicIntervalGather(packetSize, interval, safeThreshold);
+        gatherScheme = new DynamicIntervalGather(packetSize, interval);
     } else if (gatherTrigger == "OnDemand") {
         uint32_t threshold = config.get<uint32_t>(prefix + "threshold");
         uint32_t maxInterval = config.get<uint32_t>(prefix + "maxInterval");
@@ -1352,11 +1353,6 @@ static GatherScheme* buildGatherScheme(Config& config, const std::string& prefix
         uint32_t threshold = config.get<uint32_t>(prefix + "threshold");
         uint32_t maxInterval = config.get<uint32_t>(prefix + "maxInterval");
         gatherScheme = new OnDemandOfAllGather(packetSize, threshold, maxInterval);
-    }  else if (gatherTrigger == "DynamicOnDemand") {
-        uint32_t highThreshold = config.get<uint32_t>(prefix + "highThreshold");
-        uint32_t lowThreshold = config.get<uint32_t>(prefix + "lowThreshold");
-        uint32_t maxInterval = config.get<uint32_t>(prefix + "maxInterval");
-        gatherScheme = new DynamicOnDemandGather(packetSize, highThreshold, lowThreshold, maxInterval);
     } else {
         panic("unsupported gather scheme: %s", gatherTrigger.c_str());
     }
@@ -1402,10 +1398,11 @@ static void InitTaskSupport(Config& config) {
         std::stringstream ss; 
         ss << "unit-" << i;
         TaskUnit* cur = nullptr;
-        if (taskUnitType == "PimBridge" || taskUnitType == "ReserveLbPimBridge") {
+        if (taskUnitType == "PimBridge" || taskUnitType == "ReserveLbPimBridge"
+            || taskUnitType == "LimitedReserveLbPimBridge") {
             cur = new PimBridgeTaskUnit(ss.str(), i, zinfo->taskUnitManager, config);
-        } else if(taskUnitType == "CpuComm") {
-            cur = new CpuCommTaskUnit(ss.str(), i, zinfo->taskUnitManager);
+        } else if(taskUnitType == "Cpu") {
+            cur = new CpuTaskUnit(ss.str(), i, zinfo->taskUnitManager);
         } else {
             panic("unsupported task unit type: %s", taskUnitType.c_str());
         }
@@ -1465,6 +1462,9 @@ static void buildCommModules(Config& config) {
                 uint32_t childNum = lastNumModules / numModules;
                 info("child num: %u", childNum);
                 GatherScheme* gatherScheme = buildGatherScheme(config, prefix + "gatherScheme.");
+                if (curLevel == 1 && i == 0) {
+                    zinfo->bankGatherBandwidth = gatherScheme->packetSize;
+                }
                 ScatterScheme* scatterScheme = buildScatterScheme(config, prefix + "scatterScheme.");
                 bool enableLoadBalance = config.get<bool>(prefix + "enableLoadBalance");
                 zinfo->commModules[curLevel][i] = 
@@ -1531,13 +1531,13 @@ static void buildLoadBalancer(Config& config) {
                 lb = new MultiVictimStealingLoadBalancer(config, level, commId);
             } else if (lbType == "TryReserve") {    
                 std::string taskUnitType = config.get<const char*>("sys.taskSupport.taskUnitType");
-                assert(taskUnitType == "ReserveLbPimBridge");
+                // assert(taskUnitType == "ReserveLbPimBridge");
                 lb = new TryReserveLoadBalancer(config, level, commId);
             } else if (lbType == "FastArrive") {    
                 lb = new FastArriveLoadBalancer(config, level, commId);
             }  else if (lbType == "Reserve") {
                 std::string taskUnitType = config.get<const char*>("sys.taskSupport.taskUnitType");
-                assert(taskUnitType == "ReserveLbPimBridge");
+                // assert(taskUnitType == "ReserveLbPimBridge");
                 lb = new ReserveLoadBalancer(config, level, commId);
             } else {
                 panic("Invalid loadBalancer type: %s", lbType.c_str());

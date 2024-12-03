@@ -15,10 +15,6 @@ bool IntervalGather::shouldTrigger() {
 
 bool OnDemandGather::shouldTrigger() {
     for (uint32_t i = commModule->childBeginId; i < commModule->childEndId; ++i) {
-        // if (zinfo->commModules[commModule->level-1][i]
-        //         ->getParentPackets()->getSize() >= this->threshold) {
-        //     return true;
-        // }
         if (commModule->childTransferSize[i-commModule->childBeginId] >= this->threshold) {
             return true;
         }
@@ -33,8 +29,6 @@ bool OnDemandGather::shouldTrigger() {
 bool OnDemandOfAllGather::shouldTrigger() {
     uint64_t allPackets = 0;
     for (uint32_t i = commModule->childBeginId; i < commModule->childEndId; ++i) {
-        // allPackets += zinfo->commModules[commModule->level-1][i]
-        //     ->getParentPackets()->getSize();
         allPackets += commModule->childTransferSize[i-commModule->childBeginId];
         if (allPackets >= this->threshold) {
             return true;
@@ -51,29 +45,19 @@ bool DynamicGather::enoughTransferPacket() {
     uint64_t curTransferSize = 0;
     for (size_t i = commModule->childBeginId; i < commModule->childEndId; ++i) {
         uint64_t curSize = commModule->childTransferSize[i-commModule->childBeginId];
-        curTransferSize += curSize >= this->packetSize ? packetSize : curSize;
+        if (curSize > this->packetSize) {
+            return true;
+        }
+        // curTransferSize += curSize >= this->packetSize ? packetSize : curSize;
     }
-    return curTransferSize >= highBwUtil * bandwidth;
-}
-
-bool DynamicGather::isDangerous() {
-    // TBY LATER TODO
-    return (!isSafe());
-    // uint64_t idleUnit = 0;
-    // for (size_t i = commModule->childBeginId; i < commModule->childEndId; ++i) {
-    //     uint64_t curSize = commModule->childQueueReadyLength[i-commModule->childBeginId];
-    //     if (curSize <= 2) {
-    //         idleUnit += 1;
-    //     }
-    // }
-    // return (idleUnit > 1);
+    return false;
+    // return curTransferSize >= highBwUtil * bandwidth;
 }
 
 bool DynamicGather::isSafe() {
-    // TBY LATER TO CHECK
     for (uint32_t i = 0; i < commModule->bankEndId - commModule->bankBeginId; ++i) {
         uint64_t curSize = commModule->bankQueueReadyLength[i];
-        if (curSize <= safeThreshold) {
+        if (curSize <= zinfo->commModuleManager->getExecuteSpeedPerPhase() * 2) {
             return false;
         }
     }
@@ -86,25 +70,6 @@ bool DynamicIntervalGather::shouldTrigger() {
     }
     return (zinfo->numPhases - commModule->getLastGatherPhase() >= this->interval);
 }
-
-bool DynamicOnDemandGather::shouldTrigger() {
-    // TBY LATER TODO
-    return this->enoughTransferPacket();
-    // if (this->enoughTransferPacket()) {
-    //     return true;
-    // }
-    // uint32_t curThreshold = this->isDangerous() ? lowThreshold : highThreshold;
-    // for (uint32_t i = commModule->childBeginId; i < commModule->childEndId; ++i) {
-    //     if (commModule->childTransferSize[i-commModule->childBeginId] >= curThreshold) {
-    //         return true;
-    //     }
-    // }
-    // if (zinfo->numPhases - commModule->getLastGatherPhase() >= this->maxInterval) {
-    //     return true;
-    // }
-    // return false;
-}
-
 
 bool TaskGenerationTrackGather::shouldTrigger() {
     // Triggered by high bandwidth utilization

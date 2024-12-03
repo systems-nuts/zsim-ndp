@@ -83,8 +83,10 @@ void PimBridgeTaskUnitKernel::executeLoadBalanceCommand(
             } else if (available == -1) {
                 TaskCommPacket* p = new TaskCommPacket(t->timeStamp, curCycle, 0, this->taskUnitId, 1, -1, t, 3);
                 this->commModule->handleOutPacket(p);
-                this->commModule->s_ScheduleOutTasks.atomicInc(1);
                 --curCommand;
+                this->commModule->s_ScheduleOutTasks.atomicInc(1);
+                zinfo->commModuleManager->numSchedTasks.atomicInc(1);
+                    zinfo->commModuleManager->schedTransferSize.atomicInc(t->taskSize);
             } else if (available >= 0) {
                 TaskCommPacket* p = new TaskCommPacket(t->timeStamp, curCycle, 0, this->taskUnitId, 1, -1, t, 2);
                 // DEBUG_LB_O("unit %u sched task out: addr: %lu, sig: %lu", taskUnitId, p->getAddr(), p->getSignature());
@@ -93,8 +95,10 @@ void PimBridgeTaskUnitKernel::executeLoadBalanceCommand(
                     info.insert(std::make_pair(lbPageAddr, 0));
                 }
                 info[lbPageAddr] += 1;
-                this->commModule->s_ScheduleOutTasks.atomicInc(1);
                 --curCommand;
+                this->commModule->s_ScheduleOutTasks.atomicInc(1);
+                zinfo->commModuleManager->numSchedTasks.atomicInc(1);
+                zinfo->commModuleManager->schedTransferSize.atomicInc(t->taskSize);
             } else {
                 panic("invalid available value");
             }
@@ -107,6 +111,7 @@ void PimBridgeTaskUnitKernel::executeLoadBalanceCommand(
         this->commModule->newAddrLend(addr);
         DataLendCommPacket* p = new DataLendCommPacket(this->curTs, curCycle, 0, this->taskUnitId,
             1, -1, addr, zinfo->lbPageSize);
+        zinfo->commModuleManager->schedTransferSize.atomicInc(zinfo->lbPageSize);
         if (this->commModule->toLendMap.count(addr) == 0) {
             this->commModule->toLendMap.insert(std::make_pair(addr, p));
         }
@@ -170,6 +175,11 @@ PimBridgeTaskUnit::PimBridgeTaskUnit(const std::string& _name, uint32_t _tuId,
         uint32_t bucketSize = config.get<uint32_t>("sys.taskSupport.sketchBucketSize");
         this->taskUnit1 = new ReserveLbPimBridgeTaskUnitKernel(_tuId, 1001, numBucket, bucketSize);
         this->taskUnit2 = new ReserveLbPimBridgeTaskUnitKernel(_tuId, 1002, numBucket, bucketSize);
+    } else if (taskUnitType == "LimitedReserveLbPimBridge") {
+        uint32_t numBucket = config.get<uint32_t>("sys.taskSupport.sketchBucketNum");
+        uint32_t bucketSize = config.get<uint32_t>("sys.taskSupport.sketchBucketSize");
+        this->taskUnit1 = new LimitedReserveLbPimBridgeTaskUnitKernel(_tuId, 1001, numBucket, bucketSize);
+        this->taskUnit2 = new LimitedReserveLbPimBridgeTaskUnitKernel(_tuId, 1002, numBucket, bucketSize);
     }
     this->useQ1 = false;
     this->curTaskUnit = this->taskUnit2;

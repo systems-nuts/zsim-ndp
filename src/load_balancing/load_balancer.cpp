@@ -33,10 +33,6 @@ LoadBalancer::LoadBalancer(Config& config, uint32_t _level, uint32_t _commId)
         panic("Unsupported scheme for chunk size!");
     }
 
-    if (DYNAMIC_THRESHOLD && this->chunkScheme == ChunkScheme::Dynamic) {
-        DEBUG_DYNAMIC_LB_CONFIG_O("all dynamic!");
-    }
-
     uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
     this->commands.resize(numBanks);
     this->demand.resize(numBanks);
@@ -49,6 +45,10 @@ LoadBalancer::LoadBalancer(Config& config, uint32_t _level, uint32_t _commId)
 void LoadBalancer::assignOneAddr(Address addr, uint32_t targetBankId) {
     uint32_t curCommId = this->commId;
     uint32_t childLevelCommId = (uint32_t)-1;
+    uint32_t originBankId = zinfo->numaMap->getNodeFromLbPageAddress(addr);
+    if (zinfo->commModules[0][originBankId]->checkAvailable(addr) >= 0) {
+        return;
+    }
     for (uint32_t l = this->level; l >= 1; --l) {
         childLevelCommId = zinfo->commMapping->getCommId(l-1, targetBankId);
         zinfo->commModules[l][curCommId]->newAddrRemap(addr, childLevelCommId, false);
@@ -63,7 +63,9 @@ void LoadBalancer::outputCommand() {
     uint32_t numBanks = commModule->bankEndId - commModule->bankBeginId;
     for (uint32_t i = 0; i < numBanks; ++i) {
         std::string val = commands[i].output();
-        info("bank: %u, commands: %s", i+commModule->bankBeginId, val.c_str());
+        if (val != "None") {
+            info("bank: %u, commands: %s", i+commModule->bankBeginId, val.c_str());
+        }
     }
     info("---end command output---");
 #endif
@@ -88,6 +90,7 @@ void LoadBalancer::reset() {
     this->canDemand.assign(numBanks, true);
     this->demand.assign(numBanks, 0);
     this->supply.assign(numBanks, 0);
+    this->remainTransfer.assign(numBanks, 2 * zinfo->bankGatherBandwidth);
     for (auto& c : commands) {
         c.reset();
     }
@@ -96,13 +99,13 @@ void LoadBalancer::reset() {
     }
 }
 
-void LoadBalancer::setDynamicLbConfig(uint32_t avgSpeed) {
+void LoadBalancer::setDynamicLbConfig() {
     if (this->DYNAMIC_THRESHOLD) {
-        this->VICTIM_THRESHOLD = 2 * avgSpeed;
-        this->STEALER_THRESHOLD = avgSpeed;
+        this->STEALER_THRESHOLD = zinfo->commModuleManager->STEALER_THRESHOLD;
+        this->VICTIM_THRESHOLD = 2 * STEALER_THRESHOLD;        
     }
     if (this->chunkScheme == ChunkScheme::Dynamic) {
-        this->CHUNK_SIZE = avgSpeed;
+        this->CHUNK_SIZE = zinfo->commModuleManager->CHUNK_SIZE;
     }
 }
 

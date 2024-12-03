@@ -37,7 +37,7 @@ public:
         std::vector<pimbridge::DataHotness>& outInfo) {}
 
     // for ReserveBased;
-    virtual void prepareState() {}
+    virtual void prepareLbState() {}
 
     void setCurTs(uint64_t ts) { this->curTs = ts; }
 

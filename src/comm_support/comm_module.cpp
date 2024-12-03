@@ -136,6 +136,11 @@ void CommModule::handleInPacket(CommPacket* packet) {
     } else {
         assert(avail >= 0);
         uint32_t availLoc = (uint32_t)avail;
+        if (availLoc == packet->fromCommId) {
+            // info("comm %s back to from %u packet: type: %u, addr: %lu", 
+            //     this->getName(), availLoc, packet->getInnerType(), packet->getAddr());
+            assert(zinfo->commModules[level-1][availLoc]->checkAvailable(packet->getAddr()) != -1);
+        }
         this->handleToChildPacket(packet, availLoc);
     }
 }
@@ -236,8 +241,10 @@ void CommModule::gatherState() {
         this->bankTransferSize[id] = 
             zinfo->commModules[0][i]->stateTransferRegionSize();
         if (this->level == zinfo->commModules.size()-1) {
-            DEBUG_GATHER_STATE_O("bank %u queueLength %lu readyLength %lu", 
-                i, bankQueueLength[id] ,bankQueueReadyLength[id])
+            if (bankQueueLength[id] != 0) {
+                DEBUG_GATHER_STATE_O("bank %u queueLength %lu readyLength %lu", 
+                    i, bankQueueLength[id],bankQueueReadyLength[id])
+            }
         }
     }
     this->executeSpeed = 0;
@@ -245,8 +252,10 @@ void CommModule::gatherState() {
         CommModuleBase* child = zinfo->commModules[level-1][i];
         this->executeSpeed += child->getExecuteSpeed();
         this->childTransferSize[i - childBeginId] = child->stateTransferRegionSize();
-        DEBUG_GATHER_STATE_O("child %s transferLength %lu", 
-            child->getName(), childTransferSize[i - childBeginId]);
+        if (this->childTransferSize[i - childBeginId]!=0) {
+            DEBUG_GATHER_STATE_O("child %s transferLength %lu", 
+                child->getName(), childTransferSize[i - childBeginId]);
+        }
     }
 }
 

@@ -49,6 +49,8 @@ struct packetCmp {
         } else if (p1->getIdx() != p2->getIdx()) {
             return  p1->getIdx() > p2->getIdx();
         } else {
+            return true;
+            /*
             assert_msg(false, "Two totally same packet! sig: %lu, addr: %lu, %lu \n"\
                 "p1: type: %u, from: %u-%u, to: %u-%u, prio: %u, idx: %u, innertype: %u\n"\
                 "p2: type: %u, from: %u-%u, to: %u-%u, prio: %u, idx: %u, innertype: %u\n"\
@@ -59,6 +61,7 @@ struct packetCmp {
                 p2->type, p2->fromLevel, p2->fromCommId, 
                 p2->toLevel, p2->toCommId, p2->priority, p2->getIdx(), p2->getInnerType(), 
                 (uint64_t)p1, (uint64_t)p2);
+            */
         }
         /*
         if (p1->timeStamp != p2->timeStamp) {

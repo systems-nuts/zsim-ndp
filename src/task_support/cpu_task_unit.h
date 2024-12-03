@@ -4,12 +4,13 @@
 
 namespace task_support {
 
-class CpuCommTaskUnitKernel : public TaskUnitKernel {
-private:
-    std::deque<TaskPtr> taskQueue;
+class CpuTaskUnitKernel : public TaskUnitKernel {
 public:
-    CpuCommTaskUnitKernel(uint32_t _tuId, uint32_t _kernelId);
-    ~CpuCommTaskUnitKernel() {}
+    // static std::deque<TaskPtr> taskQueue;
+    std::deque<TaskPtr> taskQueue;
+
+    CpuTaskUnitKernel(uint32_t _tuId, uint32_t _kernelId);
+    ~CpuTaskUnitKernel() {}
 
     void taskEnqueueKernel(TaskPtr t, int available) override;
     TaskPtr taskDequeueKernel() override;
@@ -19,9 +20,9 @@ public:
 
 };
 
-class CpuCommTaskUnit : public TaskUnit {
+class CpuTaskUnit : public TaskUnit {
 public:
-    CpuCommTaskUnit(const std::string& _name, uint32_t _tuId, TaskUnitManager* _tum);
+    CpuTaskUnit(const std::string& _name, uint32_t _tuId, TaskUnitManager* _tum);
 
     void assignNewTask(TaskPtr t, Hint* hint) override;
 };

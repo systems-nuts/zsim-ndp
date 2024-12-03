@@ -18,8 +18,8 @@ public:
         OnDemand, 
         OnDemandOfAll, 
         DynamicInterval, 
-        DynamicOnDemand, 
-        TaskGenerationTrack
+        TaskGenerationTrack,
+        Never
     };
     Trigger trigger;
     uint32_t packetSize;
@@ -55,6 +55,16 @@ public:
     bool shouldTrigger() override;
 };
 
+class NeverGather : public GatherScheme {
+public:
+    NeverGather(uint32_t _packetSize) 
+        : GatherScheme(Trigger::Never, _packetSize) {}
+
+    bool shouldTrigger() override {
+        return false;
+    }
+};
+
 class OnDemandGather : public GatherScheme {
 public:
     uint32_t threshold;
@@ -76,36 +86,20 @@ public:
 
 class DynamicGather : public GatherScheme {
 public:
-    DynamicGather(Trigger _trigger, uint32_t _packetSize, uint32_t _safeThreshold)
-        : GatherScheme(_trigger, _packetSize), safeThreshold(_safeThreshold) {}
+    DynamicGather(Trigger _trigger, uint32_t _packetSize)
+        : GatherScheme(_trigger, _packetSize) {}
 protected:
     const double highBwUtil = 1.0, midBwUtil = 0.5, lowBwUtil = 0.2;
     uint32_t safeThreshold;
     bool enoughTransferPacket();
-    bool isDangerous();
     bool isSafe();
-};
-
-class DynamicOnDemandGather : public DynamicGather {
-private:
-    uint32_t highThreshold;
-    uint32_t lowThreshold;
-    const uint32_t maxInterval;
-public:
-    DynamicOnDemandGather(uint32_t _packetSize, uint32_t _highThreshold, 
-        uint32_t _lowThreshold, uint32_t _maxInterval)
-        : DynamicGather(Trigger::DynamicOnDemand, _packetSize, _lowThreshold), 
-          highThreshold(_highThreshold), lowThreshold(_lowThreshold), 
-          maxInterval(_maxInterval) {}
-    
-    bool shouldTrigger() override;
 };
 
 class DynamicIntervalGather : public DynamicGather {
 public:
     uint32_t interval;
-    DynamicIntervalGather(uint32_t _packetSize, uint32_t _initialInterval, uint32_t _safeThrehold) 
-        : DynamicGather(Trigger::DynamicInterval, _packetSize, _safeThrehold), 
+    DynamicIntervalGather(uint32_t _packetSize, uint32_t _initialInterval) 
+        : DynamicGather(Trigger::DynamicInterval, _packetSize), 
           interval(_initialInterval) {}
 
     bool shouldTrigger() override;

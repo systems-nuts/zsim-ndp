@@ -33,6 +33,10 @@ public:
     void executeLoadBalanceCommand(
         const LbCommand& command, 
         std::vector<DataHotness>& outInfo) override;
+    
+    void setCommModule(BottomCommModule* _commModule) {
+        this->commModule = _commModule;
+    }
 
 protected:
     void newNotReadyTask(TaskPtr t);

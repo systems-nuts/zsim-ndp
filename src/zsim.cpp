@@ -492,13 +492,21 @@ static bool allCommModuleEmpty(bool output, bool forCurTs) {
     }
     uint32_t targetTs = forCurTs ? zinfo->taskUnitManager->getAllowedTimeStamp() : 0;
     // uint32_t targetTs = 0;
+    // bool allEmpty = true;
     for (auto l : zinfo->commModules) {
         for (auto c : l) {
             if (!c->isEmpty(targetTs)) { 
                 if (output) {
-                    info("commModule %s not empty, targetTs: %u", c->getName(), targetTs);
+                    // info("commModule %s not empty, targetTs: %u",c->getName(), targetTs);
+                    info("commModule %s not empty, targetTs: %u, remainSize: %lu, curPhase: %lu", 
+                        c->getName(), targetTs, c->stateTransferRegionSize(), zinfo->numPhases);
+                    // if (c->getLevel() == 0) {
+                    //     BottomCommModule* bc = ((BottomCommModule*)c);
+                    //     info("remain task size: %u, ready")
+                    // }
                 }
                 return false; 
+                // allEmpty = false;
             }
         }
     }
@@ -553,20 +561,19 @@ VOID EndOfPhaseActions() {
     if (!zinfo->IS_PIMBRIDGE) {
         return;
     }
-
     if (zinfo->BEGIN_TASK_EXECUTION && !zinfo->END_TASK_EXECUTION) {
         uint64_t curCycle = zinfo->globPhaseCycles + zinfo->phaseLength;
         DEBUG_PHASE_O("--- new phase ---");
         zinfo->commModuleManager->clearStaleToSteal();
-        for (auto tu : zinfo->taskUnits) {
-            tu->getCurUnit()->prepareState();
-        }
         for (auto l : zinfo->commModules) {
             for (auto c : l) {
                 c->gatherState();
             }
         }
         if (zinfo->ENABLE_LOAD_BALANCE) {
+            for (auto tu : zinfo->taskUnits) {
+                tu->getCurUnit()->prepareLbState();
+            }
             zinfo->commModuleManager->setDynamicLbConfig();
             if (zinfo->HIERARCHY_AWARE_LOAD_BALANCE) {
                 for (size_t i = 1; i < zinfo->commModules.size(); ++i) {
@@ -604,7 +611,6 @@ VOID EndOfPhaseActions() {
                 ((BottomCommModule*)c)->pushDataLendPackets();
             }
         }
-        
         zinfo->CAN_SIM_COMM_EVENT = true;
         for (uint32_t i = 0; i < zinfo->numCores; ++i) {
             if (!zinfo->cores[i]->canSimEvent()) {
@@ -615,11 +621,17 @@ VOID EndOfPhaseActions() {
         }
         for (auto l : zinfo->commModules) {
             for (auto c : l) {
-                // c->gather(curCycle);
-                // c->scatter(curCycle);
-                c->communicate(curCycle);
+                c->gather(curCycle);
+                c->scatter(curCycle);
+                // c->communicate(curCycle);
             }
         }
+        if (zinfo->ENABLE_LOAD_BALANCE) {
+            for (auto c : zinfo->commModules[0]) {
+                ((BottomCommModule*)c)->pushDataLendPackets();
+            }
+        }
+
     }
 }
 
@@ -1354,8 +1366,11 @@ VOID HandleTaskDequeueMagicOp(THREADID tid, ADDRINT op, CONTEXT* ctxt) {
     
     if (taskPtr->isEndTask) {
         bool finish = zinfo->taskUnitManager->allFinish();
+        if(finish) {
+            zinfo->beginDebugOutput = true;
+        }
         bool emptyComm = allCommModuleEmpty(finish, false);
-        if (finish && emptyComm) { 
+        if (finish && emptyComm) {
             endTaskExecution(tid, ctxt, curThread);
             return;
         } else {

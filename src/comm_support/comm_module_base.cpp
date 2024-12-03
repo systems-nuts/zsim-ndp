@@ -70,9 +70,9 @@ void CommModuleBase::receivePackets(CommModuleBase* src,
             break;
         }
         // if (zinfo->beginDebugOutput) {
-        DEBUG_SCHED_META_O("receivePacket: %s type %u, fromLevel: %u, fromComm: %u, toLevel: %u, toComm: %d, priority: %u, sig: %lu, addr: %lu, idx: %u", 
-            this->getName(), p->type, p->fromLevel, p->fromCommId, p->toLevel, p->toCommId, 
-            p->priority, p->getSignature(), p->getAddr(), p->getIdx());
+        // DEBUG_SCHED_META_O("receivePacket: %s type %u, fromLevel: %u, fromComm: %u, toLevel: %u, toComm: %d, priority: %u, sig: %lu, addr: %lu, idx: %u", 
+        //     this->getName(), p->type, p->fromLevel, p->fromCommId, p->toLevel, p->toCommId, 
+        //     p->priority, p->getSignature(), p->getAddr(), p->getIdx());
         // }
         p->readyCycle = readyCycle;
         totalSize += p->getSize();
@@ -116,8 +116,8 @@ void CommModuleBase::newAddrLend(Address lbPageAddr) {
     Address pageAddr = zinfo->numaMap->getPageAddressFromLbPageAddress(lbPageAddr);
     uint32_t nodeId = zinfo->numaMap->getNodeOfPage(pageAddr);
     DEBUG_SCHED_META_O("module %s lend data: %lu, nodeId: %u", this->getName(), lbPageAddr, nodeId);
-    assert(!addrRemapTable->getAddrLend(lbPageAddr) && 
-        !addrRemapTable->getAddrBorrowMidState(lbPageAddr));
+    assert_msg(!addrRemapTable->getAddrLend(lbPageAddr), "addr: %lu", lbPageAddr); 
+    assert_msg(!addrRemapTable->getAddrBorrowMidState(lbPageAddr), "addr: %lu", lbPageAddr);
     addrRemapTable->setChildRemap(lbPageAddr, -1);
     if (isChild(nodeId)) {
         addrRemapTable->setAddrLend(lbPageAddr, true);
@@ -142,7 +142,8 @@ void CommModuleBase::newAddrRemap(Address lbPageAddr, uint32_t dst, bool isMidSt
             addrRemapTable->setAddrLend(lbPageAddr, false);
         } else {
             assert(!addrRemapTable->getAddrLend(lbPageAddr));
-            assert(addrRemapTable->getChildRemap(lbPageAddr) == -1);
+            assert_msg(addrRemapTable->getChildRemap(lbPageAddr) == -1, "addr: %lu res: %d", 
+                lbPageAddr, addrRemapTable->getChildRemap(lbPageAddr));
             if (isMidState) {
                 addrRemapTable->setAddrBorrowMidState(lbPageAddr, 0);
             } else {

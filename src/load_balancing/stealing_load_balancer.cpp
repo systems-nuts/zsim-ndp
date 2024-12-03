@@ -66,7 +66,10 @@ bool StealingLoadBalancer::genSupply(uint32_t bankIdx) {
     // TBY TODO: generate supply according to speed.
     if (commModule->bankQueueReadyLength[bankIdx] <= VICTIM_THRESHOLD) {
         return false;
+    } else if (commModule->bankTransferSize[bankIdx] >= 2 * zinfo->bankGatherBandwidth){
+        return false; 
     } else {
+        this->remainTransfer[bankIdx] = 2 * zinfo->bankGatherBandwidth - commModule->bankTransferSize[bankIdx];
         this->supply[bankIdx] =  commModule->bankQueueReadyLength[bankIdx] - VICTIM_THRESHOLD;
         this->supplyIdxVec.push_back(bankIdx);
         return true;

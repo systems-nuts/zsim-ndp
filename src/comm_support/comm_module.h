@@ -111,6 +111,7 @@ protected:
     // >= 0: available location
     // -1: not available
     // -2: being transferred
+public:
     virtual int checkAvailable(Address lbPageAddr) = 0;
 
 public:
@@ -151,7 +152,9 @@ public:
 private:
     void handleInPacket(CommPacket* packet) override;
     // 1 for available
+public:
     int checkAvailable(Address lbPageAddr) override;
+private:   
     bool isChild(int id) override {
         return ((uint32_t)id == this->commId);
     }
@@ -161,7 +164,7 @@ public:
     friend class PimBridgeTaskUnitKernel;
     friend class PimBridgeTaskUnit;
     friend class ReserveLbPimBridgeTaskUnitKernel;
-    friend class ReserveLbPimBridgeTaskUnit;
+    friend class LimitedReserveLbPimBridgeTaskUnitKernel;
 };
 
 class CommModule : public CommModuleBase {
@@ -215,7 +218,9 @@ public:
 private: 
     void handleInPacket(CommPacket* packet) override;
     void handleToChildPacket(CommPacket* packet, uint32_t childCommId);
+public:
     int checkAvailable(Address lbPageAddr) override;
+private:
     bool isChild(int id) override {
         return (id >= 0 && (uint32_t)id >= this->bankBeginId && 
             (uint32_t)id < this->bankEndId);
@@ -233,8 +238,8 @@ private:
     friend class pimbridge::OnDemandGather;
     friend class pimbridge::OnDemandOfAllGather;
     friend class pimbridge::WheneverGather;
+    friend class pimbridge::NeverGather;
     friend class pimbridge::DynamicGather;
-    friend class pimbridge::DynamicOnDemandGather;
     friend class pimbridge::DynamicIntervalGather;
     friend class pimbridge::TaskGenerationTrackGather;
 

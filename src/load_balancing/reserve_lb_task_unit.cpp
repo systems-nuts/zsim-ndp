@@ -84,7 +84,7 @@ uint64_t ReserveLbPimBridgeTaskUnitKernel::getAllTaskQueueSize() {
         + this->notReadyTaskNumber + commModule->toStealSize;
 }
 
-void ReserveLbPimBridgeTaskUnitKernel::prepareState() {
+void ReserveLbPimBridgeTaskUnitKernel::prepareLbState() {
     this->sketch.prepareForAccess();
 }
 
@@ -95,9 +95,10 @@ void ReserveLbPimBridgeTaskUnitKernel::executeLoadBalanceCommand(
     std::unordered_map<Address, uint32_t> info;
     info.clear();
     bool noHot = false;
+    bool noAvailSched = false;
     for (auto curCommand : command.get()) {
         while(curCommand > 0 && this->getReadyTaskQueueSize() > 0) {
-            DataHotness item = this->sketch.fetchHotItem();
+            DataHotness item = this->sketch.fetchHotItem(this->getReadyTaskQueueSize() / 2);
             if (!noHot && item.cnt == 0) {
                 info("no hot data!");
                 noHot = true;
@@ -122,14 +123,20 @@ void ReserveLbPimBridgeTaskUnitKernel::executeLoadBalanceCommand(
                     this->reserveRegionSize--;
                     TaskCommPacket* p = new TaskCommPacket(t->timeStamp, curCycle, 0, this->taskUnitId, 1, -1, t, 2);
                     this->commModule->handleOutPacket(p);
-                    this->commModule->s_ScheduleOutTasks.atomicInc(1);
                     if (curCommand > 0) {
                         curCommand--;
                     }
+                    this->commModule->s_ScheduleOutTasks.atomicInc(1);
+                    zinfo->commModuleManager->numSchedTasks.atomicInc(1);
+                    zinfo->commModuleManager->schedTransferSize.atomicInc(t->taskSize);
                 }
                 reserveRegion.erase(item.addr);
             } else {
-                assert(!this->taskQueue.empty());
+                // assert(!this->taskQueue.empty());
+                if (this->taskQueue.empty()) {
+                    noAvailSched = true;
+                    break;
+                }
                 TaskPtr t = this->taskQueue.top();
                 assert(t->timeStamp == this->curTs);
                 this->taskQueue.pop();
@@ -140,8 +147,10 @@ void ReserveLbPimBridgeTaskUnitKernel::executeLoadBalanceCommand(
                 } else if (available == -1) {
                     TaskCommPacket* p = new TaskCommPacket(t->timeStamp, curCycle, 0, this->taskUnitId, 1, -1, t, 3);
                     this->commModule->handleOutPacket(p);
-                    this->commModule->s_ScheduleOutTasks.atomicInc(1);
                     --curCommand;
+                    this->commModule->s_ScheduleOutTasks.atomicInc(1);
+                    zinfo->commModuleManager->numSchedTasks.atomicInc(1);
+                    zinfo->commModuleManager->schedTransferSize.atomicInc(t->taskSize);
                 } else if (available >= 0) {
                     TaskCommPacket* p = new TaskCommPacket(t->timeStamp, curCycle, 0, this->taskUnitId, 1, -1, t, 2);
                     this->commModule->handleOutPacket(p);
@@ -149,11 +158,16 @@ void ReserveLbPimBridgeTaskUnitKernel::executeLoadBalanceCommand(
                         info.insert(std::make_pair(lbPageAddr, 0));
                     }
                     info[lbPageAddr] += 1;
-                    this->commModule->s_ScheduleOutTasks.atomicInc(1);
                     --curCommand;
+                    this->commModule->s_ScheduleOutTasks.atomicInc(1);
+                    zinfo->commModuleManager->numSchedTasks.atomicInc(1);
+                    zinfo->commModuleManager->schedTransferSize.atomicInc(t->taskSize);
                 } else {
                     panic("invalid available value");
                 }
+            }
+            if (noAvailSched) {
+                break;
             }
         }
     }
@@ -164,6 +178,7 @@ void ReserveLbPimBridgeTaskUnitKernel::executeLoadBalanceCommand(
         this->commModule->newAddrLend(addr);
         DataLendCommPacket* p = new DataLendCommPacket(this->curTs, curCycle, 0, this->taskUnitId,
             1, -1, addr, zinfo->lbPageSize);
+        zinfo->commModuleManager->schedTransferSize.atomicInc(zinfo->lbPageSize);
         if (this->commModule->toLendMap.count(addr) == 0) {
             this->commModule->toLendMap.insert(std::make_pair(addr, p));
         }
@@ -220,4 +235,106 @@ void ReserveLbPimBridgeTaskUnitKernel::exitReserveState(Address lbPageAddr) {
         this->taskQueue.push(t);
     }
     this->reserveRegion.erase(lbPageAddr);
+}
+
+
+void LimitedReserveLbPimBridgeTaskUnitKernel::executeLoadBalanceCommand(
+        const LbCommand& command,  
+        std::vector<DataHotness>& outInfo) {
+    uint64_t curCycle = zinfo->cores[taskUnitId]->getCurCycle();
+    std::unordered_map<Address, uint32_t> info;
+    info.clear();
+    bool noHot = false;
+    bool noAvailSched = false;
+    for (auto curCommand : command.get()) {
+        while(curCommand > 0 && this->getReadyTaskQueueSize() > 0) {
+            DataHotness item = this->sketch.fetchHotItem(this->getReadyTaskQueueSize() / 2);
+            if (!noHot && item.cnt == 0) {
+                info("no hot data!");
+                noHot = true;
+                // break;
+            }
+            if (!noHot) {
+                assert(reserveRegion.count(item.addr) != 0 && !reserveRegion[item.addr].empty());
+                auto& q = reserveRegion[item.addr];
+                int available = this->commModule->checkAvailable(item.addr);
+                if (available >= 0) {
+                    // because of different timestamps
+                    info.insert(std::make_pair(item.addr, q.size()));
+                }
+                while(!q.empty()) {
+                    TaskPtr t = q.top();
+                    assert(t->timeStamp == this->curTs);
+                    q.pop();
+                    #ifdef DEBUG_CHECK_CORRECT
+                        Address lbPageAddr = zinfo->numaMap->getLbPageAddress(t->hint->dataPtr);
+                        assert(lbPageAddr == item.addr);
+                    #endif
+                    this->reserveRegionSize--;
+                    TaskCommPacket* p = new TaskCommPacket(t->timeStamp, curCycle, 0, this->taskUnitId, 1, -1, t, 2);
+                    this->commModule->handleOutPacket(p);
+                    if (curCommand > 0) {
+                        curCommand--;
+                    }
+                    this->commModule->s_ScheduleOutTasks.atomicInc(1);
+                    zinfo->commModuleManager->numSchedTasks.atomicInc(1);
+                    zinfo->commModuleManager->schedTransferSize.atomicInc(t->taskSize);
+                }
+                reserveRegion.erase(item.addr);
+            } else {
+                // assert(!this->taskQueue.empty());
+                if (this->taskQueue.empty()) {
+                    noAvailSched = true;
+                    break;
+                }
+                TaskPtr t = this->taskQueue.top();
+                assert(t->timeStamp == this->curTs);
+                this->taskQueue.pop();
+                Address lbPageAddr = zinfo->numaMap->getLbPageAddress(t->hint->dataPtr);
+                int available = this->commModule->checkAvailable(lbPageAddr);
+                if (available == -2) {
+                    newNotReadyTask(t);
+                } else if (available == -1) {
+                    TaskCommPacket* p = new TaskCommPacket(t->timeStamp, curCycle, 0, this->taskUnitId, 1, -1, t, 3);
+                    this->commModule->handleOutPacket(p);
+                    --curCommand;
+                    this->commModule->s_ScheduleOutTasks.atomicInc(1);
+                    zinfo->commModuleManager->numSchedTasks.atomicInc(1);
+                    zinfo->commModuleManager->schedTransferSize.atomicInc(t->taskSize);
+                } else if (available >= 0) {
+                    TaskCommPacket* p = new TaskCommPacket(t->timeStamp, curCycle, 0, this->taskUnitId, 1, -1, t, 2);
+                    this->commModule->handleOutPacket(p);
+                    if (info.count(lbPageAddr) == 0) {
+                        info.insert(std::make_pair(lbPageAddr, 0));
+                    }
+                    info[lbPageAddr] += 1;
+                    --curCommand;
+                    this->commModule->s_ScheduleOutTasks.atomicInc(1);
+                    zinfo->commModuleManager->numSchedTasks.atomicInc(1);
+                    zinfo->commModuleManager->schedTransferSize.atomicInc(t->taskSize);
+                } else {
+                    panic("invalid available value");
+                }
+            }
+            if (noAvailSched) {
+                break;
+            }
+        }
+    }
+    for (auto it = info.begin(); it != info.end(); ++it) {
+        Address addr = it->first;
+        DEBUG_LB_O("unit %u execute lb: addr: %lu, cnt: %u", taskUnitId, addr, it->second);
+        outInfo.push_back(DataHotness(addr, this->taskUnitId, it->second));
+        this->commModule->newAddrLend(addr);
+        DataLendCommPacket* p = new DataLendCommPacket(this->curTs, curCycle, 0, this->taskUnitId,
+            1, -1, addr, zinfo->lbPageSize);
+        zinfo->commModuleManager->schedTransferSize.atomicInc(zinfo->lbPageSize);
+        if (this->commModule->toLendMap.count(addr) == 0) {
+            this->commModule->toLendMap.insert(std::make_pair(addr, p));
+        }
+        // this->commModule->handleOutPacket(p);
+    }
+    if (!zinfo->taskUnits[taskUnitId]->getHasBeenVictim()) {
+        zinfo->taskUnits[taskUnitId]->setHasBeenVictim(true);
+    }
 }

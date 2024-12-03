@@ -14,6 +14,16 @@ CommModuleManager::CommModuleManager(Config& config) {
     this->lastReady.resize(size);
     this->lastToSteal.resize(size);
     this->CLEAN_STEAL_INTERVAL = config.get<uint32_t>("sys.pimBridge.cleanStealInterval", 0);
+
+    numSchedTasks.init("numScheTasks", "number of scheduled out tasks in all units");
+    numSchedTasks.reset();
+    schedTransferSize.init("schedTransferSize", "schedTransferSize");
+    schedTransferSize.reset();
+
+    CHUNK_SIZE = 0;
+    STEALER_THRESHOLD = 0; 
+    executeSpeedPerPhase = 0;
+    transferSizePerTask = 0;
 }
 
 void CommModuleManager::clearStaleToSteal() {
@@ -100,18 +110,41 @@ void CommModuleManager::returnReplacedAddrFromLevel(
 }
 
 void CommModuleManager::setDynamicLbConfig() {
+    this->computeExecuteSpeed();
+    this->computeTransferRatio();
+    CHUNK_SIZE = std::max((uint32_t)10, executeSpeedPerPhase);
+    uint32_t timeToTransfer = (this->transferSizePerTask * CHUNK_SIZE 
+        + zinfo->bankGatherBandwidth - 1) / zinfo->bankGatherBandwidth;
+    STEALER_THRESHOLD = std::max((uint32_t)10, timeToTransfer * executeSpeedPerPhase);
+
+    DEBUG_DYNAMIC_LB_CONFIG_O("Speed: %u, TranferRatio: %u, time: %u,  victim: %u, chunk: %u", 
+        this->executeSpeedPerPhase, 
+        this->transferSizePerTask, 
+        timeToTransfer,
+        STEALER_THRESHOLD, CHUNK_SIZE);
+
+    for (size_t i = 1; i < zinfo->commModules.size(); ++i) {
+        for (auto c : zinfo->commModules[i]) {
+            c->getLoadBalancer()->setDynamicLbConfig();
+        }
+    }
+}
+
+void CommModuleManager::computeExecuteSpeed() {
     double speed = 0;
     for (size_t i = 0; i < zinfo->taskUnits.size(); ++i) {
         double perSpeed = zinfo->taskUnits[i]->getExecuteSpeed();
         speed = speed < perSpeed ? perSpeed : speed;
     }
-    // speed = 3.2768 * speed * 10000;
-    speed = speed * 2048;
-    uint32_t finalSpeed = (uint32_t)speed;
-    DEBUG_DYNAMIC_LB_CONFIG_O("Speed: %u", finalSpeed);
-    for (size_t i = 1; i < zinfo->commModules.size(); ++i) {
-        for (auto c : zinfo->commModules[i]) {
-            c->getLoadBalancer()->setDynamicLbConfig(finalSpeed);
-        }
+    speed *= zinfo->phaseLength;
+    this->executeSpeedPerPhase = (uint32_t)speed;
+}
+
+void CommModuleManager::computeTransferRatio() {
+    DEBUG_DYNAMIC_LB_CONFIG_O("Transfer: %lu, sched: %lu", schedTransferSize.get(), numSchedTasks.get());
+    if (schedTransferSize.get() == 0 || numSchedTasks.get() == 0) {
+        this->transferSizePerTask = 20;
+        return;
     }
+    this->transferSizePerTask = (double)(schedTransferSize.get()) / (numSchedTasks.get());
 }

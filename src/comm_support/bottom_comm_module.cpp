@@ -57,23 +57,16 @@ void BottomCommModule::executeLoadBalance(
     this->taskUnit->getCurUnit()->executeLoadBalanceCommand(command, outInfo);
 }
 
-
-// uint64_t BottomCommModule::stateAllLength() {
-//     return this->taskUnit->getCurUnit()->getReadyTaskQueueSize() + 
-//         this->toStealSize + 
-//         ((PimBridgeTaskUnitKernel*)this->taskUnit->getCurUnit())->notReadyTaskNumber;
-// }
-
 void BottomCommModule::handleInPacket(CommPacket* packet) {
     assert_msg(packet->fromLevel == 1 && packet->toLevel == 0, "fromLevel: %u, toLevel: %u", 
         packet->fromLevel, packet->toLevel);
     assert(packet->toCommId >= 0 && (uint32_t)packet->toCommId == this->commId);
-    DEBUG_SCHED_META_O("module %s handle in packet type: %u addr: %lu sig: %lu, idx: %u", 
-        this->getName(), packet->type, packet->getAddr(), 
-        packet->getSignature(), packet->getIdx());
+    // DEBUG_SCHED_META_O("module %s handle in packet type: %u addr: %lu sig: %lu, idx: %u", 
+    //     this->getName(), packet->type, packet->getAddr(), 
+    //     packet->getSignature(), packet->getIdx());
     if (packet->getInnerType() == CommPacket::PacketType::DataLend) {
         int avail = this->checkAvailable(packet->getAddr());
-        if (avail == -1) { 
+        if (avail == -1 || avail == 0) { 
             delete packet;
             s_RecvPackets.atomicInc(1);
             return;

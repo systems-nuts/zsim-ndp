@@ -90,6 +90,10 @@ class NUMAMap : public GlobAlloc {
             return (lbPageAddr >> (pageBits - lbPageBits));
         }
 
+        inline Address getNodeFromLbPageAddress(const Address lbPageAddr) {
+            return this->getNodeOfPage(this->getPageAddressFromLbPageAddress(lbPageAddr));
+        }
+
         inline Address getLbPageAddress(const Address addr) {
             return (addr >> lbPageBits) | (procMask >> (lbPageBits - lineBits));
         }

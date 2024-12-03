@@ -75,6 +75,7 @@ protected:
 
     std::vector<uint32_t> demand;
     std::vector<uint32_t> supply;
+    std::vector<uint32_t> remainTransfer;
     std::vector<uint32_t> demandIdxVec; // all demands, each is a pair<bankChildId, demandVal>
     std::vector<uint32_t> supplyIdxVec; // all supplies, each is a pair<bankChildId, supplyVal>
 
@@ -83,7 +84,7 @@ public:
     LoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
     virtual void generateCommand(bool* needParentLevelLb) = 0;
     virtual void assignLbTarget(const std::vector<DataHotness>& outInfo) = 0;
-    void setDynamicLbConfig(uint32_t avgSpeed);
+    void setDynamicLbConfig();
 protected:
     void assignOneAddr(Address addr, uint32_t target);
     void reset();
@@ -135,23 +136,8 @@ public:
 
 class FastArriveLoadBalancer : public StealingLoadBalancer {
 private:
-    class TransferLength {
-    public:
-        uint32_t bankIdx;
-        uint64_t transferLength;
-        TransferLength(uint32_t _bankIdx, uint64_t _transferLength)
-            : bankIdx(_bankIdx), transferLength(_transferLength) {}
-    };
-    struct cmp {
-        bool operator()(const TransferLength& t1, const TransferLength& t2) const {
-            return t1.transferLength > t2.transferLength;
-        }
-    };
-    std::priority_queue<TransferLength, std::deque<TransferLength>, cmp> transferLengthQueue;
 public:
     FastArriveLoadBalancer(Config& config, uint32_t _level, uint32_t _commId);
-    void generateCommandOld(bool* needParentLevelLb);
-    void generateCommand(bool* needParentLevelLb) override;
 protected:
     bool genSupply(uint32_t bankIdx) override; 
 };

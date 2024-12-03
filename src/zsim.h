@@ -231,6 +231,7 @@ struct GlobSimInfo {
     bool ENABLE_LOAD_BALANCE;
     bool HIERARCHY_AWARE_LOAD_BALANCE;
     uint32_t lbPageSize;
+    uint32_t bankGatherBandwidth;
 
     // Profiling
     GatherScatterProfiler* gatherProfiler;
