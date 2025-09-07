@@ -62,6 +62,96 @@ def get_list(vals):
     return ','.join(['-'.join([str(v) for v in r]) for r in rnglst])
 
 
+def parse_distance_file(distance_file, expected_nodes):
+    """
+    Parse a distance matrix file and return distance matrix.
+    Similar to what a `numactl --hardware` would give.
+    Expected format:
+    node   0   1   2   3
+      0:  10  16  16  16
+      1:  16  10  16  16
+      2:  16  16  10  16
+      3:  16  16  16  10
+    """
+    if not os.path.exists(distance_file):
+        raise ValueError('Distance file {} does not exist'.format(distance_file))
+
+    with open(distance_file, 'r') as f:
+        lines = [line.strip() for line in f.readlines() if line.strip()]
+
+    if not lines:
+        raise ValueError('Distance file {} is empty'.format(distance_file))
+
+    # Parse header line
+    header = lines[0].split()
+    if header[0] != 'node':
+        raise ValueError('Distance file must start with "node" header')
+
+    # Extract node numbers from header
+    try:
+        header_nodes = [int(x) for x in header[1:]]
+    except ValueError:
+        raise ValueError('Invalid node numbers in header: {}'.format(' '.join(header[1:])))
+
+    # Check if header nodes match expected topology
+    expected_node_list = list(range(expected_nodes))
+    if sorted(header_nodes) != expected_node_list:
+        raise ValueError('Distance file nodes {} do not match expected nodes {}'.format(
+            sorted(header_nodes), expected_node_list))
+
+    # Parse distance matrix
+    distance_matrix = {}
+    for line in lines[1:]:
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+
+        # Extract node ID (remove trailing colon if present)
+        node_str = parts[0].rstrip(':')
+        try:
+            node_id = int(node_str)
+        except ValueError:
+            raise ValueError('Invalid node ID: {}'.format(node_str))
+
+        # Extract distances
+        try:
+            distances = [int(x) for x in parts[1:]]
+        except ValueError:
+            raise ValueError('Invalid distance values in line: {}'.format(line))
+
+        if len(distances) != len(header_nodes):
+            raise ValueError('Node {} has {} distances but header has {} nodes'.format(
+                node_id, len(distances), len(header_nodes)))
+
+        # Map distances according to header order
+        distance_matrix[node_id] = {}
+        for i, target_node in enumerate(header_nodes):
+            distance_matrix[node_id][target_node] = distances[i]
+
+    # Verify all expected nodes are present
+    for node in expected_node_list:
+        if node not in distance_matrix:
+            raise ValueError('Missing distance data for node {}'.format(node))
+
+    # Verify matrix is symmetric and the diagonal makes sense
+    for i in expected_node_list:
+        for j in expected_node_list:
+            if j not in distance_matrix[i]:
+                raise ValueError('Missing distance from node {} to node {}'.format(i, j))
+
+            # Check symmetry
+            if distance_matrix[i][j] != distance_matrix[j][i]:
+                raise ValueError('Distance matrix is not symmetric: distance({},{}) = {} != distance({},{}) = {}'.format(
+                    i, j, distance_matrix[i][j], j, i, distance_matrix[j][i]))
+
+            # Check diagonal (local distance should make sense)
+            if i == j and distance_matrix[i][j] != 10:
+                sys.stderr.write('WARN: Local distance for node {} is {} (expected 10)\n'.format(
+                    i, distance_matrix[i][j]))
+
+    return distance_matrix
+
+
 def main(args):
     ''' Main. '''
     # pylint: disable=too-many-branches
@@ -72,6 +162,7 @@ def main(args):
     nmems_l = args.ln
     root = os.path.abspath(args.dir)
     share_nodes = args.share_nodes
+    distance_file = args.distance_file
 
     ## Value check.
 
@@ -106,6 +197,11 @@ def main(args):
         nmems = nmems_b + nmems_l
         mem1st_b, mem1st_l = 0, nmems_b
 
+    # Parse distance matrix if provided
+    distance_matrix = None
+    if distance_file:
+        distance_matrix = parse_distance_file(distance_file, nmems)
+
     c2m = [None for _ in range(ncpus)]
     m2cs = [[] for _ in range(nmems)]
     if nmems < 1:
@@ -137,6 +233,8 @@ def main(args):
           'with {} {}/{} NUMA memory nodes in {}'
           .format(ncpus_b, ncpus_l, 'shared' if share_nodes else 'separate',
                   nmems_b, nmems_l, root))
+    if distance_matrix:
+        print('Using custom distance matrix from {}'.format(distance_file))
 
     ## /proc
 
@@ -248,7 +346,11 @@ def main(args):
             fh.write(meminfo_temp.substitute({'NODE': mem}))
         with create_file(nndir, 'distance') as fh:
             for mem2 in range(nmems):
-                fh.write('10  ' if mem2 == mem else '20  ')
+                if distance_matrix:
+                    distance = distance_matrix[mem][mem2]
+                else:
+                    distance = 10 if mem2 == mem else 20
+                fh.write('{}  '.format(distance))
             fh.write('\n')
 
     # misc
@@ -286,9 +388,11 @@ def get_parser():
     parser.add_argument('--share-nodes', action='store_true',
                         help='Big and little cores share the same set of NUMA memory nodes')
 
+    parser.add_argument('--distance-file', type=str,
+                        help='File containing custom NUMA distance matrix')
+
     return parser
 
 
 if __name__ == '__main__':
     sys.exit(main(get_parser().parse_args()))
-
