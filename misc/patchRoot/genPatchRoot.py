@@ -72,9 +72,9 @@ if ncpus < 1:
     print("ERROR: Need >= 1 cpus!")
     sys.exit(1)
 
-ncpusPerNode = ncpus / nnodes
+ncpusPerNode = ncpus // nnodes  # Changed from / to // for integer division
 if ncpus % nnodes != 0:
-    print "ERROR: CPUs (%d) must be evenly distributed among %d NUMA nodes!" % (ncpus, nnodes)
+    print("ERROR: CPUs (%d) must be evenly distributed among %d NUMA nodes!" % (ncpus, nnodes))  # Added parentheses
     sys.exit(1)
 
 if os.path.exists(root) and not options.force:
@@ -113,12 +113,12 @@ with open(root + "/proc/stat", "w") as f:
 cmd("mkdir -p %s/proc/self" % root)
 f = open(root + "/proc/self/status", "w")
 # FIXME: only for CPU/memory list
-print >>f, "..."
-print >>f, "Cpus_allowed:\t%s" % getMask(0, ncpus-1)
-print >>f, "Cpus_allowed_list:\t%s" % ("0-" + str(ncpus-1) if ncpus > 1 else "0")
-print >>f, "Mems_allowed:\t%s" % getMask(0, nnodes-1)
-print >>f, "Mems_allowed_list:\t%s" % ("0-" + str(nnodes-1) if nnodes > 1 else "0")
-print >>f, "..."
+print("...", file=f)  # Changed from print >>f to print(..., file=f)
+print("Cpus_allowed:\t%s" % getMask(0, ncpus-1), file=f)
+print("Cpus_allowed_list:\t%s" % ("0-" + str(ncpus-1) if ncpus > 1 else "0"), file=f)
+print("Mems_allowed:\t%s" % getMask(0, nnodes-1), file=f)
+print("Mems_allowed_list:\t%s" % ("0-" + str(nnodes-1) if nnodes > 1 else "0"), file=f)
+print("...", file=f)
 f.close()
 
 ## /sys
@@ -132,11 +132,11 @@ for f in ["online", "possible", "present"]:
 cmd("echo > " + cpuDir + "offline")
 cmd("echo 0 > " + cpuDir + "sched_mc_power_savings")
 if ncpus > 255:
-    print "WARN: These many cpus have not been tested, x2APIC systems may be different..."
+    print("WARN: These many cpus have not been tested, x2APIC systems may be different...")
 maxCpus = max(ncpus, 255)
 cmd("echo %d > %s" % (maxCpus, cpuDir + "kernel_max"))
 for cpu in range(ncpus):
-    node = cpu / ncpusPerNode
+    node = cpu // ncpusPerNode  # Changed from / to // for integer division
     coreSiblingsMask = getMask(node*ncpusPerNode, (node+1)*ncpusPerNode-1)
     cpuList = (str(node*ncpusPerNode) + "-" + str((node+1)*ncpusPerNode-1)) if ncpusPerNode > 1 else str(cpu)
     d = cpuDir + "cpu" + str(cpu) + "/"
@@ -157,8 +157,8 @@ nodeDir = root + "/sys/devices/system/node/"
 cmd("mkdir -p " + nodeDir)
 nodeList = "0-" + str(nnodes-1)
 for f in ["has_normal_memory", "online", "possible"]:
-    cmd("echo %s > " % (nodeList if nnodes > 1 else "0") + nodeDir + f)
-cmd("echo %s > " % (nodeList if nnodes > 1 else "")+ nodeDir + "has_cpu")
+    cmd("echo %s > %s" % (nodeList if nnodes > 1 else "0", nodeDir + f))  # Fixed string concatenation
+cmd("echo %s > %s" % (nodeList if nnodes > 1 else "", nodeDir + "has_cpu"))  # Fixed string concatenation
 
 meminfoTemplate = XTemplate(open(progDir + "/nodeFiles/meminfo.template", "r").read())
 for node in range(nnodes):
@@ -176,14 +176,14 @@ for node in range(nnodes):
     cmd("echo %s > %s" % (cpuList, nDir + "cpulist"))
 
     f = open(nDir + "/meminfo", "w")
-    print >>f, meminfoTemplate.substitute({"NODE" : str(node)}),
+    print(meminfoTemplate.substitute({"NODE" : str(node)}), end="", file=f)  # Changed print statement
     f.close()
 
     f = open(nDir + "/distance", "w")
     for n2 in range(nnodes):
         d = "10" if n2 == node else "20"
-        print >>f, d + " ",
-    print >>f, ""
+        print(d + " ", end="", file=f)  # Changed print statement
+    print("", file=f)  # Changed print statement
     f.close()
 
 # misc
@@ -192,5 +192,3 @@ cmd("mkdir -p " + root + "/sys/bus/pci/devices")
 # make read-only
 if not options.force:
     cmd("chmod a-w -R " + root)
-
-
